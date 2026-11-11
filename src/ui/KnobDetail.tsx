@@ -1,7 +1,9 @@
-// The focused knob in full: its value, play range, spread and glide, the modulators and macros that drive it.
+// The focused knob in full: its value, play range, spread and glide, the modulators, macros and MIDI control
+// that drive it.
 import { clamp, hardRange, resolve, type Knob } from '../scene'
 import { Num, useCtl } from './controls'
 import { format } from './Knob'
+import { MidiLearn } from './Midi'
 
 export function KnobDetail() {
   const { scene, live, focus, edit, setKnob } = useCtl()
@@ -62,6 +64,7 @@ export function KnobDetail() {
             + play range
           </button>
         )}
+        <MidiLearn target={{ knob: focus }} />
       </div>
       {mods.length > 0 && (
         <div className="detail-row">

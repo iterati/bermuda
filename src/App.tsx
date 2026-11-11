@@ -1,8 +1,9 @@
 // Bermuda: the picture, and over it (Stage) or beside it (Edit) the fader from scene A to scene B, the chain,
-// the picked chip's knobs, the modulators, the macros and the bank. The controls edit one side, A or B; every
-// change is instant.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+// the picked chip's knobs, the modulators, the macros, MIDI and the bank. The controls edit one side, A or B; every
+// change is instant, and so is MIDI, which plays the side being edited and the fader.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LOOKS } from './looks'
+import { attach, drive, echoes, HAS_MIDI, keyOf, learn, learnTrigger, takes, waiting, type Learning } from './midi'
 import { morphSize } from './morph'
 import { applyPreset, capturePreset, newLive, setKnob, update } from './motion'
 import {
@@ -13,9 +14,11 @@ import {
   knobsOf,
   MAX_DEPTH,
   MAX_LEVELS,
+  parseControls,
   parseScene,
   resolve,
   type Address,
+  type Controls,
   type Edge,
   type Scene,
 } from './scene'
@@ -24,21 +27,24 @@ import { Chain } from './ui/Chain'
 import { CtlContext, Section, type Ctl } from './ui/controls'
 import { Fader } from './ui/Fader'
 import { KnobDetail } from './ui/KnobDetail'
+import { Midi } from './ui/Midi'
 import { Macros, Modulators } from './ui/Motion'
 import { Picture, type Side } from './ui/Picture'
 
 const STORE = 'bermuda.looks'
+const CONTROLS = 'bermuda.midi'
 
-function loadSaved(): { looks: Scene[]; error?: string } {
-  const text = localStorage.getItem(STORE)
-  if (!text) return { looks: [] }
+// What this browser keeps under a key, parsed: a store that fails its parse is set aside whole, so the next save
+// does not write over what did parse.
+function loadStored<T>(what: string, key: string, parse: (text: string) => T, empty: T): { value: T; error?: string } {
+  const text = localStorage.getItem(key)
+  if (!text) return { value: empty }
   try {
-    return { looks: (JSON.parse(text) as unknown[]).map(parseScene) }
+    return { value: parse(text) }
   } catch (err) {
-    // set aside whole, so the next save does not write over the looks that did parse
-    localStorage.setItem(`${STORE}.broken`, text)
-    localStorage.removeItem(STORE)
-    return { looks: [], error: `saved looks moved to ${STORE}.broken: ${(err as Error).message}` }
+    localStorage.setItem(`${key}.broken`, text)
+    localStorage.removeItem(key)
+    return { value: empty, error: `${what} moved to ${key}.broken: ${(err as Error).message}` }
   }
 }
 
@@ -55,9 +61,14 @@ function refusal(pair: Record<Side, Scene>): string | undefined {
 const other = (side: Side): Side => (side === 'a' ? 'b' : 'a')
 
 export function App() {
-  const [initial] = useState(loadSaved)
-  const [saved, setSaved] = useState(initial.looks)
-  const [error, setError] = useState(initial.error)
+  const [initial] = useState(() =>
+    loadStored('saved looks', STORE, (text) => (JSON.parse(text) as unknown[]).map(parseScene), [] as Scene[]),
+  )
+  const [initialControls] = useState(() =>
+    loadStored('saved MIDI controls', CONTROLS, parseControls, { buttons: [] } as Controls),
+  )
+  const [saved, setSaved] = useState(initial.value)
+  const [error, setError] = useState([initial.error, initialControls.error].filter(Boolean).join('; ') || undefined)
   const [pair, setPair] = useState<Record<Side, Scene>>(() => ({
     a: structuredClone(LOOKS[0]),
     b: structuredClone(LOOKS.find((l) => l.name.startsWith('Tapestry 7 '))!),
@@ -77,6 +88,34 @@ export function App() {
   const [lives] = useState(() => ({ a: newLive(), b: newLive() }))
   // each side's preset in play, for [ and ]
   const [presets, setPresets] = useState<Record<Side, number>>({ a: -1, b: -1 })
+  const [midi, setMidi] = useState<MIDIAccess | null>(null)
+  const [inputs, setInputs] = useState<string[]>([])
+  const [learning, setLearning] = useState<Learning | null>(null)
+  const [controls, setControls] = useState(initialControls.value)
+  const [positions, setPositions] = useState<ReadonlyMap<string, number>>(new Map())
+
+  const connect = useCallback(
+    () => navigator.requestMIDIAccess().then(setMidi, (err: Error) => setError(`MIDI: ${err.message}`)),
+    [],
+  )
+  // once this browser has let the page use MIDI, connect on load without asking again
+  useEffect(() => {
+    if (HAS_MIDI)
+      navigator.permissions.query({ name: 'midi' as PermissionName }).then((p) => {
+        if (p.state === 'granted') connect()
+      })
+  }, [connect])
+  const learnMidi = useCallback(
+    (target: Learning | null) => {
+      if (target && !midi) connect()
+      setLearning(target)
+    },
+    [midi, connect],
+  )
+  const saveControls = useCallback((next: Controls) => {
+    localStorage.setItem(CONTROLS, JSON.stringify(next))
+    setControls(next)
+  }, [])
 
   // a look saved under a built-in's name takes its place in the bank
   const looks = useMemo(
@@ -107,6 +146,7 @@ export function App() {
       setPresets((p) => ({ ...p, [side]: presetIndex ?? -1 }))
       setPicked(next.levels[0].id)
       setFocus(null)
+      setLearning(null)
     },
     [lives, pair, side, setScene],
   )
@@ -140,6 +180,82 @@ export function App() {
 
   // a focused knob that an edit took away is dropped
   const focused = focus && knobsOf(scene).some((k) => k.address === focus) ? focus : null
+  // and so is a knob or macro learning a control
+  const learningNow =
+    learning &&
+    ('knob' in learning
+      ? !resolve(scene, learning.knob)
+      : 'macro' in learning && !scene.macros.some((m) => m.id === learning.macro))
+      ? null
+      : learning
+
+  // the MIDI handlers read the app as it is now
+  const now = useRef({ scene, setScene, fader, looks, mode, controls, load, learning: learningNow })
+  useEffect(() => {
+    now.current = { scene, setScene, fader, looks, mode, controls, load, learning: learningNow }
+  })
+  useEffect(() => {
+    if (!midi) return
+    const at = new Map<string, number>() // each control's last position, for pickup
+    return attach(
+      midi,
+      () => {
+        const { scene, fader, looks, mode, controls } = now.current
+        return echoes(scene, controls, fader, (t) =>
+          'slot' in t ? looks[t.slot]?.name === scene.name : t.mode === mode,
+        )
+      },
+      {
+        inputs: setInputs,
+        message: (m) => {
+          const { scene, setScene, fader, looks, controls, load, learning } = now.current
+          // a target learning takes the first control of its kind: knobs, macros and the fader a CC, triggers a note
+          if (m.kind === 'note') {
+            if (learning && ('slot' in learning || 'mode' in learning)) {
+              now.current.learning = null
+              setLearning(null)
+              return saveControls({ ...controls, buttons: learnTrigger(controls.buttons, learning, m) })
+            }
+            const t = controls.buttons.find((x) => x.channel === m.channel && x.note === m.number)
+            if (t && 'mode' in t) setMode(t.mode)
+            else if (t && looks[t.slot]) load(looks[t.slot])
+            return
+          }
+          const key = keyOf('cc', m.channel, m.number)
+          const last = at.get(key)
+          at.set(key, m.value)
+          const ab = controls.fader && keyOf('cc', controls.fader.channel, controls.fader.control) === key
+          // only a fader's position is shown, while it waits to pick up
+          if (
+            (ab && controls.fader!.pickup) ||
+            scene.midi?.some((x) => x.pickup && keyOf('cc', x.channel, x.control) === key)
+          )
+            setPositions(new Map(at))
+          if (learning && 'fader' in learning) {
+            now.current.learning = null
+            setLearning(null)
+            // a fader learns with pickup, as it cannot move to where the A/B fader is
+            return saveControls({ ...controls, fader: { channel: m.channel, control: m.number, pickup: true } })
+          }
+          if (learning && ('knob' in learning || 'macro' in learning)) {
+            now.current.learning = null
+            setLearning(null)
+            // the A/B fader lets the control go, and a control learning a target drives it from its first move
+            if (ab) saveControls({ buttons: controls.buttons })
+            setScene((s) =>
+              drive(
+                update(s, (d) => learn(d, learning, m)),
+                m,
+              ),
+            )
+          } else if (ab) {
+            if (!controls.fader!.pickup || takes(fader, last, m.value)) setFader(m.value)
+          } else setScene((s) => drive(s, m, last))
+        },
+      },
+    )
+  }, [midi, saveControls])
+
   const ctl: Ctl = {
     scene,
     live: shown,
@@ -148,6 +264,9 @@ export function App() {
     edit,
     setKnob: (address, value) => setScene((s) => setKnob(s, address, value)),
     pick: setPicked,
+    learning: learningNow,
+    learn: learnMidi,
+    positions,
   }
 
   // the chips in chain order, for the arrow keys
@@ -187,8 +306,11 @@ export function App() {
       } else if (e.key === 's' && !e.metaKey && !e.ctrlKey) save()
       else if (e.key === 'p')
         setScene((s) => update(s, (d) => d.presets.push(capturePreset(d, `Preset ${d.presets.length + 1}`))))
-      else if (e.key === 'Escape') setFocus(null)
-      else if (e.key === 'a' || e.key === 'b') setSide(e.key)
+      else if ((e.key === 'm' || e.key === 'M') && focused && HAS_MIDI) learnMidi({ knob: focused })
+      else if (e.key === 'Escape') {
+        setFocus(null)
+        setLearning(null)
+      } else if (e.key === 'a' || e.key === 'b') setSide(e.key)
       else if (e.key === ',' || e.key === '.')
         setFader((x) => Math.min(1, Math.max(0, x + (e.key === '.' ? 0.05 : -0.05))))
       else if (e.key === 'x') swap()
@@ -196,7 +318,7 @@ export function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [looks, load, save, scene, presets, side, chips, pickedChip, focused, setScene, swap, toggleLoop])
+  }, [looks, load, save, scene, presets, side, chips, pickedChip, focused, setScene, swap, toggleLoop, learnMidi])
 
   const bank = (
     <Bank
@@ -234,6 +356,23 @@ export function App() {
         setEdge(f.edge)
       }}
       onError={setError}
+      pickup={
+        controls.fader && waiting(controls.fader, fader, positions)
+          ? `MIDI fader waiting: move it to ${Math.round(fader * 100)}% to pick up`
+          : undefined
+      }
+    />
+  )
+
+  const midiBlock = (
+    <Midi
+      connected={!!midi}
+      inputs={inputs}
+      onConnect={connect}
+      looks={looks}
+      controls={controls}
+      fader={fader}
+      onControls={saveControls}
     />
   )
 
@@ -302,8 +441,8 @@ export function App() {
             </label>
           )}
           <span className="dim keys">
-            Tab hides · E edit · Space pause · 1-0 looks · [ ] presets · ← → chips · ↑ ↓ knob · S save · P preset · A B
-            side · , . fader · X swap · L loop
+            Tab hides · E edit · Space pause · 1-0 looks · [ ] presets · ← → chips · ↑ ↓ knob · M MIDI learn · S save ·
+            P preset · A B side · , . fader · X swap · L loop
           </span>
         </header>
         {error && (
@@ -320,6 +459,7 @@ export function App() {
             <aside className="panel right">
               <Modulators />
               <Macros />
+              {midiBlock}
               {bank}
             </aside>
             <section className="panel bottom">
@@ -350,6 +490,7 @@ export function App() {
             <div className="panel">
               <Modulators />
               <Macros />
+              {midiBlock}
             </div>
             <div className="panel">{bank}</div>
           </aside>

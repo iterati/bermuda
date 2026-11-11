@@ -1,10 +1,10 @@
 // The modulators and macros. A modulator's chip drags onto any knob; a macro's slider moves all its knobs at once.
+import { prune } from '../edit'
 import { setMacro, wave } from '../motion'
 import { clamp, hardRange, resolve, WAVES, type Modulator } from '../scene'
 import { Choice, Num, useCtl } from './controls'
-import { MOD_DRAG } from './Knob'
-
-const short = (address: string) => address.replace(/^levels/, '').replace(/variants\[(\d+)\]\.shape/, 'v$1')
+import { MOD_DRAG, short } from './Knob'
+import { MidiLearn } from './Midi'
 
 // A modulator's wave over one period, as a small sparkline.
 function WaveLine({ m }: { m: Modulator }) {
@@ -179,7 +179,16 @@ export function Macros() {
                 e.target.value && edit((d) => (d.macros.find((x) => x.id === m.id)!.name = e.target.value))
               }
             />
-            <button className="mini" onClick={() => edit((d) => (d.macros = d.macros.filter((x) => x.id !== m.id)))}>
+            <MidiLearn target={{ macro: m.id }} />
+            <button
+              className="mini"
+              onClick={() =>
+                edit((d) => {
+                  d.macros = d.macros.filter((x) => x.id !== m.id)
+                  prune(d)
+                })
+              }
+            >
               ×
             </button>
           </div>

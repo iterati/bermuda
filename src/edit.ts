@@ -58,7 +58,7 @@ export function addSubChain(scene: Scene, id: string, variant: number) {
 }
 
 // Unlink every level whose link no longer points at an earlier unlinked level of the same list, and drop
-// every modulator target, macro target and preset value whose knob is gone.
+// every modulator target, macro target, preset value and MIDI mapping whose knob or macro is gone.
 export function prune(scene: Scene) {
   for (const { level, list } of allLevels(scene.levels)) {
     if (!level.link) continue
@@ -71,6 +71,10 @@ export function prune(scene: Scene) {
   for (const m of scene.macros) m.targets = m.targets.filter((t) => resolve(scene, t.knob))
   for (const p of scene.presets)
     p.values = Object.fromEntries(Object.entries(p.values).filter(([address]) => resolve(scene, address)))
+  if (scene.midi)
+    scene.midi = scene.midi.filter((m) =>
+      'knob' in m ? resolve(scene, m.knob) : scene.macros.some((x) => x.id === m.macro),
+    )
 }
 
 // A linked level as it plays: its leader's structure and knobs under its own id and link, each variant

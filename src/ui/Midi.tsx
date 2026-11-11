@@ -1,0 +1,228 @@
+// The MIDI block: the controller's connection, what is learning a control, the look's mappings (each to follow
+// to its knob, to give pickup as a fader, or to drop), the A/B fader's control, and the app's buttons (each to
+// drop), and learning a button.
+import { useState } from 'react'
+import { HAS_MIDI, keyOf, label, mappingOf, positionOf, same, unmap, waiting, type Learning } from '../midi'
+import type { Controls, MidiTarget, Scene, TriggerTarget } from '../scene'
+import { useCtl } from './controls'
+import { short } from './Knob'
+
+type Props = {
+  connected: boolean
+  inputs: string[]
+  onConnect: () => void
+  looks: Scene[]
+  controls: Controls
+  fader: number
+  onControls: (next: Controls) => void
+}
+
+const percent = (v: number) => `${Math.round(v * 100)}%`
+
+export function Midi({ connected, inputs, onConnect, looks, controls, fader, onControls }: Props) {
+  const { scene, edit, setFocus, learning, learn, positions } = useCtl()
+  const [button, setButton] = useState('slot 0')
+  const macroName = (id: string) => scene.macros.find((m) => m.id === id)!.name
+  const name = (t: Learning) =>
+    'knob' in t
+      ? short(t.knob)
+      : 'macro' in t
+        ? `macro ${macroName(t.macro)}`
+        : 'fader' in t
+          ? 'the A/B fader'
+          : 'slot' in t
+            ? `look ${t.slot + 1}${looks[t.slot] ? ` · ${looks[t.slot].name}` : ''}`
+            : t.mode === 'stage'
+              ? 'Stage'
+              : 'Edit'
+  const picked: TriggerTarget = button.startsWith('slot ')
+    ? { slot: Number(button.slice(5)) }
+    : { mode: button as 'stage' | 'edit' }
+  const learningPicked = !!learning && same(learning, picked)
+  return (
+    <div className="panel-block">
+      <div className="block-title">
+        <span>MIDI</span>
+        {!HAS_MIDI ? (
+          <span className="dim">this browser has no Web MIDI</span>
+        ) : connected ? (
+          <span className="dim midi-inputs" title={inputs.join('\n')}>
+            {inputs.length ? inputs.join(', ') : 'no controller plugged in'}
+          </span>
+        ) : (
+          <button className="mini" title="let this page hear your MIDI controllers" onClick={onConnect}>
+            connect
+          </button>
+        )}
+      </div>
+      {learning && (
+        <div className="midi-learning">
+          <span>
+            {'slot' in learning || 'mode' in learning ? 'press a button' : 'move a control'} for <b>{name(learning)}</b>
+          </span>
+          <button className="mini" title="Esc" onClick={() => learn(null)}>
+            cancel
+          </button>
+        </div>
+      )}
+      {HAS_MIDI && (
+        <div className="targets">
+          {!scene.midi?.length && !learning && (
+            <span className="dim">focus a knob and press M, or learn on a macro, then move a control</span>
+          )}
+          {scene.midi?.map((m) => {
+            const at = positions.get(keyOf('cc', m.channel, m.control))
+            const to = positionOf(scene, m)
+            return (
+              <div key={label(m)}>
+                <span className="target">
+                  <b className="chip-midi">{label(m)}</b>
+                  {'knob' in m ? (
+                    <button className="link" onClick={() => setFocus(m.knob)} title={m.knob}>
+                      {short(m.knob)}
+                    </button>
+                  ) : (
+                    <span className="chip-macro">macro {macroName(m.macro)}</span>
+                  )}
+                  <label className="check" title="a fader: it takes over only once it passes the value">
+                    <input
+                      type="checkbox"
+                      checked={!!m.pickup}
+                      onChange={(e) =>
+                        edit((d) => {
+                          const x = d.midi!.find((x) => same(x, m))!
+                          if (e.target.checked) x.pickup = true
+                          else delete x.pickup
+                        })
+                      }
+                    />
+                    fader
+                  </label>
+                  <button className="mini" onClick={() => edit((d) => unmap(d, m))}>
+                    ×
+                  </button>
+                </span>
+                {waiting(m, to, positions) && (
+                  <div className="pickup">
+                    waiting: move the fader {at === undefined ? 'to' : at < to ? 'up to' : 'down to'} {percent(to)}
+                    {at !== undefined && <span className="dim"> (at {percent(at)})</span>}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+      {HAS_MIDI && (
+        <div className="targets">
+          <span className="target">
+            <span>A/B fader</span>
+            {controls.fader ? (
+              <>
+                <b className={`chip-midi${waiting(controls.fader, fader, positions) ? ' waiting' : ''}`}>
+                  {label(controls.fader)}
+                </b>
+                <label className="check" title="a fader: it takes over only once it passes where the A/B fader is">
+                  <input
+                    type="checkbox"
+                    checked={!!controls.fader.pickup}
+                    onChange={(e) => {
+                      const { channel, control } = controls.fader!
+                      onControls({
+                        ...controls,
+                        fader: e.target.checked ? { channel, control, pickup: true } : { channel, control },
+                      })
+                    }}
+                  />
+                  fader
+                </label>
+                <button className="mini" onClick={() => onControls({ buttons: controls.buttons })}>
+                  ×
+                </button>
+              </>
+            ) : (
+              <button
+                className={`mini${learning && 'fader' in learning ? ' learning' : ''}`}
+                title="map the next MIDI control you move to the A/B fader"
+                onClick={() => learn(learning && 'fader' in learning ? null : { fader: true })}
+              >
+                {learning && 'fader' in learning ? 'move a control…' : 'MIDI learn'}
+              </button>
+            )}
+          </span>
+          {controls.fader && waiting(controls.fader, fader, positions) && (
+            <div className="pickup">waiting: move the fader to {percent(fader)}</div>
+          )}
+        </div>
+      )}
+      {HAS_MIDI && (
+        <div className="targets midi-buttons">
+          <span className="target">
+            <label className="choice">
+              <span>button for</span>
+              <select value={button} onChange={(e) => setButton(e.target.value)} onKeyDown={(e) => e.stopPropagation()}>
+                {looks.map((look, i) => (
+                  <option key={look.name} value={`slot ${i}`}>
+                    look {i + 1} · {look.name}
+                  </option>
+                ))}
+                <option value="stage">Stage</option>
+                <option value="edit">Edit</option>
+              </select>
+            </label>
+            <button
+              className={`mini${learningPicked ? ' learning' : ''}`}
+              title="map the next button you press to this; its LED shows when it is on"
+              onClick={() => learn(learningPicked ? null : picked)}
+            >
+              {learningPicked ? 'press a button…' : 'MIDI learn'}
+            </button>
+          </span>
+          {controls.buttons.map((t) => (
+            <span className="target" key={label(t)}>
+              <b className="chip-midi">{label(t)}</b>
+              <span>{name(t)}</span>
+              <button
+                className="mini"
+                onClick={() => onControls({ ...controls, buttons: controls.buttons.filter((x) => x !== t) })}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// A knob's or a macro's control: its mapping to drop (amber while its fader waits to pick up), else a learn button.
+export function MidiLearn({ target }: { target: MidiTarget }) {
+  const { scene, edit, learning, learn, positions } = useCtl()
+  const map = mappingOf(scene, target)
+  const on = !!learning && same(learning, target)
+  if (map)
+    return (
+      <span className="pair">
+        <b
+          className={`chip-midi${waiting(map, positionOf(scene, map), positions) ? ' waiting' : ''}`}
+          title={`the MIDI control driving this${map.pickup ? ', a fader with pickup' : ''}`}
+        >
+          {label(map)}
+        </b>
+        <button className="mini" title="forget the MIDI control" onClick={() => edit((d) => unmap(d, target))}>
+          ×
+        </button>
+      </span>
+    )
+  return (
+    <button
+      className={`mini${on ? ' learning' : ''}`}
+      disabled={!HAS_MIDI}
+      title={HAS_MIDI ? 'map the next MIDI control you move to this (M on a focused knob)' : 'no Web MIDI here'}
+      onClick={() => learn(on ? null : target)}
+    >
+      {on ? 'move a control…' : 'MIDI learn'}
+    </button>
+  )
+}

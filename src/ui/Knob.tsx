@@ -1,6 +1,8 @@
 // An on-screen knob: drag up and down (shift for fine), or the wheel. Its arc shows the value inside the
 // kind's hard range, the brighter band its play range, the dot its live value; drop a modulator chip on it to modulate it.
+// Its corner names the MIDI control that drives it, dimmed while a fader waits to pick it up.
 import { useRef } from 'react'
+import { label as midiLabel, mappingOf, positionOf, waiting } from '../midi'
 import { clamp, hardRange, resolve, type Address } from '../scene'
 import { useCtl } from './controls'
 
@@ -33,14 +35,18 @@ export const format = (address: Address, v: number) => {
   return deg ? `${text}°` : text
 }
 
+export const short = (address: string) => address.replace(/^levels/, '').replace(/variants\[(\d+)\]\.shape/, 'v$1')
+
 // A knob of the scene by its address.
 export function Knob({ label, at: address }: { label: string; at: Address }) {
-  const { scene, live: shown, focus, setFocus, edit, setKnob } = useCtl()
+  const { scene, live: shown, focus, setFocus, edit, setKnob, learning, positions } = useCtl()
   const knob = resolve(scene, address)!
   // the live scene lags the scene by a frame after a structural edit
   const live = resolve(shown, address)?.value
   const modulated = scene.modulators.some((m) => m.targets.some((t) => t.knob === address))
   const focused = focus === address
+  const midi = mappingOf(scene, { knob: address })
+  const learningThis = !!learning && 'knob' in learning && learning.knob === address
   const onFocus = () => setFocus(address)
   const onChange = (v: number) => setKnob(address, v)
   const [lo, hi] = hardRange(address)
@@ -50,7 +56,7 @@ export function Knob({ label, at: address }: { label: string; at: Address }) {
   const dot = a === undefined ? undefined : ((-135 + SWEEP * a) * Math.PI) / 180
   return (
     <div
-      className={`knob${focused ? ' focused' : ''}${modulated ? ' modulated' : ''}`}
+      className={`knob${focused ? ' focused' : ''}${modulated ? ' modulated' : ''}${learningThis ? ' learning' : ''}`}
       title={`${address}\ndrag or wheel; shift for fine`}
       onPointerDown={(e) => {
         onFocus()
@@ -85,6 +91,14 @@ export function Knob({ label, at: address }: { label: string; at: Address }) {
         <path className="value" d={arc(0, f(knob.value))} />
         {dot !== undefined && <circle className="live" cx={22 + R * Math.sin(dot)} cy={22 - R * Math.cos(dot)} r="3" />}
       </svg>
+      {midi && (
+        <span
+          className={`knob-midi${waiting(midi, positionOf(scene, midi), positions) ? ' waiting' : ''}`}
+          title={`${midiLabel(midi)}${midi.pickup ? ', a fader with pickup' : ''}`}
+        >
+          cc{midi.control}
+        </span>
+      )}
       <div className="knob-value">{format(address, live ?? knob.value)}</div>
       <div className="knob-label">{label}</div>
     </div>

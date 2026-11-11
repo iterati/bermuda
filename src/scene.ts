@@ -37,6 +37,7 @@ export type Scene = {
   modulators: Modulator[]
   macros: Macro[]
   presets: Preset[]
+  midi?: Midi[] // after milestone 1's shapes: a look saved before MIDI learn has none
   loop?: { seconds: number }
 }
 export type Preset = { name: string; values: Record<Address, number> } // a keyframe inside the look's clamps
@@ -52,6 +53,17 @@ export type Modulator = {
   targets: { knob: Address; depth: number; phaseSpread?: number }[]
 }
 export type Macro = { id: string; name: string; value: number; targets: { knob: Address; from: number; to: number }[] }
+// A controller's control change (CC) number on its channel (1 to 16), driving one knob or one macro; a fader's
+// takes pickup: it drives only once it passes the value it drives.
+export type MidiTarget = { knob: Address } | { macro: string }
+export type Midi = { channel: number; control: number; pickup?: true } & MidiTarget
+// A controller's button, a note on its channel, for the whole app: it loads a bank slot or picks a mode, and its
+// LED is lit while that slot or mode is on.
+export type TriggerTarget = { slot: number } | { mode: 'stage' | 'edit' }
+export type Trigger = { channel: number; note: number } & TriggerTarget
+// The app's own MIDI, kept in the browser beside the looks: its buttons, and the CC on the A/B fader (with pickup
+// for a fader, as a look's mappings take it).
+export type Controls = { buttons: Trigger[]; fader?: { channel: number; control: number; pickup?: true } }
 export type Edge = { seconds: number; stagger: number; deepFirst: boolean }
 export type Bank = {
   scenes: string[]
@@ -368,6 +380,41 @@ function address(scene: Scene, v: unknown, path: string): Address {
   return a
 }
 
+// A MIDI channel (1 to 16) and control or note number (0 to 127), each pair once in its list.
+function midiControl(x: Json, at: string, field: 'control' | 'note', seen: Set<string>): [number, number] {
+  const out: [number, number] = [num(x.channel, `${at}.channel`, [1, 16]), num(x[field], `${at}.${field}`, [0, 127])]
+  if (!out.every(Number.isInteger)) fail(at, 'channel and number must be whole numbers')
+  if (seen.has(String(out))) fail(at, `channel ${out[0]} number ${out[1]} is mapped twice`)
+  seen.add(String(out))
+  return out
+}
+
+// Parse the app's own MIDI (text or a parsed value), as strictly as a scene.
+export function parseControls(input: unknown): Controls {
+  const v = typeof input === 'string' ? (JSON.parse(input) as unknown) : input
+  const o = obj(v, '', ['buttons'], ['fader'])
+  const notes = new Set<string>()
+  const out: Controls = {
+    buttons: list(o.buttons, 'buttons', 0, 256).map((item, i): Trigger => {
+      const at = `buttons[${i}]`
+      const x = obj(item, at, ['channel', 'note'], ['slot', 'mode'])
+      const [channel, note] = midiControl(x, at, 'note', notes)
+      if ((x.slot === undefined) === (x.mode === undefined)) fail(at, 'must name one slot or one mode')
+      if (x.mode !== undefined) return { channel, note, mode: oneOf(x.mode, `${at}.mode`, ['stage', 'edit'] as const) }
+      const slot = num(x.slot, `${at}.slot`, [0, 255])
+      if (!Number.isInteger(slot)) fail(`${at}.slot`, 'must be a whole number')
+      return { channel, note, slot }
+    }),
+  }
+  if (o.fader !== undefined) {
+    const x = obj(o.fader, 'fader', ['channel', 'control'], ['pickup'])
+    const [channel, control] = midiControl(x, 'fader', 'control', new Set())
+    if (x.pickup !== undefined && x.pickup !== true) fail('fader.pickup', 'must be true when given')
+    out.fader = x.pickup === true ? { channel, control, pickup: true } : { channel, control }
+  }
+  return out
+}
+
 // Parse a scene's JSON (text or a parsed value): refuse anything off the shapes above, naming the field.
 export function parseScene(input: unknown): Scene {
   const v = typeof input === 'string' ? (JSON.parse(input) as unknown) : input
@@ -375,7 +422,7 @@ export function parseScene(input: unknown): Scene {
     v,
     '',
     ['name', 'frame', 'levels', 'contour', 'line', 'palette', 'composite', 'post', 'modulators', 'macros', 'presets'],
-    ['loop'],
+    ['midi', 'loop'],
   )
   const ids = new Set<string>()
   const frame = obj(o.frame, 'frame', ['origin', 'zoom', 'turn'])
@@ -493,6 +540,21 @@ export function parseScene(input: unknown): Scene {
       out[address(scene, k, `${at}.values`)] = num(value, `${at}.values.${k}`, hardRange(k))
     return { name: str(x.name, `${at}.name`), values: out }
   })
+  if (o.midi !== undefined) {
+    const controls = new Set<string>()
+    scene.midi = list(o.midi, 'midi', 0, 256).map((item, i): Midi => {
+      const at = `midi[${i}]`
+      const x = obj(item, at, ['channel', 'control'], ['knob', 'macro', 'pickup'])
+      const [channel, control] = midiControl(x, at, 'control', controls)
+      if (x.pickup !== undefined && x.pickup !== true) fail(`${at}.pickup`, 'must be true when given')
+      const pickup = x.pickup === true ? { pickup: true as const } : {}
+      if ((x.knob === undefined) === (x.macro === undefined)) fail(at, 'must name one knob or one macro')
+      if (x.knob !== undefined) return { channel, control, ...pickup, knob: address(scene, x.knob, `${at}.knob`) }
+      const macro = str(x.macro, `${at}.macro`)
+      if (!macroIds.has(macro)) fail(`${at}.macro`, `${macro} names no macro`)
+      return { channel, control, ...pickup, macro }
+    })
+  }
   if (o.loop !== undefined) {
     const loop = obj(o.loop, 'loop', ['seconds'])
     scene.loop = { seconds: num(loop.seconds, 'loop.seconds', [0.1, 3600]) }

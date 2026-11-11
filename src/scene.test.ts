@@ -120,6 +120,37 @@ describe('the parse refuses a broken scene, naming its field', () => {
     ],
     ['stops out of order', broken((s) => (s.palette.stops[1].at = 0)), /^palette\.stops\[1\]\.at: must be above/],
     ['a NaN', broken((s) => (s.post.gamma.value = NaN)), /^post\.gamma\.value: must be a finite number/],
+    [
+      'a MIDI mapping that names no knob',
+      broken((s) => (s.midi = [{ channel: 1, control: 21, knob: 'levels[nope].weight' }])),
+      /^midi\[0\]\.knob: levels\[nope\]\.weight names no knob/,
+    ],
+    [
+      'a MIDI mapping to a macro the look lacks',
+      broken((s) => (s.midi = [{ channel: 1, control: 21, macro: 'nope' }])),
+      /^midi\[0\]\.macro: nope names no macro/,
+    ],
+    [
+      'a MIDI mapping to a knob and a macro',
+      broken((s) => (s.midi = [{ channel: 1, control: 21, knob: 'frame.zoom', macro: 'nope' } as never])),
+      /^midi\[0\]: must name one knob or one macro/,
+    ],
+    [
+      'a MIDI control mapped twice',
+      broken(
+        (s) =>
+          (s.midi = [
+            { channel: 2, control: 21, knob: 'frame.zoom' },
+            { channel: 2, control: 21, knob: 'frame.turn' },
+          ]),
+      ),
+      /^midi\[1\]: channel 2 number 21 is mapped twice/,
+    ],
+    [
+      'a MIDI channel off 1 to 16',
+      broken((s) => (s.midi = [{ channel: 0, control: 21, knob: 'frame.zoom' }])),
+      /^midi\[0\]\.channel: 0 is outside 1 to 16/,
+    ],
   ])('%s', (_, parse, message) => {
     expect(parse).toThrow(message)
   })

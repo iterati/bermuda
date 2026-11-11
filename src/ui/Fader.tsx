@@ -18,12 +18,26 @@ type Props = {
   onCopy: () => void
   onPair: (pair: Pair) => void
   onError: (message: string) => void
+  pickup?: string // a MIDI fader waiting to pick the fader up, and where to move it
 }
 
 const W = 1000
 const ROW = 5
 
-export function Fader({ pair, side, fader, edge, onSide, onFader, onEdge, onSwap, onCopy, onPair, onError }: Props) {
+export function Fader({
+  pair,
+  side,
+  fader,
+  edge,
+  onSide,
+  onFader,
+  onEdge,
+  onSwap,
+  onCopy,
+  onPair,
+  onError,
+  pickup,
+}: Props) {
   const { depth } = useMemo(() => morphSize(pair.a, pair.b), [pair])
   const height = Math.max(depth, 1) * ROW + 6
   const set = (e: React.PointerEvent<SVGSVGElement>) => {
@@ -78,6 +92,7 @@ export function Fader({ pair, side, fader, edge, onSide, onFader, onEdge, onSwap
       </div>
       <div className="fader-row">
         <span className="dim fader-at">{Math.round(fader * 100)}%</span>
+        {pickup && <span className="pickup">{pickup}</span>}
         <label className="slide" title="how far apart the depths morph: 0 all at once, 1 one after another">
           <span>stagger</span>
           <input

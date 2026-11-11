@@ -16,6 +16,7 @@ import {
   type Level,
   type Scene,
 } from '../scene'
+import type { Learning } from '../midi'
 import { Knob } from './Knob'
 
 export type Ctl = {
@@ -26,6 +27,9 @@ export type Ctl = {
   edit: (fn: (draft: Scene) => void) => void
   setKnob: (address: Address, value: number) => void
   pick: (chip: string) => void
+  learning: Learning | null // what the next MIDI control or button maps to
+  learn: (target: Learning | null) => void
+  positions: ReadonlyMap<string, number> // each MIDI control's last position, 0 to 1, by midi.ts keyOf
 }
 export const CtlContext = createContext<Ctl | null>(null)
 export const useCtl = () => useContext(CtlContext)!
