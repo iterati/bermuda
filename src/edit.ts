@@ -85,8 +85,8 @@ export function setLattice(scene: Scene, id: string, kind: LatticeKind) {
 // (√2 at 45° for squares, √3 at 30° for hexes, 2 at 0° for any pad). None when the level has no parent,
 // when the parent's cells do not repeat by its pad (only oblique and voronoi at jitter 0 do: triangle's
 // halves and polar, logpolar, brick and fold sit apart otherwise), when the level's own cells are off its
-// pad (a jittered voronoi), when the parent turns its cells two ways, or when the two pads have no nesting
-// inside the scale's hard range.
+// pad (a jittered voronoi), when the parent turns its cells two ways or mirrors them, or when the two pads have no
+// nesting inside the scale's hard range.
 export function alignedNesting(scene: Scene, id: string): { scale: number; turn: number } | undefined {
   const { level, list } = findLevel(scene, id)
   const i = list.indexOf(level)
@@ -103,8 +103,8 @@ export function alignedNesting(scene: Scene, id: string): { scale: number; turn:
   if (!['oblique', 'triangle', 'voronoi'].includes(level.lattice.kind)) return undefined
   if (level.lattice.kind === 'voronoi' && level.lattice.jitter!.value !== 0) return undefined
   // a parent's cell turn turns what the level re-tiles: one way for all its cells, or two ways, or by a
-  // spread across its linked group, which no single turn lines up
-  if ((cell.by !== 'none' && cell.turn.value !== 0) || cell.turn.spread) return undefined
+  // spread across its linked group, which no single turn lines up, nor a mirror's reflection
+  if ((cell.by !== 'none' && cell.turn.value !== 0) || cell.turn.spread || cell.by === 'mirror') return undefined
   const cellTurn = cell.by === 'none' ? cell.turn.value : 0
   const [px, py] = lattice.e2.map((k) => k.value)
   const [cx, cy] = level.lattice.e2.map((k) => k.value)

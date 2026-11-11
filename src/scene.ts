@@ -29,7 +29,7 @@ export type Level = {
     jitter?: Knob // voronoi's, and only voronoi's
     sectors?: number // polar's and logpolar's: the whole number of cells round the centre
   }
-  cell: { by: 'none' | 'parity' | 'hash' | 'ring'; turn: Knob; phase: Knob; spill?: Knob } // spill: after milestone 1
+  cell: { by: (typeof CELLS)[number]; turn: Knob; phase: Knob; spill?: Knob } // spill: after milestone 1
   variants: { share: Knob; shape: Shape; below?: Level[] }[] // below: a per-cell sub-chain
   colour: { at: Knob; speed: Knob; cellSpread: Knob }
 }
@@ -62,6 +62,7 @@ export type Scene = {
     contrast: Knob
     radius: Knob
     time: Knob
+    trap?: Trap // after milestone 1's shapes
   }
   composite: 'add' | 'first'
   post: { aa: 1 | 2 | 3; gamma: Knob }
@@ -112,6 +113,9 @@ export type Timeline = {
 // Dotted lines: count dots round each outline, each size of the gap to the next along it (round dots of the line's
 // width near 0, dashes, a whole line at 1), crawling round at crawl dots a beat.
 export type Dots = { count: Knob; size: Knob; crawl: Knob }
+// Orbit-trap colour: the palette index moved by weight times how near the pixel's point came, down the chain, to a
+// circle of radius size round its cell's middle (iq's point trap at size 0), in each cell's own units.
+export type Trap = { weight: Knob; size: Knob }
 // The two scenes on the hand fader, where it sits and the edge it runs along: a pair kept as one file.
 export type Fader = { a: Scene; b: Scene; at: number; edge: Edge }
 
@@ -125,14 +129,57 @@ export const VARIATIONS = [
   'polar',
   'bubble',
   'fisheye',
+  // the rest of flam3's that need no parameters of their own and no random draws (loonie, secant2 and scry read
+  // their weight as flam3's do)
+  'horseshoe',
+  'handkerchief',
+  'heart',
+  'disc',
+  'spiral',
+  'hyperbolic',
+  'diamond',
+  'ex',
+  'julia',
+  'bent',
+  'exponential',
+  'power',
+  'cosine',
+  'eyefish',
+  'cylinder',
+  'tangent',
+  'secant2',
+  'cross',
+  'butterfly',
+  'edisc',
+  'elliptic',
+  'foci',
+  'loonie',
+  'polar2',
+  'scry',
+  'exp',
+  'log',
+  'sin',
+  'cos',
+  'tan',
+  'sec',
+  'csc',
+  'cot',
+  'sinh',
+  'cosh',
+  'tanh',
+  'sech',
+  'csch',
+  'coth',
 ] as const
 export type LatticeKind = (typeof LATTICES)[number]
 // each lattice reads e2 its own way (shader.ts): the second lattice vector of the oblique pad, which
 // voronoi jitters and triangle halves; brick's row shift and height; polar's and logpolar's ring stagger
 // and spacing; fold's shift
 export const LATTICES = ['oblique', 'brick', 'triangle', 'polar', 'logpolar', 'fold', 'voronoi'] as const
-// the Cell step: parity turns odd cells the other way, hash turns each cell either way by its id (Truchet)
-export const CELLS = ['none', 'parity', 'hash'] as const
+// the Cell step: parity turns odd cells the other way, hash turns each cell either way by its id (Truchet), ring
+// turns and phases each cell as far as it is out from the middle, mirror reflects the cells of odd id across
+// each axis (iq's mirrored repetition)
+export const CELLS = ['none', 'parity', 'hash', 'ring', 'mirror'] as const
 // the lattices whose cells are translates of each other, so a shape can spill into the cells round it
 export const SPILLS: readonly LatticeKind[] = ['oblique', 'brick', 'triangle', 'voronoi']
 export type ShapeKind = (typeof SHAPES)[number]
@@ -313,12 +360,12 @@ export const KINDS: Record<string, Kind> = {
   'levels[].cell.turn': {
     range: [-180, 180],
     label: 'cell turn',
-    help: 'turns every cell, and the levels below it, in degrees; with cell parity odd cells turn the other way, with hash each cell either way',
+    help: 'turns every cell, and the levels below it, in degrees; with cell parity odd cells turn the other way, with hash each cell either way, with ring each cell by the turn times how far out it is from the middle',
   },
   'levels[].cell.phase': {
     range: [-1, 1],
     label: 'ring phase',
-    help: "shifts this level's echo rings by a part of their spacing (0.5 is one whole ring); flipped cells shift the other way; needs rings",
+    help: "shifts this level's echo rings by a part of their spacing (0.5 is one whole ring); flipped cells shift the other way, and with ring each cell by the phase times how far out it is; needs rings",
     shows: ringsShow,
   },
   'levels[].cell.spill': {
@@ -521,6 +568,16 @@ export const KINDS: Record<string, Kind> = {
     range: [-2, 2],
     label: 'time',
     help: 'cycles every colour round the palette, in turns a beat',
+  },
+  'palette.trap.weight': {
+    range: [-4, 4],
+    label: 'trap',
+    help: "how far the orbit trap moves the palette index: the nearer a point's path came to the trap, the further round",
+  },
+  'palette.trap.size': {
+    range: [0, 1],
+    label: 'trap size',
+    help: "the radius of the trap's circle round each cell's middle; 0 is iq's point trap",
   },
   'post.gamma': {
     range: [0.5, 3],
@@ -866,7 +923,7 @@ export function parseScene(input: unknown): Scene {
   const frame = obj(o.frame, 'frame', ['origin', 'zoom', 'turn'])
   const contour = obj(o.contour, 'contour', ['rings', 'drift', 'radialWeight'])
   const line = obj(o.line, 'line', ['kind', 'width', 'falloff', 'units'], ['dots'])
-  const palette = obj(o.palette, 'palette', ['stops', 'hue', 'contrast', 'radius', 'time'])
+  const palette = obj(o.palette, 'palette', ['stops', 'hue', 'contrast', 'radius', 'time'], ['trap'])
   const post = obj(o.post, 'post', ['aa', 'gamma'])
   const scene: Scene = {
     name: str(o.name, 'name'),
@@ -917,6 +974,13 @@ export function parseScene(input: unknown): Scene {
       crawl: knob(dots.crawl, 'line.dots.crawl'),
     }
   } else if (scene.line.kind === 'dots') fail('line.dots', 'is missing for dotted lines')
+  if (palette.trap !== undefined) {
+    const trap = obj(palette.trap, 'palette.trap', ['weight', 'size'])
+    scene.palette.trap = {
+      weight: knob(trap.weight, 'palette.trap.weight'),
+      size: knob(trap.size, 'palette.trap.size'),
+    }
+  }
   scene.palette.stops.forEach((s, i, all) => {
     if (i > 0 && s.at <= all[i - 1].at) fail(`palette.stops[${i}].at`, 'must be above the stop before it')
   })

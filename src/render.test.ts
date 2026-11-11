@@ -4,7 +4,9 @@
 // frames of Play's transitions along an autopilot walk are finite and not blank. Every shape draws alone and
 // joined, screen lines hold their width through a warp, spill draws only what reaches over, and dots fade from one
 // count to the next and crawl. The Decks' three pictures, each drawn at its own size in the canvas's corner, are
-// finite and not blank. A background of each kind draws under the lines, and at amount 0 draws as none.
+// finite and not blank. A background of each kind draws under the lines, and at amount 0 draws as none. Every
+// variation warps finite and not blank, ring and mirror draw as none where they have nothing to do, and the orbit
+// trap draws as none at weight 0.
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
@@ -23,6 +25,7 @@ import {
   LATTICES,
   SHAPES,
   SPILLS,
+  VARIATIONS,
   type Edge,
   type Scene,
   type ShapeKind,
@@ -232,6 +235,9 @@ describe('the morph', () => {
       { ...look('Tapestry 1'), background: background('soak') },
       look('Tapestry 7 '),
     ],
+    ['Mirror tiles into Ripples', look('Cells - Mirror tiles'), look('Cells - Ripples')],
+    ['Orbit traps into Tapestry 7', look('Colour - Orbit traps'), look('Tapestry 7 ')],
+    ['Hearts and discs into Julia set', look('flam3 - Hearts and discs'), look('flam3 - Julia set')],
   ]
   it.each(ends)('%s lands on A and B exactly at its ends', async (_, a, b) => {
     for (const [x, end] of [
@@ -257,6 +263,9 @@ describe('the morph', () => {
     ['Remix - Square into hex', 'hexA'],
     ['Remix - Pinwheel crosses', 'wheel'],
     ['Remix - Branching cells', 'sqA'],
+    ['Cells - Mirror tiles', 'tile'],
+    ['Cells - Ripples', 'pond'],
+    ['Remix - Kaleidoscope pond', 'glass'],
   ])('%s: a level at weight 0 draws as if it were gone (%s)', async (name, id) => {
     const at = (s: Scene) => {
       const live = newLive()
@@ -447,5 +456,54 @@ describe('the Decks view', () => {
       expect(mean, name).toBeGreaterThan(0.01)
       expect(spread, name).toBeGreaterThan(0.01)
     }
+  })
+})
+
+describe('the cells, colour and variations', () => {
+  const still = { drift: 0, colour: 0, crawl: 0 }
+  const drawn = (s: Scene) => pixels(advance(s, newLive(), 0, 60), still)
+
+  it.each(VARIATIONS)('a %s warp draws finite and not blank', async (kind) => {
+    const s = scene({
+      name: kind,
+      levels: [
+        level('warp', { scale: 1.3, vary: [[kind, 1]], e2: [0.5, Math.sqrt(3) / 2], shape: star(6, 2, 0.42) }),
+        level('fine', { scale: 1.7, turn: 30, shape: star(6, 3, 0.4), at: 0.5 }),
+      ],
+      rings: 1.5,
+      width: 0.004,
+    })
+    const { finite, mean, spread } = await shoot(s, still)
+    expect(finite).toBe(true)
+    expect(mean).toBeGreaterThan(0.01)
+    expect(spread).toBeGreaterThan(0.01)
+  })
+
+  const one = (by: Scene['levels'][number]['cell']['by'], o: Parameters<typeof level>[1] = {}) =>
+    scene({ name: by, levels: [level('a', { by, shape: star(6, 2.5, 0.4), ...o })], rings: 2, width: 0.004 })
+
+  it('draws ring as none where its cells neither turn nor shift, and moves them out from the middle', async () => {
+    const none = await drawn(one('none'))
+    expect(furthest(await drawn(one('ring')), none)).toBeLessThan(1e-4)
+    expect(furthest(await drawn(one('ring', { cellPhase: 0.2 })), none)).toBeGreaterThan(0.1)
+    // none shifts every cell's rings by the phase alike, so the middle cell, ring 0, draws as none at phase 0
+    const middle = (px: number[]) => px.slice((45 * 160 + 80) * 4, (45 * 160 + 80) * 4 + 4)
+    expect(furthest(middle(await drawn(one('ring', { cellPhase: 0.2 }))), middle(none))).toBeLessThan(1e-4)
+  })
+
+  it('draws mirror as none on a shape its reflections keep, and reflects a shape they do not', async () => {
+    expect(furthest(await drawn(one('mirror')), await drawn(one('none')))).toBeLessThan(1e-4)
+    const moon = { shape: shape('moon', 0.4, 0.5, { twist: 30 }) }
+    expect(furthest(await drawn(one('mirror', moon)), await drawn(one('none', moon)))).toBeGreaterThan(0.1)
+  })
+
+  it('draws an orbit trap at weight 0 as none, and recolours by it', async () => {
+    const none = await drawn(look('Tapestry 7 '))
+    const trap = (weight: number) => ({
+      ...look('Tapestry 7 '),
+      palette: { ...look('Tapestry 7 ').palette, trap: { weight: { value: weight }, size: { value: 0.2 } } },
+    })
+    expect(furthest(await drawn(trap(0)), none)).toBeLessThan(1e-4)
+    expect(furthest(await drawn(trap(2)), none)).toBeGreaterThan(0.1)
   })
 })

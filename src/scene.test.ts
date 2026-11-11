@@ -3,6 +3,7 @@ import { background, BANK, join, level, LOOKS, mod, scene, shape, star } from '.
 import { capturePreset } from './motion'
 import {
   BACKGROUNDS,
+  CELLS,
   FORMLESS,
   KINDS,
   kindOf,
@@ -14,6 +15,7 @@ import {
   resolve,
   SHAPES,
   type Address,
+  VARIATIONS,
   type Bank,
   type Fader,
   type Scene,
@@ -55,6 +57,17 @@ describe('a scene as JSON', () => {
       FORMLESS.includes(kind) ? undefined : 0.7,
     )
     expect(kindOf('levels[b].variants[0].shape.join.offset[1]')).toBe('levels[].variants[].shape.join.offset[1]')
+  })
+
+  // every cell step and every variation, under an orbit trap
+  it.each(CELLS)('round-trips a level by %s, every variation and an orbit trap', (by) => {
+    const look = scene({
+      name: by,
+      levels: [level('a', { by, cellTurn: 20, cellPhase: 0.3, vary: VARIATIONS.map((kind, i) => [kind, i / 40]) })],
+      trap: { weight: { value: 2, play: [1, 3] }, size: 0.2 },
+    })
+    expect(parseScene(JSON.stringify(look))).toEqual(look)
+    expect(resolve(look, 'palette.trap.size')?.value).toBe(0.2)
   })
 
   it('names every knob by a path through level ids, sub-chains included', () => {
@@ -378,9 +391,24 @@ describe('the parse refuses a broken scene, naming its field', () => {
       /^levels\[sq1\]\.lattice\.sectors: is polar and logpolar only/,
     ],
     [
-      'a cell step of a later milestone',
-      broken((s) => (s.levels[0].cell.by = 'ring')),
-      /^levels\[sq1\]\.cell\.by: must be one of none, parity, hash/,
+      'an unknown cell step',
+      broken((s) => ((s.levels[0].cell as { by: string }).by = 'weave')),
+      /^levels\[sq1\]\.cell\.by: must be one of none, parity, hash, ring, mirror/,
+    ],
+    [
+      'an unknown variation',
+      broken((s) => ((s.levels[0].variations[0] as { kind: string }).kind = 'blur')),
+      /^levels\[sq1\]\.variations\[0\]\.kind: must be one of linear/,
+    ],
+    [
+      'an orbit trap without its size',
+      broken((s) => ((s.palette as { trap?: unknown }).trap = { weight: { value: 1 } })),
+      /^palette\.trap\.size: is missing/,
+    ],
+    [
+      'an orbit trap off its range',
+      broken((s) => (s.palette.trap = { weight: { value: 9 }, size: { value: 0 } })),
+      /^palette\.trap\.weight\.value: 9 is outside -4 to 4/,
     ],
     ['a level id used twice', broken((s) => (s.levels[1].id = 'sq1')), /^levels\[1\]\.id: sq1 is used twice/],
     [

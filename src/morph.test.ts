@@ -115,6 +115,27 @@ describe('the morph', () => {
     expect(at(a, b, 1).levels[0].cell.turn.value).toBe(30)
   })
 
+  it('swaps a mirror where the level weighs nothing, and ring where its cells neither turn nor shift', () => {
+    const a = scene({ name: 'a', levels: [level('c', { cellTurn: 20 })] })
+    const mirror = scene({ name: 'b', levels: [level('c', { by: 'mirror', cellTurn: 20 })] })
+    expect(at(a, mirror, 0.47).levels[0]).toMatchObject({ cell: { by: 'none' }, weight: { value: 0 } })
+    expect(at(a, mirror, 0.53).levels[0]).toMatchObject({ cell: { by: 'mirror' }, weight: { value: 0 } })
+    expect(at(a, mirror, 1).levels[0].weight.value).toBe(1)
+    const ring = scene({ name: 'b', levels: [level('c', { by: 'ring', cellTurn: 20, cellPhase: 0.2 })] })
+    expect(at(a, ring, 0.55).levels[0]).toMatchObject({
+      cell: { by: 'ring', turn: { value: 0 } },
+      weight: { value: 1 },
+    })
+  })
+
+  it('morphs an orbit trap one side lacks from weight 0', () => {
+    const a = scene({ name: 'a', levels: [level('l')] })
+    const b = scene({ name: 'b', levels: [level('l')], trap: { weight: 2, size: 0.3 } })
+    expect(at(a, b, 0.25).palette.trap).toEqual({ weight: { value: 0.5 }, size: { value: 0.3 } })
+    expect(at(b, a, 0.25).palette.trap).toEqual({ weight: { value: 1.5 }, size: { value: 0.3 } })
+    expect(at(a, a, 0.5).palette.trap).toBeUndefined()
+  })
+
   it('morphs oblique into voronoi by its jitter, and swaps another lattice kind where the level weighs nothing', () => {
     const square = scene({ name: 'a', levels: [level('l')] })
     const organic = scene({ name: 'b', levels: [level('l', { lattice: 'voronoi', jitter: 0.8 })] })

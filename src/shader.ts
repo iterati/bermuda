@@ -1,6 +1,7 @@
 // The one fragment shader, generated once: every module is in it and uniforms pick which runs,
 // so changing a scene never recompiles. The levels live in a float texture, one row per level (render.ts packs it).
 import {
+  CELLS,
   LATTICES,
   MAX_DEPTH,
   MAX_STOPS,
@@ -15,21 +16,25 @@ import {
 // A level's row, in texels:
 //   0 weight, scale, turn, next row (-1 ends the chain)
 //   1 offset x, offset y, e2 x, e2 y
-//   2 and 3: the weights of VARIATIONS, in order
-//   4 cell by (0 none, 1 parity, 2 hash), cell turn, cell phase (radians), variant count
+//   2 and 3: the weights of VARIATIONS' first eight, in order
+//   4 cell by (CELLS' index), cell turn, cell phase (radians), variant count
 //   5 colour at, colour speed, cell spread, total share
 //   6 the level's hash seed (from its id), its far end's in a morph, how far through its window it is, spill
-//   7 lattice kind (its index in LATTICES), sectors, jitter, unused
+//   7 lattice kind (its index in LATTICES), sectors, jitter, 1 if no variation but linear has weight
 //   8 + 6v: variant v's share, n, m, r
 //   9 + 6v: its round, twist, the row its sub-chain starts at (-1: none), kind (SHAPES' index)
 //   10 + 6v: its form, corner, onion, join weight (0: no join)
 //   11 + 6v: the joined shape's kind, n, m, r
 //   12 + 6v: the joined shape's round, twist, form, corner
 //   13 + 6v: the join's offset x, offset y, blend, unused
+//   VARY_TEXEL on: the weights of the rest of VARIATIONS, four a texel, in order
 export const VARIANT_TEXELS = 6
-export const ROW_TEXELS = 8 + VARIANT_TEXELS * MAX_VARIANTS
+export const VARY_TEXEL = 8 + VARIANT_TEXELS * MAX_VARIANTS
+export const ROW_TEXELS = VARY_TEXEL + Math.ceil((VARIATIONS.length - 8) / 4)
 
-// Each variation as GLSL over p, with r2 = |p|², r = |p| and th = atan(x, y) at hand (flam3's forms).
+// Each variation as GLSL over p, with r2 = |p|², r = |p|, th = atan(x, y) (flam3's angle, from the y axis),
+// sc = (x, y) / r (flam3's sina and cosa) and w its weight at hand: flam3's forms, with each pole and overflow
+// held finite (inv, ch, sh).
 const VARIATION_GLSL: Record<VariationKind, string> = {
   linear: 'p',
   radial: 'p * (exp(min(r, 8.)) - 1.)',
@@ -39,7 +44,49 @@ const VARIATION_GLSL: Record<VariationKind, string> = {
   polar: 'vec2(th / PI, r - 1.)',
   bubble: 'p * 4. / (r2 + 4.)',
   fisheye: 'p.yx * 2. / (r + 1.)',
+  horseshoe: 'vec2((p.x - p.y) * (p.x + p.y), 2. * p.x * p.y) / max(r, 1e-6)',
+  handkerchief: 'r * vec2(sin(th + r), cos(th - r))',
+  heart: 'r * vec2(sin(th * r), -cos(th * r))',
+  disc: 'th / PI * vec2(sin(PI * r), cos(PI * r))',
+  spiral: 'vec2(sc.y + sin(r), sc.x - cos(r)) / max(r, 1e-6)',
+  hyperbolic: 'vec2(sc.x / max(r, 1e-6), sc.y * r)',
+  diamond: 'vec2(sc.x * cos(r), sc.y * sin(r))',
+  ex: 'ex(r, th)',
+  // one of flam3's two roots, so it seams along its cut where the cells are not point-symmetric
+  julia: 'sqrt(r) * vec2(cos(.5 * atan(p.y, p.x)), sin(.5 * atan(p.y, p.x)))',
+  bent: 'vec2(p.x < 0. ? 2. * p.x : p.x, p.y < 0. ? .5 * p.y : p.y)',
+  exponential: 'exp(min(p.x - 1., 8.)) * vec2(cos(PI * p.y), sin(PI * p.y))',
+  power: 'pow(max(r, 1e-6), sc.x) * sc.yx',
+  cosine: 'vec2(cos(PI * p.x) * ch(p.y), -sin(PI * p.x) * sh(p.y))',
+  eyefish: 'p * 2. / (r + 1.)',
+  cylinder: 'vec2(sin(p.x), p.y)',
+  tangent: 'vec2(sin(p.x), sin(p.y)) * inv(cos(p.y))',
+  secant2: 'vec2(p.x, inv(cos(w * r)) - sign(cos(w * r)))',
+  cross: 'p * inversesqrt((p.x * p.x - p.y * p.y) * (p.x * p.x - p.y * p.y) + 1e-8)',
+  butterfly: '1.30294003 * sqrt(abs(p.x * p.y) / (1e-9 + p.x * p.x + 4. * p.y * p.y)) * vec2(p.x, 2. * p.y)',
+  edisc: 'edisc(p, r2)',
+  elliptic: 'elliptic(p, r2)',
+  foci: 'foci(p)',
+  loonie: 'r2 < w * w ? p * sqrt(max(w * w / max(r2, 1e-8) - 1., 0.)) : p',
+  polar2: 'vec2(th, .5 * log(max(r2, 1e-12))) / PI',
+  scry: 'p * inv(max(r, 1e-4) * (w * r2 + 1.))',
+  exp: 'exp(min(p.x, 8.)) * vec2(cos(p.y), sin(p.y))',
+  log: 'vec2(.5 * log(max(r2, 1e-12)), atan(p.y, p.x))',
+  sin: 'vec2(sin(p.x) * ch(p.y), cos(p.x) * sh(p.y))',
+  cos: 'vec2(cos(p.x) * ch(p.y), -sin(p.x) * sh(p.y))',
+  tan: 'vec2(sin(2. * p.x), sh(2. * p.y)) * inv(cos(2. * p.x) + ch(2. * p.y))',
+  sec: '2. * vec2(cos(p.x) * ch(p.y), sin(p.x) * sh(p.y)) * inv(cos(2. * p.x) + ch(2. * p.y))',
+  csc: '2. * vec2(sin(p.x) * ch(p.y), -cos(p.x) * sh(p.y)) * inv(ch(2. * p.y) - cos(2. * p.x))',
+  cot: 'vec2(sin(2. * p.x), -sh(2. * p.y)) * inv(ch(2. * p.y) - cos(2. * p.x))',
+  sinh: 'vec2(sh(p.x) * cos(p.y), ch(p.x) * sin(p.y))',
+  cosh: 'vec2(ch(p.x) * cos(p.y), sh(p.x) * sin(p.y))',
+  tanh: 'vec2(sh(2. * p.x), sin(2. * p.y)) * inv(cos(2. * p.y) + ch(2. * p.x))',
+  sech: '2. * vec2(cos(p.y) * ch(p.x), -sin(p.y) * sh(p.x)) * inv(cos(2. * p.y) + ch(2. * p.x))',
+  csch: '2. * vec2(sh(p.x) * cos(p.y), -ch(p.x) * sin(p.y)) * inv(ch(2. * p.x) - cos(2. * p.y))',
+  coth: 'vec2(sh(2. * p.x), sin(2. * p.y)) * inv(ch(2. * p.x) - cos(2. * p.y))',
 }
+// the texel and component a variation's weight sits in (the layout above)
+const weightAt = (i: number) => (i < 8 ? [2 + (i >> 2), i & 3] : [VARY_TEXEL + ((i - 8) >> 2), (i - 8) & 3])
 
 // Each lattice kind as GLSL over p, e2, n (sectors) and t7.z (jitter), setting k where its cells are not
 // one unit wide. polar and logpolar run the oblique pad over (angle, radius) and (angle, log radius) in
@@ -104,10 +151,22 @@ const SHAPE_GLSL: Record<ShapeKind, string> = {
 
 export function generateShader(): string {
   const shapes = SHAPES.map((kind, i) => `    case ${i}: return ${SHAPE_GLSL[kind]}; // ${kind}`).join('\n')
-  const vary = VARIATIONS.map((kind, i) => {
-    const w = `${i < 4 ? 'wa' : 'wb'}.${'xyzw'[i % 4]}`
-    return `  if (${w} != 0.) q += ${w} * (${VARIATION_GLSL[kind]}); // ${kind}`
-  }).join('\n')
+  // each texel's four weights, skipped whole where all are 0
+  const texels = [...new Set(VARIATIONS.map((_, i) => weightAt(i)[0]))]
+  const vary = texels
+    .map((texel) => {
+      const lines = VARIATIONS.flatMap((kind, i) => {
+        const [at, c] = weightAt(i)
+        const w = `g.${'xyzw'[c]}`
+        return at === texel
+          ? [`    if (${w} != 0.) { float w = ${w}; q += w * (${VARIATION_GLSL[kind]}); } // ${kind}`]
+          : []
+      })
+      return `  g = row(j, ${texel});\n  if (g != vec4(0)) {\n${lines.join('\n')}\n  }`
+    })
+    .join('\n')
+  const cell = (by: (typeof CELLS)[number]) => `${CELLS.indexOf(by)}.`
+  const lattice = (kind: LatticeKind) => `${LATTICES.indexOf(kind)}.`
   return `#version 300 es
 precision highp float;
 precision highp int;
@@ -132,6 +191,7 @@ uniform vec4 uStops[MAX_STOPS];   // at, L, C, h
 uniform int uStopMix[MAX_STOPS];  // 0 straight, 1 short, 2 long
 uniform int uTowardMix[MAX_STOPS]; // the far end's
 uniform vec4 uPalette;            // hue, contrast, radius, running index
+uniform vec2 uTrap;               // the orbit trap's weight, its circle's size
 uniform float uComposite;         // 0 add to 1 first hit
 uniform vec4 uToward;             // a morph's far end: its line kind, how far in (0 none), its ring phase, its index
 uniform vec2 uTowardRings;        // the far end's rings, their spread
@@ -144,6 +204,10 @@ out vec4 outColor;
 mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, s, -s, c); }
 vec4 row(int j, int k) { return texelFetch(uLevels, ivec2(k, j), 0); }
 float hash(vec2 id) { return fract(sin(dot(id, vec2(127.1, 311.7))) * 43758.5453); }
+// 1 / x held to 1e4 in size, and cosh and sinh held to their value at 8, so the variations' poles stay finite
+float inv(float x) { return 1. / (abs(x) < 1e-4 ? (x < 0. ? -1e-4 : 1e-4) : x); }
+float ch(float x) { return cosh(clamp(x, -8., 8.)); }
+float sh(float x) { return sinh(clamp(x, -8., 8.)); }
 
 // iq's sdStar (the first of the shapes below, from his 2D distance functions): n points, m from 1 (a dual star)
 // through 2 (an n-gon) to n (spokes)
@@ -373,11 +437,36 @@ vec4 voronoi(vec2 p, vec2 e2, float jitter) {
   return best;
 }
 
-vec2 vary(vec2 p, vec4 wa, vec4 wb) {
+// flam3's ex, edisc, elliptic and foci, which take more than one line
+vec2 ex(float r, float th) {
+  float a = sin(th + r), b = cos(th - r);
+  a *= a * a * r;
+  b *= b * b * r;
+  return vec2(a + b, a - b);
+}
+vec2 edisc(vec2 p, float r2) {
+  float xmax = .5 * (sqrt(max(r2 + 1. + 2. * p.x, 0.)) + sqrt(max(r2 + 1. - 2. * p.x, 0.)));
+  float a1 = log(xmax + sqrt(max(xmax - 1., 0.))), a2 = -acos(clamp(p.x / xmax, -1., 1.));
+  return vec2(cosh(a2) * cos(a1), sinh(a2) * (p.y > 0. ? -sin(a1) : sin(a1))) / 11.57034632;
+}
+vec2 elliptic(vec2 p, float r2) {
+  float xmax = .5 * (sqrt(max(r2 + 1. + 2. * p.x, 0.)) + sqrt(max(r2 + 1. - 2. * p.x, 0.)));
+  float a = p.x / xmax, l = log(xmax + sqrt(max(xmax - 1., 0.)));
+  return vec2(atan(a, sqrt(max(1. - a * a, 0.))), p.y > 0. ? l : -l) / (.5 * PI);
+}
+vec2 foci(vec2 p) {
+  float e = .5 * exp(clamp(p.x, -8., 8.)), en = .25 / e;
+  return vec2(e - en, sin(p.y)) * inv(e + en - cos(p.y));
+}
+
+// level row j's weighted sum of variations at p, held inside 1e5 either way
+vec2 vary(vec2 p, int j) {
+  if (row(j, 7).w > .5) return row(j, 2).x * p;
   float r2 = dot(p, p), r = sqrt(r2), th = atan(p.x, p.y);
-  vec2 q = vec2(0);
+  vec2 sc = p / max(r, 1e-9), q = vec2(0);
+  vec4 g;
 ${vary}
-  return q;
+  return clamp(q, vec2(-1e5), vec2(1e5));
 }
 
 // A level's lattice: the local offset .xy and the cell id .zw, and k, the cells per unit at p.
@@ -499,12 +588,24 @@ vec3 background(vec2 fc) {
   return c * uBg.y;
 }
 
-// What one cell of a level draws: its distance, where it is round the cell's middle (turns) and how far out (rad), its
-// parity sign, the variant its hash picks and the seed it picked with.
-struct Cell { float d; float turn; float rad; float sgn; int v; float seed; };
+// What one cell of a level draws: its distance, where it is round the cell's middle (turns) and how far out (rad), the
+// way its rings and dots run (sgn, -1 for a cell turned the other way), how far its cell turn and ring phase go (f),
+// the variant its hash picks and the seed it picked with.
+struct Cell { float d; float turn; float rad; float sgn; float f; int v; float seed; };
 
-// cell id's shape at h (in the cell, turned by the Cell step) on level row j of weight w
-Cell cellAt(int j, vec2 h, vec2 id, float w) {
+// how far out a cell is from the middle of the level, for the ring step: its middle's distance, in cells, on the
+// lattices whose cells are translates; polar's and logpolar's ring; fold's mirror count
+float ringOf(vec2 q, vec4 cell, float kind) {
+  if (kind == ${lattice('polar')} || kind == ${lattice('logpolar')}) return cell.w;
+  if (kind == ${lattice('fold')}) return cell.z + cell.w;
+  return length(q - cell.xy);
+}
+
+// the mirror step: a cell's offset reflected across each axis where its id is odd along it
+vec2 mirrored(vec2 h, vec2 id) { return h * (1. - 2. * mod(id, 2.)); }
+
+// cell id's shape at h (in the cell, turned by the Cell step) on level row j of weight w, ring out from the middle
+Cell cellAt(int j, vec2 h, vec2 id, float w, float ring) {
   vec4 t4 = row(j, 4), t5 = row(j, 5), t6 = row(j, 6);
   Cell c;
   // a level whose far end has another id turns each cell over to the far end's seed at the cell's own time,
@@ -513,9 +614,13 @@ Cell cellAt(int j, vec2 h, vec2 id, float w) {
   c.seed = t6.z < over ? t6.x : t6.y;
   float dip = t6.x != t6.y ? 1. - smoothstep(0., .08, abs(t6.z - over)) : 0.;
   // the Cell step: parity turns odd cells the other way, hash turns each cell either way (Truchet), and both
-  // flip the turned cells' ring phase; a collapsed level does not turn
-  c.sgn = (t4.x > 1.5 ? hash(id + c.seed * 5.13 + 7.) : t4.x > .5 ? mod(id.x + id.y, 2.) : 0.) > .5 ? -1. : 1.;
-  h = rot(c.sgn * t4.y * w) * h;
+  // flip the turned cells' ring phase and dots; ring turns and phases each cell by how far out it is; mirror's
+  // reflection is in h already; a collapsed level does not turn
+  float by = t4.x;
+  c.sgn = (by == ${cell('hash')} ? hash(id + c.seed * 5.13 + 7.) : by == ${cell('parity')} ? mod(id.x + id.y, 2.) : 0.) > .5
+    ? -1. : 1.;
+  c.f = by == ${cell('ring')} ? ring : c.sgn;
+  h = rot(c.f * t4.y * w) * h;
   // the per-cell pick among the variants, by share
   float pick = hash(id + c.seed * 17.31) * t5.w, shares = 0.;
   c.v = 0;
@@ -549,19 +654,19 @@ float drawn(Cell c, float ringPhase, float depth, float scale) {
   float k = PI * mix(max(ra, 1.), max(rb, 1.), uToward.y);
   float lw = max(uLine.y + uLine.z * depth, 1e-5), lf = uFalloff.x + uFalloff.y * depth;
   vec4 dash = vec4(c.turn, c.rad * scale, max(uDots.x + uDots.y * depth, 1.), clamp(uDots.z + uDots.w * depth, 0., 1.));
-  float a = contour(c.d, k, ra, uContour.z + c.sgn * ringPhase, uLine.x, scale, lw, lf, dash, c.sgn * uCrawl.x);
+  float a = contour(c.d, k, ra, uContour.z + c.f * ringPhase, uLine.x, scale, lw, lf, dash, c.sgn * uCrawl.x);
   if (uToward.y > 0.)
-    a = mix(a, contour(c.d, k, rb, uToward.z + c.sgn * ringPhase, uToward.x, scale, lw, lf, dash, c.sgn * uCrawl.y),
+    a = mix(a, contour(c.d, k, rb, uToward.z + c.f * ringPhase, uToward.x, scale, lw, lf, dash, c.sgn * uCrawl.y),
             uToward.y);
   // in screen units a cell the warps shrink to a few line widths across fades out rather than filling with line
   return a * mix(1., smoothstep(2. * lw, 8. * lw, scale), uLine.w);
 }
 
-// how far the variations stretch the plane at q0 (to q): the linear weight's scale alone, else measured
-mat2 stretch(vec2 q0, vec2 q, vec4 wa, vec4 wb) {
-  if (wa.yzw == vec3(0) && wb == vec4(0)) return mat2(wa.x);
+// how far level row j's variations stretch the plane at q0 (to q): the linear weight's scale alone, else measured
+mat2 stretch(vec2 q0, vec2 q, int j) {
+  if (row(j, 7).w > .5) return mat2(row(j, 2).x);
   float e = 1e-3 * max(length(q0), 1e-3);
-  return mat2((vary(q0 + vec2(e, 0), wa, wb) - q) / e, (vary(q0 + vec2(0, e), wa, wb) - q) / e);
+  return mat2((vary(q0 + vec2(e, 0), j) - q) / e, (vary(q0 + vec2(0, e), j) - q) / e);
 }
 
 // one sample of the lines over the background bg: added to it, or over it where the first hit leaves it uncovered
@@ -571,6 +676,8 @@ vec3 render(vec2 fc, vec3 bg) {
   float ci = uPalette.z * r0;
   vec3 add = vec3(0), first = vec3(0);
   float cover = 0., grown = 0.;
+  // the orbit trap: how near the point has come to the trap's circle, from the frame's point on down the chain
+  float trap = abs(r0 - uTrap.y);
   // how far the chain has stretched the screen at this pixel, for lines in screen units
   mat2 J = rot(uFrame.w) / uFrame.z;
   int j = 0;
@@ -579,18 +686,20 @@ vec3 render(vec2 fc, vec3 bg) {
     // a level is as deep as the weight above it, so a level collapsing or growing moves the depths below smoothly
     float depth = grown / uDepth;
     vec4 t0 = row(j, 0), t1 = row(j, 1), t4 = row(j, 4), t5 = row(j, 5), t6 = row(j, 6), t7 = row(j, 7);
-    vec4 wa = row(j, 2), wb = row(j, 3);
     float w = t0.x, kc;
     // affine, variations, lattice; the level weight blends the re-tiling toward pass-through
-    vec2 q0 = t0.y * (rot(t0.z) * p) + t1.xy, q = vary(q0, wa, wb);
+    vec2 q0 = t0.y * (rot(t0.z) * p) + t1.xy, q = vary(q0, j);
     vec4 cell = lattice(q, t1.zw, t7, kc);
+    // the cell's offset, reflected where the Cell step mirrors
+    bool mirror = t4.x == ${cell('mirror')};
+    vec2 local = mirror ? mirrored(cell.xy, cell.zw) : cell.xy;
     mat2 Jq = t0.y * rot(t0.z) * J;
-    if (uLine.w > 0.) Jq = stretch(q0, q, wa, wb) * Jq;
+    if (uLine.w > 0.) Jq = stretch(q0, q, j) * Jq;
     J = J * (1. - w) + kc * Jq * w;
     // how many screen units a cell unit spans here
     float px = inversesqrt(max(abs(determinant(J)), 1e-12)), scale = mix(1., px, uLine.w);
     // draw: the cell's shape and line
-    Cell own = cellAt(j, mix(p, cell.xy, w), cell.zw, w);
+    Cell own = cellAt(j, mix(p, local, w), cell.zw, w, ringOf(q, cell, t7.x));
     float a = drawn(own, t4.z, depth, scale);
     // spill: the outlines of the shapes of the cells a step round it, drawn where they reach into this one (the
     // nearest outline, so overlapping shapes each show theirs), faded in by spill; the parse keeps it to lattices
@@ -599,12 +708,12 @@ vec3 render(vec2 fc, vec3 bg) {
     Cell near = own;
     vec2 nid = cell.zw;
     if (t6.w > 0.) {
-      float st = t7.x == ${LATTICES.indexOf('triangle')}. ? .5 : 1.;
+      float st = t7.x == ${lattice('triangle')} ? .5 : 1.;
       for (int k = 0; k < 9; k++) {
         if (k == 4) continue;
         vec2 o = vec2(k % 3 - 1, k / 3 - 1);
         vec4 nc;
-        if (t7.x == ${LATTICES.indexOf('voronoi')}.) {
+        if (t7.x == ${lattice('voronoi')}) {
           vec2 d = jittered(cell.zw + o, t7.z) - jittered(cell.zw, t7.z);
           nc = vec4(cell.xy - d.x * vec2(1, 0) - d.y * t1.zw, cell.zw + o);
         } else {
@@ -614,7 +723,7 @@ vec3 render(vec2 fc, vec3 bg) {
           nc.xy -= dq;
         }
         if (nc.zw == cell.zw) continue;
-        Cell c = cellAt(j, mix(p, nc.xy, w), nc.zw, w);
+        Cell c = cellAt(j, mix(p, mirror ? mirrored(nc.xy, nc.zw) : nc.xy, w), nc.zw, w, ringOf(q, nc, t7.x));
         if (abs(c.d) < abs(near.d)) {
           near = c;
           nid = nc.zw;
@@ -628,15 +737,17 @@ vec3 render(vec2 fc, vec3 bg) {
     // spread; a spilled outline wears its own cell's, by spill
     float ni = mix(ci, t5.x + t5.z * hash(nid + near.seed * 3.7 + 11.), t5.y * w);
     ci = mix(ci, t5.x + t5.z * hash(cell.zw + own.seed * 3.7 + 11.), t5.y * w);
-    float li = mix(ci, ni, t6.w);
+    // the orbit trap takes in this level's point as far as the level is grown, and moves the index by its weight
+    trap = mix(trap, min(trap, abs(length(mix(p, local, w)) - uTrap.y)), w);
+    float li = mix(ci, ni, t6.w) + uTrap.x * trap;
     vec3 col = palette(li + uPalette.w);
     if (uToward.y > 0.) col = mix(col, palette(li + uToward.w), uToward.y);
     add += col * a;
     float c = clamp(a, 0., 1.);
     first += (1. - cover) * col * c;
     cover += (1. - cover) * c;
-    // the chain runs on in this cell, turned by the Cell step
-    p = rot(own.sgn * t4.y * w) * mix(p, cell.xy, w);
+    // the chain runs on in this cell, turned (and mirrored) by the Cell step
+    p = rot(own.f * t4.y * w) * mix(p, local, w);
     grown += w;
     float below = row(j, 9 + ${VARIANT_TEXELS} * own.v).z;
     j = below >= 0. ? int(below) : int(t0.w);

@@ -103,6 +103,29 @@ export function step(bank: Bank, looks: Scene[], at: Keyframe, random = Math.ran
   return preset === undefined || chosen.size ? { entry, scene } : { entry, scene, preset }
 }
 
+// How far Mutate nudges at most: this share of a knob's play range, or of a macro's travel.
+export const NUDGE = 0.25
+
+// Mutate: every knob the look gives a play range (playable) nudged at random by up to NUDGE of that range either
+// way, bounced back inside it at its ends, and every macro by up to NUDGE of its travel; a knob a macro drives
+// moves with the macro alone.
+export function mutate(scene: Scene, random = Math.random): Scene {
+  const { knobs, macros } = playable(scene)
+  const driven = new Set(macros.flatMap((m) => m.targets.map((t) => t.knob)))
+  const nudge = (v: number, [lo, hi]: [number, number]) => {
+    const x = v + (2 * random() - 1) * NUDGE * (hi - lo)
+    return clamp(x > hi ? 2 * hi - x : x < lo ? 2 * lo - x : x, [lo, hi])
+  }
+  return update(scene, (d) => {
+    for (const m of macros) setMacro(d, m.id, nudge(m.value, [0, 1]))
+    for (const { address } of knobs) {
+      if (driven.has(address)) continue
+      const knob = resolve(d, address)!
+      knob.value = nudge(knob.value, knob.play!)
+    }
+  })
+}
+
 // Every knob's value as the scene plays it before its modulators: a linked level's from its leader, with the spread.
 export const valuesOf = (scene: Scene): Map<Address, number> =>
   new Map(knobsOf(advance({ ...scene, modulators: [] }, newLive(), 0, 60)).map((k) => [k.address, k.knob.value]))

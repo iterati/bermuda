@@ -4,6 +4,7 @@
 import {
   allLevels,
   BACKGROUNDS,
+  CELLS,
   LATTICES,
   LINES,
   MAX_LEVELS,
@@ -15,7 +16,7 @@ import {
   type Scene,
   type Shape,
 } from './scene'
-import { generateShader, ROW_TEXELS, VARIANT_TEXELS } from './shader'
+import { generateShader, ROW_TEXELS, VARIANT_TEXELS, VARY_TEXEL } from './shader'
 import type { Live } from './motion'
 
 const RAD = Math.PI / 180
@@ -68,14 +69,10 @@ export function packLevels(levels: Level[], far: Toward['levels']): Float32Array
     const { affine, lattice, cell, colour, variants } = level
     at(0, level.weight.value, affine.scale.value, affine.turn.value * RAD, next ? rows.get(next)! : -1)
     at(1, affine.offset[0].value, affine.offset[1].value, lattice.e2[0].value, lattice.e2[1].value)
-    at(2, ...VARIATIONS.map((kind) => variationWeight(level, kind)))
-    at(
-      4,
-      cell.by === 'parity' ? 1 : cell.by === 'hash' ? 2 : 0,
-      cell.turn.value * RAD,
-      cell.phase.value * 2 * Math.PI,
-      variants.length,
-    )
+    const weights = VARIATIONS.map((kind) => variationWeight(level, kind))
+    at(2, ...weights.slice(0, 8))
+    at(VARY_TEXEL, ...weights.slice(8))
+    at(4, CELLS.indexOf(cell.by), cell.turn.value * RAD, cell.phase.value * 2 * Math.PI, variants.length)
     at(
       5,
       colour.at.value,
@@ -85,7 +82,13 @@ export function packLevels(levels: Level[], far: Toward['levels']): Float32Array
     )
     const other = far[row]
     at(6, seedOf(level.id), seedOf(other?.id ?? level.id), other?.at ?? 0, cell.spill?.value ?? 0)
-    at(7, LATTICES.indexOf(lattice.kind), lattice.sectors ?? 0, lattice.jitter?.value ?? 0, 0)
+    at(
+      7,
+      LATTICES.indexOf(lattice.kind),
+      lattice.sectors ?? 0,
+      lattice.jitter?.value ?? 0,
+      weights.every((w, i) => i === 0 || w === 0) ? 1 : 0,
+    )
     variants.forEach(({ share, shape, below }, v) => {
       const base = 8 + VARIANT_TEXELS * v
       const { join } = shape
@@ -145,6 +148,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     stops: u('uStops'),
     stopMix: u('uStopMix'),
     palette: u('uPalette'),
+    trap: u('uTrap'),
     composite: u('uComposite'),
     bg: u('uBg'),
     bgSoak: u('uBgSoak'),
@@ -228,6 +232,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
       far.mixes.map((m) => MIXES.indexOf(m)),
     )
     gl.uniform4f(loc.palette, palette.hue.value * RAD, palette.contrast.value, palette.radius.value, live.colour)
+    gl.uniform2f(loc.trap, palette.trap?.weight.value ?? 0, palette.trap?.size.value ?? 0)
     gl.uniform1f(loc.composite, mixed(scene.composite === 'first', far.composite === 'first'))
     gl.uniform4f(loc.toward, LINES.indexOf(far.line), far.at, far.drift, far.colour)
     gl.uniform2f(loc.towardRings, ...far.rings)

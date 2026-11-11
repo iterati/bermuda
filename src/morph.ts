@@ -188,10 +188,13 @@ function mixLevels(
     const by = a.cell.by === b.cell.by ? 1 : 1 - dip(t, 0.1)
     // oblique is voronoi at jitter 0, so the two morph as voronoi throughout; another change of kind or
     // sectors swaps where the level's weight dips to nothing, and where only its first variant is picked, so
-    // every cell runs on down the same chain either side of the swap
+    // every cell runs on down the same chain either side of the swap; so does a mirror coming or going, as no
+    // turn reaches a reflection
     const kinds = new Set([a.lattice.kind, b.lattice.kind])
     const voronoi = kinds.has('voronoi') && (kinds.size === 1 || kinds.has('oblique'))
-    const swaps = !voronoi && (kinds.size > 1 || a.lattice.sectors !== b.lattice.sectors)
+    const swaps =
+      (!voronoi && (kinds.size > 1 || a.lattice.sectors !== b.lattice.sectors)) ||
+      (a.cell.by === 'mirror') !== (b.cell.by === 'mirror')
     const hidden = swaps ? 1 - dip(t, 0.05) : 1
     const vectors = [...kinds].every((kind) => ['oblique', 'triangle', 'voronoi'].includes(kind))
     const lattice: Level['lattice'] = {
@@ -327,6 +330,12 @@ export function morph(
     modulators: [],
     macros: [],
     presets: [],
+  }
+  // an orbit trap one side lacks is there at weight 0
+  if (a.palette.trap || b.palette.trap) {
+    const ta = a.palette.trap ?? { ...b.palette.trap!, weight: { value: 0 } }
+    const tb = b.palette.trap ?? { ...a.palette.trap!, weight: { value: 0 } }
+    scene.palette.trap = { weight: k(ta.weight, tb.weight), size: k(ta.size, tb.size) }
   }
   // dots one side lacks morph from the other side's, which that side does not draw
   const dots = a.line.dots ?? b.line.dots

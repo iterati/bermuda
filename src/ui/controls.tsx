@@ -341,6 +341,32 @@ function PaletteSection() {
       <Knob label="contrast" at="palette.contrast" />
       <Knob label="radius" at="palette.radius" />
       <Knob label="time" at="palette.time" />
+      {scene.palette.trap ? (
+        <span className="pair">
+          <Knob label="trap" at="palette.trap.weight" />
+          <Knob label="trap size" at="palette.trap.size" />
+          <button
+            className="mini"
+            title="drop the orbit trap"
+            onClick={() =>
+              edit((d) => {
+                delete d.palette.trap
+                prune(d)
+              })
+            }
+          >
+            ×
+          </button>
+        </span>
+      ) : (
+        <button
+          className="mini"
+          title="orbit-trap colour: the index moved by how near each point comes, down the chain, to a circle round its cell's middle"
+          onClick={() => edit((d) => (d.palette.trap = { weight: { value: 0.5 }, size: { value: 0 } }))}
+        >
+          + orbit trap
+        </button>
+      )}
       <div className="stops">
         {stops.map((s, i) => (
           <div className="stop" key={i}>

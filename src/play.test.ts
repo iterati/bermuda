@@ -6,7 +6,9 @@ import {
   bend,
   bendOf,
   entryScene,
+  mutate,
   neighbours,
+  NUDGE,
   playable,
   pruneBank,
   step,
@@ -121,6 +123,36 @@ describe('the autopilot', () => {
     const bare = scene({ name: 'bare', levels: [level('a', { shape: star(6, 2, 0.4) })] })
     expect(step(lone, LOOKS, { entry, scene: bare })).toBeUndefined()
   })
+})
+
+describe('mutate', () => {
+  it.each(LOOKS.map((l) => l.name))(
+    'keeps every knob inside its play range and moves only the playable, %s',
+    (name) => {
+      const look = LOOKS.find((l) => l.name === name)!
+      const random = seeded(name.length * 104729)
+      const { knobs, macros } = playable(look)
+      const free = new Set(knobs.map((k) => k.address))
+      const driven = new Set(macros.flatMap((m) => m.targets.map((t) => t.knob)))
+      let at = look
+      let changed = 0
+      for (let i = 0; i < 20; i++) {
+        const next = mutate(at, random)
+        for (const m of moved(at, next)) {
+          expect(m.value, m.address).toSatisfy((v: number) => v >= m.range[0] && v <= m.range[1])
+          expect(free.has(m.address) || driven.has(m.address), `${m.address} has no play range`).toBe(true)
+          if (!driven.has(m.address))
+            expect(Math.abs(m.value - resolve(at, m.address)!.value), m.address).toBeLessThanOrEqual(
+              NUDGE * (m.range[1] - m.range[0]) + 1e-9,
+            )
+          changed++
+        }
+        for (const m of next.macros) expect(m.value).toSatisfy((v: number) => v >= 0 && v <= 1)
+        at = next
+      }
+      expect(changed).toBeGreaterThan(0)
+    },
+  )
 })
 
 describe('the curve a transition runs on', () => {

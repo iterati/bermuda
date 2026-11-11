@@ -155,6 +155,7 @@ type SceneSpec = {
   contrast?: K
   radius?: K
   time?: K
+  trap?: { weight: K; size: K }
   composite?: Scene['composite']
   aa?: Scene['post']['aa']
   gamma?: K
@@ -183,6 +184,7 @@ export const scene = (s: SceneSpec): Scene => ({
     contrast: k(s.contrast ?? 1),
     radius: k(s.radius ?? 0.4),
     time: k(s.time ?? 0),
+    ...(s.trap ? { trap: { weight: k(s.trap.weight), size: k(s.trap.size) } } : {}),
   },
   composite: s.composite ?? 'add',
   post: { aa: s.aa ?? 2, gamma: k(s.gamma ?? 2.2) },
@@ -1285,15 +1287,337 @@ export const LOOKS: Scene[] = [
       mod('hue', 'cos', 60, [['palette.hue', 180]]),
     ],
   }),
+  // ---- the Cell step's ring and mirror, orbit-trap colour and the rest of flam3 ----
+  scene({
+    name: 'Cells - Ripples',
+    zoom: 0.8,
+    // the ring step's phase grows with each cell's distance from the middle, and the drift runs every cell's rings
+    // on together, so the echo rings travel outward from cell to cell like ripples on a pond
+    levels: [
+      level('pond', {
+        scale: 1.1,
+        turn: 30,
+        e2: HEX,
+        by: 'ring',
+        cellTurn: { value: 0, play: [-12, 12] },
+        cellPhase: { value: 0.12, play: [0.04, 0.3] },
+        shape: star(6, 2, 0.48, { twist: 30, round: { value: 0.3, play: [0, 0.8] } }),
+        at: 0,
+        speed: 0.5,
+      }),
+      level('drops', {
+        scale: R3,
+        turn: 30,
+        e2: HEX,
+        by: 'ring',
+        cellTurn: { value: 0, play: [-20, 20] },
+        cellPhase: { value: -0.2, play: [-0.4, 0] },
+        shape: star(6, 2, 0.4, { round: 1 }),
+        at: 0.45,
+      }),
+    ],
+    rings: { value: 3, play: [2, 5] },
+    drift: { value: 1.2, play: [0.6, 2] },
+    width: { value: 0.004, spread: 0.002 },
+    falloff: 1.2,
+    palette: 'ice',
+    radius: { value: 0.3, play: [0.1, 0.5] },
+    modulators: [
+      mod('wavelength', 'cos', 24, [['levels[pond].cell.phase', 0.08]]),
+      mod('swirl', 'cos', 40, [['levels[drops].cell.turn', 12]]),
+      mod('hue', 'cos', 50, [['palette.hue', 60]]),
+    ],
+    presets: [
+      { name: 'Still water', values: { 'levels[pond].cell.phase': 0.05, 'levels[drops].cell.turn': 0 } },
+      {
+        name: 'Whirlpool',
+        values: { 'levels[pond].cell.turn': 9, 'levels[drops].cell.turn': -16, 'contour.drift': 1.8 },
+      },
+    ],
+  }),
+  scene({
+    name: 'Cells - Mirror tiles',
+    zoom: 0.9,
+    // every odd cell along each axis is its neighbour's reflection (iq's mirrored repetition), so a lopsided shape
+    // meets its mirror image at every edge and the plane reads as one pattern rather than a grid of stamps
+    levels: [
+      level('tile', {
+        scale: 1.1,
+        by: 'mirror',
+        spill: 1,
+        shape: shape('moon', 0.5, { value: 0.55, play: [0.3, 0.8] }, { twist: { value: 35, play: [0, 90] } }),
+        at: 0,
+        speed: 0.5,
+        cellSpread: 0.15,
+      }),
+      level('inlay', {
+        scale: 2,
+        by: 'mirror',
+        shape: shape('pie', 0.38, { value: 0.3, play: [0.15, 0.6] }, { twist: 135, corner: 0.02 }),
+        at: 0.5,
+      }),
+    ],
+    rings: { value: 2.5, play: [1, 4] },
+    drift: 0.4,
+    width: { value: 0.004, spread: 0.002 },
+    falloff: 1.3,
+    palette: 'warm',
+    radius: { value: 0.25, play: [0.05, 0.5] },
+    modulators: [
+      mod('turn', 'cos', 30, [['levels[tile].variants[0].shape.twist', 30]]),
+      mod('bite', 'tri', 19, [['levels[tile].variants[0].shape.form', 0.2]]),
+      mod('opening', 'cos', 23, [['levels[inlay].variants[0].shape.form', 0.15]], { phase: 0.5 }),
+      mod('hue', 'cos', 48, [['palette.hue', 80]]),
+    ],
+    presets: [
+      {
+        name: 'Butterflies',
+        values: { 'levels[tile].variants[0].shape.twist': 80, 'levels[tile].variants[0].shape.form': 0.75 },
+      },
+      { name: 'Scales', values: { 'levels[tile].variants[0].shape.twist': 5, 'levels[inlay].affine.scale': 1.5 } },
+    ],
+  }),
+  scene({
+    name: 'Colour - Orbit traps',
+    zoom: 1.5,
+    // the levels pull no colour of their own: the palette index is how near each point came, down the chain, to
+    // the trap's circle round its cells' middles, so the colour follows the nesting rather than the radius
+    levels: linked('o', 4, {
+      scale: { value: 1.56, play: [1.4, 1.75] },
+      turn: 30,
+      e2: HEX,
+      shape: star(6, { value: 3, play: [1.5, 5] }, 0.36),
+      at: 0,
+      speed: 0,
+    }),
+    line: 'hard',
+    width: { value: 0.003, spread: 0.012 },
+    contrast: 1.2,
+    radius: 0,
+    palette: 'dusk',
+    trap: { weight: { value: 2.8, play: [1.5, 4] }, size: { value: 0.15, play: [0, 0.45] } },
+    modulators: [
+      mod('trap', 'cos', 26, [['palette.trap.size', 0.15]]),
+      mod('nest', 'cos', 36, [['levels[o1].affine.scale', 0.12]], { phase: 0.5 }),
+      mod('character', 'tri', 17, [['levels[o1].variants[0].shape.m', 1.5]]),
+      mod('hue', 'ramp', 80, [['palette.hue', 180]]),
+    ],
+    presets: [
+      { name: 'Point trap', values: { 'palette.trap.size': 0, 'palette.trap.weight': 3.6 } },
+      { name: 'Ring trap', values: { 'palette.trap.size': 0.4, 'palette.trap.weight': 2 } },
+      palettePreset('Rainbow', 'rainbow'),
+    ],
+  }),
+  scene({
+    name: 'flam3 - Hearts and discs',
+    zoom: 1.2,
+    // one level warped by a blend of flam3's heart, disc, spiral and handkerchief; its presets dial between them
+    levels: [
+      level('warp', {
+        scale: { value: 1.2, play: [0.8, 1.6] },
+        vary: [
+          ['linear', { value: 0.2, play: [0, 0.5] }],
+          ['heart', { value: 0.8, play: [0, 1] }],
+          ['disc', { value: 0, play: [0, 1] }],
+          ['spiral', { value: 0, play: [0, 0.6] }],
+          ['handkerchief', { value: 0, play: [0, 1] }],
+        ],
+        e2: HEX,
+        shape: star(6, 2, 0.42, { twist: 30 }),
+        at: 0,
+        speed: 0.5,
+        cellSpread: 0.3,
+      }),
+      level('seeds', { scale: R3, turn: 30, e2: HEX, shape: star(6, 3, 0.4), at: 0.4 }),
+      level('dust', { scale: R3, turn: 30, e2: HEX, shape: star(6, 2, 0.35, { twist: 30 }), at: 0.8 }),
+    ],
+    width: 0.0025,
+    falloff: 1.3,
+    units: 'screen',
+    palette: 'warm',
+    radius: 0.2,
+    modulators: [
+      mod('beat', 'cos', 16, [['levels[warp].variations[1].weight', 0.2]]),
+      mod('spin', 'ramp', 60, [['levels[warp].affine.turn', 180]]),
+      mod('hue', 'cos', 40, [['palette.hue', 50]]),
+    ],
+    presets: [
+      {
+        name: 'Disc',
+        values: { 'levels[warp].variations[1].weight': 0, 'levels[warp].variations[2].weight': 1 },
+      },
+      {
+        name: 'Spiral',
+        values: {
+          'levels[warp].variations[1].weight': 0,
+          'levels[warp].variations[3].weight': 0.5,
+          'levels[warp].variations[0].weight': 0.5,
+        },
+      },
+      {
+        name: 'Handkerchief',
+        values: { 'levels[warp].variations[1].weight': 0, 'levels[warp].variations[4].weight': 0.9 },
+      },
+    ],
+  }),
+  scene({
+    name: 'flam3 - Complex plane',
+    zoom: 0.9,
+    // flam3's complex functions as the warp: sine folds the plane into bands, tanh pinches it into a lens, the
+    // secant rings its poles and the exponential rolls the plane round them
+    levels: [
+      level('fn', {
+        scale: { value: 1.4, play: [1, 2] },
+        vary: [
+          ['sin', { value: 1, play: [0, 1] }],
+          ['tanh', { value: 0, play: [0, 1] }],
+          ['sec', { value: 0, play: [0, 1] }],
+          ['exp', { value: 0, play: [0, 0.6] }],
+        ],
+        by: 'parity',
+        cellTurn: { value: 45, play: [0, 90] },
+        shape: star(4, 2, 0.4, { twist: 45 }),
+        at: 0,
+        speed: 0.5,
+        cellSpread: 0.25,
+      }),
+      level('grid', { scale: 2, turn: 45, shape: star(4, 2.5, 0.35), at: 0.5 }),
+    ],
+    rings: { value: 1.5, play: [1, 3] },
+    drift: 0.5,
+    width: 0.003,
+    falloff: 1.2,
+    units: 'screen',
+    palette: 'rainbow',
+    radius: 0.15,
+    modulators: [
+      mod('flow', 'ramp', 32, [['levels[fn].affine.offset[0]', 2]]),
+      mod('turn', 'tri', 21, [['levels[fn].cell.turn', 30]]),
+      mod('hue', 'cos', 60, [['palette.hue', 120]]),
+    ],
+    presets: [
+      { name: 'Tanh', values: { 'levels[fn].variations[0].weight': 0.3, 'levels[fn].variations[1].weight': 0.7 } },
+      {
+        name: 'Secant',
+        values: {
+          'levels[fn].variations[0].weight': 0,
+          'levels[fn].variations[2].weight': 1,
+          'levels[fn].affine.scale': 1,
+        },
+      },
+      {
+        name: 'Round trip',
+        values: { 'levels[fn].variations[0].weight': 0.4, 'levels[fn].variations[3].weight': 0.4 },
+      },
+    ],
+  }),
+  scene({
+    name: 'flam3 - Julia set',
+    zoom: 1.1,
+    // julia's square root halves every angle, so the hex cells close up round the cut: a six-fold shape is the
+    // same either side of it; ex and bent push the arms out
+    levels: [
+      level('root', {
+        scale: 1.6,
+        vary: [
+          ['julia', { value: 1, play: [0.5, 1] }],
+          ['ex', { value: 0, play: [0, 0.4] }],
+          ['bent', { value: 0, play: [0, 0.6] }],
+        ],
+        e2: HEX,
+        by: 'ring',
+        cellPhase: 0.15,
+        shape: star(6, { value: 2.5, play: [1.5, 4] }, 0.42),
+        at: 0,
+        speed: 0.5,
+      }),
+      level('flake', { scale: R3, turn: 30, e2: HEX, shape: star(6, 2, 0.38, { twist: 30 }), at: 0.4 }),
+      level('frost', { scale: R3, turn: 30, e2: HEX, shape: star(6, 3, 0.35), at: 0.8 }),
+    ],
+    rings: 1.5,
+    drift: 0.6,
+    width: { value: 0.0035, spread: 0.004 },
+    falloff: 1.2,
+    palette: 'ice',
+    radius: 0.25,
+    modulators: [
+      mod('turn', 'ramp', 50, [['levels[root].affine.turn', 180]]),
+      mod('ex', 'cos', 22, [['levels[root].variations[1].weight', 0.15]]),
+      mod('character', 'tri', 13, [['levels[root].variants[0].shape.m', 1]]),
+      mod('hue', 'cos', 45, [['palette.hue', 40]]),
+    ],
+    presets: [
+      { name: 'Ex', values: { 'levels[root].variations[1].weight': 0.4, 'levels[root].variations[0].weight': 0.6 } },
+      { name: 'Bent', values: { 'levels[root].variations[2].weight': 0.6 } },
+    ],
+  }),
+  scene({
+    name: 'Remix - Kaleidoscope pond',
+    zoom: 1.1,
+    // mirror tiles above, ripples within them, coloured by the orbit trap: every new part of the Cell step and
+    // colour at once, with play ranges wide enough that Mutate (R) keeps finding new ones
+    levels: [
+      level('glass', {
+        scale: { value: 1.2, play: [0.9, 1.6] },
+        turn: { value: 0, play: [-20, 20] },
+        vary: [
+          ['linear', 1],
+          ['butterfly', { value: 0, play: [0, 0.4] }],
+        ],
+        by: 'mirror',
+        shape: shape('vesica', 0.5, { value: 0.45, play: [0.2, 0.8] }, { twist: { value: 30, play: [0, 60] } }),
+        at: 0,
+        speed: 0.3,
+      }),
+      level('ripple', {
+        scale: { value: 2, play: [1.6, 2.6] },
+        e2: HEX,
+        by: 'ring',
+        cellTurn: { value: 10, play: [-30, 30] },
+        cellPhase: { value: 0.1, play: [-0.25, 0.25] },
+        shape: star(6, { value: 2, play: [1.5, 4] }, 0.45, { round: { value: 0.5, play: [0, 1] } }),
+        at: 0.5,
+        speed: 0.3,
+      }),
+    ],
+    rings: { value: 2, play: [1, 4] },
+    drift: { value: 0.8, play: [0.3, 1.5] },
+    width: { value: 0.0035, spread: 0.002 },
+    falloff: 1.3,
+    palette: 'forest',
+    radius: 0.1,
+    trap: { weight: { value: 1, play: [0.4, 2] }, size: { value: 0.2, play: [0, 0.5] } },
+    modulators: [
+      mod('wing', 'cos', 28, [['levels[glass].variations[1].weight', 0.15]]),
+      mod('trap', 'tri', 33, [['palette.trap.size', 0.15]]),
+      mod('hue', 'cos', 70, [['palette.hue', 90]]),
+    ],
+    macros: [
+      {
+        id: 'depth',
+        name: 'depth',
+        value: 0.5,
+        targets: [
+          { knob: 'levels[ripple].affine.scale', from: 1.6, to: 2.6 },
+          { knob: 'contour.rings', from: 1, to: 4 },
+        ],
+      },
+    ],
+  }),
 ]
 
-// The built-in bank: every look and preset above, the Tapestries in a ring and the lattices and the shapes in
-// others, each preset beside its look, and each remix, lattice and shape linked to the looks it draws on.
+// The built-in bank: every look and preset above, the Tapestries in a ring and the lattices, the shapes and the
+// cells, colour and flam3 looks in others, each preset beside its look, and each remix, lattice, shape and the rest
+// linked to the looks it draws on.
 const named = (start: string) => LOOKS.find((l) => l.name.startsWith(start))!.name
 const T = (n: string) => named(`Tapestry ${n} `)
 const remix = (n: string) => named(`Remix - ${n}`)
 const lattice = (n: string) => named(`Lattice - ${n}`)
 const shapes = (n: string) => named(`Shapes - ${n}`)
+const cells = named('Cells - Ripples')
+const mirrorTiles = named('Cells - Mirror tiles')
+const traps = named('Colour - Orbit traps')
+const flam3 = (n: string) => named(`flam3 - ${n}`)
 const ring = ['1', '2', '3', '4', '5', '6', '7', '8', '7b'].map(T)
 const lattices = [
   'Rhombic walk',
@@ -1314,10 +1638,21 @@ const shapeRing = [
   'Through the sphere',
   'Stairs and S',
 ].map(shapes)
+const newRing = [
+  cells,
+  mirrorTiles,
+  traps,
+  flam3('Hearts and discs'),
+  flam3('Complex plane'),
+  flam3('Julia set'),
+  remix('Kaleidoscope pond'),
+]
 export const BANK: Bank = {
   scenes: LOOKS.flatMap((l) => [l.name, ...l.presets.map((p) => entryName(l.name, p.name))]),
   links: [
-    ...[ring, lattices, shapeRing].flatMap((r) => r.map((name, i): [string, string] => [name, r[(i + 1) % r.length]])),
+    ...[ring, lattices, shapeRing, newRing].flatMap((r) =>
+      r.map((name, i): [string, string] => [name, r[(i + 1) % r.length]]),
+    ),
     ...LOOKS.flatMap((l) => {
       const presets = l.presets.map((p) => entryName(l.name, p.name))
       return presets.flatMap((p, i): [string, string][] =>
@@ -1361,6 +1696,13 @@ export const BANK: Bank = {
     [shapes('Through the sphere'), T('5')],
     [remix('Dotted hexes'), T('7')],
     [remix('Dotted hexes'), shapes('Marching ants')],
+    [cells, T('1')],
+    [mirrorTiles, lattice('Kaleidoscope')],
+    [traps, T('7')],
+    [flam3('Hearts and discs'), T('5')],
+    [flam3('Complex plane'), remix('Swirled lattice')],
+    [flam3('Julia set'), lattice('Mandala')],
+    [remix('Kaleidoscope pond'), shapes("iq's garden")],
   ],
   autopilot: {
     // a keyframe every 2 beats, as long as a change takes: it never rests, passing through each on its curve

@@ -9,7 +9,19 @@ import { BANK, LOOKS } from './looks'
 import { attach, drive, echoes, HAS_MIDI, keyOf, learn, learnTrigger, takes, waiting, type Learning } from './midi'
 import { morphSize } from './morph'
 import { applyPreset, capturePreset, newLive, setKnob, update } from './motion'
-import { bendOf, entryName, entryScene, pruneBank, step, tangent, valuesOf, type Bend, type Keyframe } from './play'
+import {
+  bendOf,
+  entryName,
+  entryScene,
+  mutate,
+  playable,
+  pruneBank,
+  step,
+  tangent,
+  valuesOf,
+  type Bend,
+  type Keyframe,
+} from './play'
 import {
   allLevels,
   CHIPS,
@@ -330,6 +342,15 @@ export function App() {
     Object.assign(lives[to], { ...from, phases: new Map(from.phases), smooth: new Map(from.smooth) })
     setPair((p) => ({ ...p, [to]: structuredClone(p[side]) }))
   }, [lives, pair, scene, side])
+  // Mutate the look showing: at once, or in Play as a transition from the look coming in
+  const mutateShown = () => {
+    const at = run ? run.to : side
+    const { knobs, macros } = playable(pair[at])
+    if (!knobs.length && !macros.length)
+      return setError('nothing to mutate: give a knob a play range (pick it, then + play range) or add a macro')
+    if (mode === 'play') go({ entry: entries[at], scene: mutate(pair[at]) })
+    else setScene(mutate)
+  }
   const toggleLoop = useCallback(() => edit((d) => (d.loop ? delete d.loop : (d.loop = { seconds: 30 }))), [edit])
   const save = useCallback(() => {
     try {
@@ -502,6 +523,7 @@ export function App() {
         setFocus(null)
         setLearning(null)
       } else if (e.key === 'l') toggleLoop()
+      else if (e.key === 'r') mutateShown()
       // the hand fader's keys are Stage's and Edit's: in Play every change rides a transition
       else if (mode === 'play') return
       else if (e.key === 'a' || e.key === 'b') setSide(e.key)
@@ -682,9 +704,16 @@ export function App() {
                 />
               </label>
             )}
+            <button
+              className="mini"
+              onClick={mutateShown}
+              title="nudge every knob with a play range, and every macro, at random inside its range (R)"
+            >
+              mutate
+            </button>
             <span className="dim keys">
               Tab hides · E edit · D decks · Space pause · 1-0 looks · [ ] presets · ← → chips · ↑ ↓ knob · M MIDI learn
-              · S save · P preset · A B side · , . fader · X swap · L loop · F play · O autopilot · N next
+              · S save · P preset · A B side · , . fader · X swap · L loop · R mutate · F play · O autopilot · N next
             </span>
           </header>
         )}
