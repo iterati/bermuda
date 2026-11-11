@@ -57,7 +57,7 @@ describe('the morph', () => {
 
   it('swaps parity where the cells do not turn', () => {
     const a = scene({ name: 'a', levels: [level('c', { cellTurn: 30 })] })
-    const b = scene({ name: 'b', levels: [level('c', { parity: true, cellTurn: 30 })] })
+    const b = scene({ name: 'b', levels: [level('c', { by: 'parity', cellTurn: 30 })] })
     expect(at(a, b, 0.45).levels[0].cell).toMatchObject({ by: 'none', turn: { value: 0 } })
     expect(at(a, b, 0.55).levels[0].cell).toMatchObject({ by: 'parity', turn: { value: 0 } })
     expect(at(a, b, 1).levels[0].cell.turn.value).toBe(30)
