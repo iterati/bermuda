@@ -16,7 +16,7 @@ import { morph, smooth } from './morph'
 import { advance, applyPreset, newLive, update, type Live } from './motion'
 import { bend, bendOf, entryScene, step, tangent, valuesOf, type Keyframe } from './play'
 import type { Toward } from './render'
-import { CELLS, LATTICES, SHAPES, type Edge, type Scene, type ShapeKind, type VariationKind } from './scene'
+import { CELLS, LATTICES, SHAPES, SPILLS, type Edge, type Scene, type ShapeKind, type VariationKind } from './scene'
 
 declare global {
   interface Window {
@@ -292,6 +292,27 @@ describe('the shapes and lines', () => {
       scene({ name: 's', levels: [level('a', { shape: star(6, 2, r), spill })], line: 'smooth', width: 0.01 })
     expect(furthest(await drawn(hexes(0.3, 1)), await drawn(hexes(0.3)))).toBeLessThan(1e-4)
     expect(furthest(await drawn(hexes(0.8, 1)), await drawn(hexes(0.8)))).toBeGreaterThan(0.1)
+  })
+
+  it.each(SPILLS)('spill on a %s lattice draws finite and reaches over from the cells round', async (lattice) => {
+    const big = (spill?: number) =>
+      scene({
+        name: 's',
+        levels: [
+          level('a', {
+            lattice,
+            e2: [0.5, 0.9],
+            ...(lattice === 'voronoi' && { jitter: 0.5 }),
+            shape: star(6, 2, 0.8),
+            spill,
+          }),
+        ],
+        line: 'smooth',
+        width: 0.01,
+      })
+    const [on, off] = [await drawn(big(1)), await drawn(big())]
+    expect(on.every(Number.isFinite)).toBe(true)
+    expect(furthest(on, off)).toBeGreaterThan(0.1)
   })
 
   it('dots fade from one whole count to the next, and crawl round their outlines', async () => {

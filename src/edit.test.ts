@@ -36,6 +36,17 @@ describe('lattice kinds', () => {
     expect(log.levels[1].lattice.sectors).toBe(9)
     expect(update(log, (d) => setLattice(d, 'b', 'fold')).levels[1].lattice.sectors).toBeUndefined()
   })
+
+  it('spill stays on the lattices whose cells are translates, and drops with its modulator target elsewhere', () => {
+    const s = update(two({ spill: 0.5 }), (d) => {
+      setLattice(d, 'b', 'brick')
+      d.modulators.push(mod('m', 'cos', 8, [['levels[b].cell.spill', 0.2]]))
+    })
+    expect(s.levels[1].cell.spill?.value).toBe(0.5)
+    const polar = update(s, (d) => setLattice(d, 'b', 'polar'))
+    expect(polar.levels[1].cell.spill).toBeUndefined()
+    expect(polar.modulators[0].targets).toEqual([])
+  })
 })
 
 describe('snap to aligned nestings', () => {

@@ -282,6 +282,14 @@ describe('the parse refuses a broken scene, naming its field', () => {
       broken((s) => (s.levels[0].cell.spill = { value: 2 })),
       /^levels\[sq1\]\.cell\.spill\.value: 2 is outside 0 to 1/,
     ],
+    [
+      'a spill on a polar lattice',
+      broken((s) => {
+        Object.assign(s.levels[0].lattice, { kind: 'polar', sectors: 6 })
+        s.levels[0].cell.spill = { value: 1 }
+      }),
+      /^levels\[sq1\]\.cell\.spill: is not for a polar lattice/,
+    ],
     ['a dotted line without its dots', broken((s) => (s.line.kind = 'dots')), /^line\.dots: is missing for dotted/],
     [
       'a dot count off its range',

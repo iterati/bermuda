@@ -353,15 +353,18 @@ vec4 oblique(vec2 p, vec2 e2) {
   return best;
 }
 
-// the pad's points each moved inside its own parallelogram by jitter (0 the pad itself, 1 organic cells),
-// the nearest of the 5 x 5 round p (a flat, sheared pad's nearest point can sit two rows off)
+// pad point id moved inside its own parallelogram by jitter (0 the pad itself, 1 organic cells)
+vec2 jittered(vec2 id, float jitter) { return id + jitter * (vec2(hash(id), hash(id + 19.19)) - .5); }
+
+// the pad's points each jittered, the nearest of the 5 x 5 round p (a flat, sheared pad's nearest point can sit
+// two rows off)
 vec4 voronoi(vec2 p, vec2 e2, float jitter) {
   vec2 q = vec2(p.x - e2.x * p.y / e2.y, p.y / e2.y);
   vec2 b = floor(q + .5);
   vec4 best = vec4(1e9);
   for (int k = 0; k < 25; k++) {
     vec2 id = b + vec2(k % 5 - 2, k / 5 - 2);
-    vec2 at = id + jitter * (vec2(hash(id), hash(id + 19.19)) - .5);
+    vec2 at = jittered(id, jitter);
     vec2 d = p - (at.x * vec2(1, 0) + at.y * e2);
     if (dot(d, d) < dot(best.xy, best.xy)) best = vec4(d, id);
   }
@@ -543,18 +546,27 @@ vec3 render(vec2 fc) {
     float a = drawn(own, t4.z, depth, scale);
     // spill: the outlines of the shapes of the cells a step round it, drawn where they reach into this one (the
     // nearest outline, so overlapping shapes each show theirs), faded in by spill; the parse keeps it to lattices
-    // whose cells are translates, and triangle steps by half the pad to reach both halves
+    // whose cells are translates, triangle steps by half the pad to reach both halves, and voronoi's are its
+    // pad's neighbours, each at its own jittered point
     Cell near = own;
     vec2 nid = cell.zw;
     if (t6.w > 0.) {
       float st = t7.x == ${LATTICES.indexOf('triangle')}. ? .5 : 1.;
       for (int k = 0; k < 9; k++) {
         if (k == 4) continue;
-        vec2 dq = st * (float(k % 3 - 1) * vec2(1, 0) + float(k / 3 - 1) * t1.zw);
-        float kn;
-        vec4 nc = lattice(q + dq, t1.zw, t7, kn);
+        vec2 o = vec2(k % 3 - 1, k / 3 - 1);
+        vec4 nc;
+        if (t7.x == ${LATTICES.indexOf('voronoi')}.) {
+          vec2 d = jittered(cell.zw + o, t7.z) - jittered(cell.zw, t7.z);
+          nc = vec4(cell.xy - d.x * vec2(1, 0) - d.y * t1.zw, cell.zw + o);
+        } else {
+          vec2 dq = st * (o.x * vec2(1, 0) + o.y * t1.zw);
+          float kn;
+          nc = lattice(q + dq, t1.zw, t7, kn);
+          nc.xy -= dq;
+        }
         if (nc.zw == cell.zw) continue;
-        Cell c = cellAt(j, mix(p, nc.xy - dq, w), nc.zw, w);
+        Cell c = cellAt(j, mix(p, nc.xy, w), nc.zw, w);
         if (abs(c.d) < abs(near.d)) {
           near = c;
           nid = nc.zw;
