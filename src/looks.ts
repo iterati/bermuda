@@ -1584,9 +1584,9 @@ export const LOOKS: Scene[] = [
     drift: { value: 0.8, play: [0.3, 1.5] },
     width: { value: 0.0035, spread: 0.002 },
     falloff: 1.3,
-    palette: 'forest',
+    palette: 'rainbow',
     radius: 0.1,
-    trap: { weight: { value: 1, play: [0.4, 2] }, size: { value: 0.2, play: [0, 0.5] } },
+    trap: { weight: { value: 2.2, play: [1, 3.5] }, size: { value: 0.2, play: [0, 0.5] } },
     modulators: [
       mod('wing', 'cos', 28, [['levels[glass].variations[1].weight', 0.15]]),
       mod('trap', 'tri', 33, [['palette.trap.size', 0.15]]),
