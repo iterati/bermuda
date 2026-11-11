@@ -714,7 +714,7 @@ export function App() {
                   side={s}
                   scene={pair[s]}
                   preset={pair[s].presets[presets[s]]?.name}
-                  share={s === 'a' ? 1 - fader : fader}
+                  share={run ? undefined : s === 'a' ? 1 - fader : fader}
                   editing={side === s}
                   looks={looks}
                   canvas={(el) => {
@@ -725,6 +725,9 @@ export function App() {
                 />
                 {s === 'a' ? (
                   <nav className="panel">
+                    <div className="block-title" title="the chain, the knobs and the panels under B edit this side">
+                      Editing {side.toUpperCase()}
+                    </div>
                     <Chain picked={pickedChip} />
                   </nav>
                 ) : (

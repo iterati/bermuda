@@ -38,7 +38,8 @@ beforeAll(async () => {
   await page.goto(`${ORIGIN}/index.html`)
   await page.waitForSelector('canvas.picture')
   // the clock stopped, so each picture holds still
-  await page.keyboard.press('Space')
+  await page.click('.bar button[title="space"]')
+  await page.waitForFunction(() => document.querySelector('.bar button[title="space"]')!.textContent === '▶')
 }, 60_000)
 
 afterAll(() => browser?.close())

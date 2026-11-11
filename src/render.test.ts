@@ -54,8 +54,8 @@ afterAll(() => browser?.close())
 
 type Phases = Pick<Live, 'drift' | 'colour' | 'crawl'>
 
-// Draw a live scene into a float framebuffer, over the whole canvas or at a size in its corner, and read back its
-// pixels.
+// Draw a live scene into a float framebuffer, over the whole canvas or at a size in its corner, and read back the
+// whole canvas's pixels.
 const pixels = (live: Scene, { drift, colour, crawl }: Phases, toward?: Toward, size?: [number, number]) =>
   page.evaluate(
     (live, phases, toward, size) => {
@@ -71,9 +71,8 @@ const pixels = (live: Scene, { drift, colour, crawl }: Phases, toward?: Toward, 
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, target, 0)
       gl.activeTexture(gl.TEXTURE0)
       renderer.draw(live, phases, toward, size)
-      const [width, height] = size ?? [canvas.width, canvas.height]
-      const px = new Float32Array(width * height * 4)
-      gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, px)
+      const px = new Float32Array(canvas.width * canvas.height * 4)
+      gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.FLOAT, px)
       return Array.from(px)
     },
     live,
@@ -83,8 +82,8 @@ const pixels = (live: Scene, { drift, colour, crawl }: Phases, toward?: Toward, 
   )
 
 // the pixels' stats: all finite, their mean lightness and its spread
-async function shoot(live: Scene, phases: Phases, toward?: Toward, size?: [number, number]) {
-  const px = await pixels(live, phases, toward, size)
+const shoot = async (live: Scene, phases: Phases, toward?: Toward) => stats(await pixels(live, phases, toward))
+function stats(px: number[]) {
   let finite = true
   let sum = 0
   let sq = 0
@@ -114,7 +113,8 @@ function morphAt(a: Scene, b: Scene, x: number, edge: Edge, t: number) {
   return { sa, sb, la, lb, ...morph(sa, sb, x, edge, lb) }
 }
 
-describe('the one shader', () => {
+// the first draw compiles the shader's software code, slow while another browser test runs beside it
+describe('the one shader', { timeout: 30_000 }, () => {
   it('compiles and links', async () => {
     const ok = await page.evaluate(
       () => !!(window.renderer ??= window.Bermuda.createRenderer(document.querySelector('canvas')!)),
@@ -383,16 +383,23 @@ describe("Play's transitions", () => {
 })
 
 describe('the Decks view', () => {
-  it('draws A, the mix and B, each at its own size in the corner, finite and not blank', async () => {
+  it('draws A, the mix and B, each at its own size in the corner and nowhere else, finite and not blank', async () => {
     const edge: Edge = { seconds: 2, stagger: 0.4, deepFirst: false }
     const m = morphAt(LOOKS[0], look('Tapestry 7 '), 0.5, edge, 7.3)
     const views: [string, Scene, Phases, Toward | undefined, [number, number]][] = [
       ['A', m.sa, m.la, undefined, [64, 36]],
-      ['the mix', m.scene, m.la, m.toward, [160, 90]],
+      ['the mix', m.scene, m.la, m.toward, [128, 72]],
       ['B', m.sb, m.lb, undefined, [64, 36]],
     ]
-    for (const [name, scene, phases, toward, size] of views) {
-      const { finite, mean, spread } = await shoot(scene, phases, toward, size)
+    for (const [name, scene, phases, toward, [w, h]] of views) {
+      const px = await pixels(scene, phases, toward, [w, h])
+      // the canvas's 160 by 90 pixels, four values each, bottom row first
+      const inCorner = (i: number) => (i >> 2) % 160 < w && (i >> 2) / 160 < h
+      expect(
+        px.filter((_, i) => !inCorner(i)).every((v) => v === 0),
+        name,
+      ).toBe(true)
+      const { finite, mean, spread } = stats(px.filter((_, i) => inCorner(i)))
       expect(finite, name).toBe(true)
       expect(mean, name).toBeGreaterThan(0.01)
       expect(spread, name).toBeGreaterThan(0.01)

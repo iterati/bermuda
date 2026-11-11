@@ -7,7 +7,7 @@ type Props = {
   side: Side
   scene: Scene
   preset?: string // the preset in play, if one is
-  share: number // how far the fader has it in the mix, 0 to 1
+  share?: number // how far the fader has it in the mix, 0 to 1; none while a transition runs it
   editing: boolean
   looks: Scene[]
   canvas: (el: HTMLCanvasElement | null) => void
@@ -25,7 +25,13 @@ export function Deck({ side, scene, preset, share, editing, looks, canvas, onEdi
         <b>{scene.name}</b>
         {preset && <span className="dim">· {preset}</span>}
         <span className={`deck-state${share === 1 ? ' air' : ''}`}>
-          {share === 1 ? 'on air' : share === 0 ? 'cued' : `${Math.round(share * 100)}% in the mix`}
+          {share === undefined
+            ? 'in a transition'
+            : share === 1
+              ? 'on air'
+              : share === 0
+                ? 'cued'
+                : `${Math.round(share * 100)}% in the mix`}
         </span>
       </div>
       <select
@@ -47,7 +53,7 @@ export function Deck({ side, scene, preset, share, editing, looks, canvas, onEdi
           </option>,
           ...look.presets.map((p, j) => (
             <option key={`${i}/${j}`} value={`${i}/${j}`}>
-              {'   '}· {p.name}
+              {'\u00a0\u00a0\u00a0'}· {p.name}
             </option>
           )),
         ])}
