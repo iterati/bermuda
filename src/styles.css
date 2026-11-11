@@ -285,6 +285,108 @@ button {
   flex-wrap: wrap;
 }
 
+/* Decks: A and B in their own previews either side of the mix, like a DJ mixer; every picture 16:9, so a deck
+   frames its scene as the mix will */
+.decks {
+  --mix-w: min(46vw, calc((100vh - 280px) * 16 / 9));
+  --mix-h: calc(var(--mix-w) * 9 / 16);
+}
+.decks .picture {
+  top: 58px;
+  left: calc(50% - var(--mix-w) / 2);
+  width: var(--mix-w);
+  height: var(--mix-h);
+  border-radius: 10px;
+}
+.deck-column {
+  position: absolute;
+  top: 58px;
+  bottom: 10px;
+  width: calc(50% - var(--mix-w) / 2 - 20px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.deck-column.a {
+  left: 10px;
+}
+.deck-column.b {
+  right: 10px;
+}
+.deck-column > .panel:not(.deck) {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+.deck {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  cursor: pointer;
+}
+.deck.on {
+  border-color: var(--accent);
+}
+.deck canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 6px;
+  background: #000;
+}
+.deck-title {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+}
+.deck-title kbd {
+  font-weight: 700;
+  color: var(--accent);
+}
+.deck-title b,
+.deck-title .dim {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.deck-state {
+  margin-left: auto;
+  flex: none;
+  font-size: 11px;
+  color: var(--dim);
+}
+.deck-state.air {
+  color: var(--accent);
+}
+.deck select {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  padding: 3px 6px;
+}
+.mixer {
+  position: absolute;
+  top: calc(58px + var(--mix-h) + 8px);
+  bottom: 10px;
+  left: calc(50% - var(--mix-w) / 2);
+  width: var(--mix-w);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mixer > .panel {
+  padding: 6px 10px;
+}
+.mixer > .panel + .panel {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
 /* the chain */
 .chain {
   display: flex;

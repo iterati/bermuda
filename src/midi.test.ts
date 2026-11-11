@@ -17,7 +17,7 @@ import {
   type Message,
 } from './midi'
 import { setKnob, update } from './motion'
-import { hardRange, parseScene, parseControls, resolve, type Controls, type Scene } from './scene'
+import { hardRange, parseScene, parseControls, resolve, type Controls, type Scene, type View } from './scene'
 
 const squareToHex = () => structuredClone(LOOKS.find((l) => l.name === 'Remix - Square to hex')!)
 
@@ -59,7 +59,7 @@ function play(scene: Scene) {
     learning: null as Learning | null,
     controls: { buttons: [] } as Controls,
     fader: 0,
-    mode: 'stage' as 'stage' | 'edit',
+    mode: 'stage' as View,
     inputs: [] as string[],
   }
   const at = new Map<string, number>()
@@ -121,6 +121,7 @@ describe('MIDI learn', () => {
       buttons: [
         { channel: 11, note: 8, slot: 0 },
         { channel: 11, note: 9, mode: 'edit' },
+        { channel: 11, note: 10, mode: 'decks' },
       ],
       fader: { channel: 11, control: 10, pickup: true },
     }

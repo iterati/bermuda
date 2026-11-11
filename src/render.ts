@@ -1,5 +1,6 @@
 // The renderer: compiles the one shader once, then each frame packs a live scene into its uniforms
-// and level rows and draws one full-screen triangle into whatever framebuffer is bound.
+// and level rows and draws one full-screen triangle into whatever framebuffer is bound, over the whole canvas or a
+// smaller picture in its bottom-left corner.
 import {
   allLevels,
   LATTICES,
@@ -102,7 +103,7 @@ export function packLevels(levels: Level[], far: Toward['levels']): Float32Array
 
 export type Renderer = {
   gl: WebGL2RenderingContext
-  draw: (scene: Scene, live: Pick<Live, 'drift' | 'colour' | 'crawl'>, toward?: Toward) => void
+  draw: (scene: Scene, live: Pick<Live, 'drift' | 'colour' | 'crawl'>, toward?: Toward, size?: [number, number]) => void
 }
 
 export function createRenderer(canvas: HTMLCanvasElement): Renderer {
@@ -159,7 +160,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
   gl.uniform1i(loc.levels, 0)
   gl.bindVertexArray(gl.createVertexArray())
 
-  const draw: Renderer['draw'] = (scene, live, toward) => {
+  const draw: Renderer['draw'] = (scene, live, toward, [width, height] = [canvas.width, canvas.height]) => {
     const { frame, contour, line, palette, post } = scene
     // a scene drawn alone is its own far end
     const far = toward ?? {
@@ -175,8 +176,8 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
       at: 0,
     }
     const mixed = (a: boolean, b: boolean) => Number(a) * (1 - far.at) + Number(b) * far.at
-    gl.viewport(0, 0, canvas.width, canvas.height)
-    gl.uniform2f(loc.res, canvas.width, canvas.height)
+    gl.viewport(0, 0, width, height)
+    gl.uniform2f(loc.res, width, height)
     gl.uniform4f(loc.frame, frame.origin[0].value, frame.origin[1].value, frame.zoom.value, frame.turn.value * RAD)
     gl.bindTexture(gl.TEXTURE_2D, texture)
     gl.texSubImage2D(

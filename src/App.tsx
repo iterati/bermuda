@@ -1,6 +1,7 @@
 // Bermuda: the picture, and over it (Stage) or beside it (Edit) the fader from scene A to scene B, the chain,
-// the picked chip's knobs, the modulators, the macros, MIDI, the looks and the bank. The controls edit one side, A
-// or B; every change is instant, and so is MIDI, which plays the side being edited and the fader. Play is the
+// the picked chip's knobs, the modulators, the macros, MIDI, the looks and the bank. Decks puts A and B in their
+// own previews either side of the mix, like a DJ mixer, so B can be cued while A plays. The controls edit one side,
+// A or B; every change is instant, and so is MIDI, which plays the side being edited and the fader. Play is the
 // picture alone with the bank over it: every change there rides a timed transition, the fader run from the side
 // showing to the other with the change loaded on it, and the autopilot walks the bank.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -26,10 +27,12 @@ import {
   type Controls,
   type Edge,
   type Scene,
+  type View,
 } from './scene'
 import { Bank } from './ui/Bank'
 import { Chain } from './ui/Chain'
 import { CtlContext, Section, type Ctl } from './ui/controls'
+import { Deck } from './ui/Deck'
 import { Fader } from './ui/Fader'
 import { KnobDetail } from './ui/KnobDetail'
 import { Looks } from './ui/Looks'
@@ -108,7 +111,7 @@ export function App() {
   const scene = pair[side]
   const setScene = useCallback((fn: (s: Scene) => Scene) => setPair((p) => ({ ...p, [side]: fn(p[side]) })), [side])
   const [shown, setShown] = useState(scene)
-  const [mode, setMode] = useState<'stage' | 'edit' | 'play'>('stage')
+  const [mode, setMode] = useState<View | 'play'>('stage')
   const [hidden, setHidden] = useState(false)
   const [picked, setPicked] = useState<string>(LOOKS[0].levels[0].id)
   const [focus, setFocus] = useState<Address | null>(null)
@@ -122,6 +125,8 @@ export function App() {
   const [learning, setLearning] = useState<Learning | null>(null)
   const [controls, setControls] = useState(initialControls.value)
   const [positions, setPositions] = useState<ReadonlyMap<string, number>>(new Map())
+  // the decks' preview canvases, while Decks shows them
+  const decks = useRef<Record<Side, HTMLCanvasElement | null>>({ a: null, b: null })
 
   const connect = useCallback(
     () => navigator.requestMIDIAccess().then(setMidi, (err: Error) => setError(`MIDI: ${err.message}`)),
@@ -185,21 +190,22 @@ export function App() {
     },
     [scene, pair, side, setScene],
   )
-  // a keyframe on the edited side, at once
+  // a keyframe on the edited side, or on the deck cued, which the controls then edit, at once
   const put = useCallback(
-    ({ entry, scene: next }: Keyframe, presetIndex?: number) => {
-      const why = refusal({ ...pair, [side]: next })
+    ({ entry, scene: next }: Keyframe, presetIndex?: number, to: Side = side) => {
+      const why = refusal({ ...pair, [to]: next })
       if (why) return setError(why)
       // a new look starts its modulators and glides afresh
-      Object.assign(lives[side], newLive())
-      setScene(() => next)
-      setEntries((e) => ({ ...e, [side]: entry }))
-      setPresets((p) => ({ ...p, [side]: presetIndex ?? -1 }))
+      Object.assign(lives[to], newLive())
+      setPair((p) => ({ ...p, [to]: next }))
+      setEntries((e) => ({ ...e, [to]: entry }))
+      setPresets((p) => ({ ...p, [to]: presetIndex ?? -1 }))
+      setSide(to)
       setPicked(next.levels[0].id)
       setFocus(null)
       setLearning(null)
     },
-    [lives, pair, side, setScene],
+    [lives, pair, side],
   )
   const load = useCallback(
     (look: Scene, presetIndex?: number) => put(keyframe(look, presetIndex), presetIndex),
@@ -274,7 +280,7 @@ export function App() {
     return () => clearTimeout(id)
   }, [mode, auto.on, running, run, queue.length, cycle, seconds, refused])
 
-  const toMode = (next: 'stage' | 'edit' | 'play') => {
+  const toMode = (next: View | 'play') => {
     if (next === 'play') {
       // Play goes on from the side showing, the fader run home to it if it sat between, and fills the screen
       const showing = fader < 0.5 ? 'a' : 'b'
@@ -451,6 +457,7 @@ export function App() {
         e.preventDefault()
         setHidden((h) => !h)
       } else if (e.key === 'e' || e.key === 'E') toMode(mode === 'edit' ? 'stage' : 'edit')
+      else if (e.key === 'd' || e.key === 'D') toMode(mode === 'decks' ? 'stage' : 'decks')
       else if (e.key === 'f') toMode(mode === 'play' ? 'stage' : 'play')
       else if (e.key === 'o') changeBank({ ...bank, autopilot: { ...auto, on: !auto.on } })
       else if (e.key === 'n') autopilot()
@@ -588,6 +595,7 @@ export function App() {
           running={running}
           lives={lives}
           transition={run}
+          decks={mode === 'decks' ? decks.current : undefined}
           onLive={setShown}
           onLand={land}
         />
@@ -605,6 +613,13 @@ export function App() {
               </button>
               <button className={mode === 'edit' ? 'on' : ''} onClick={() => toMode('edit')}>
                 Edit
+              </button>
+              <button
+                className={mode === 'decks' ? 'on' : ''}
+                onClick={() => toMode('decks')}
+                title="A and B in their own previews either side of the mix, to cue one while the other plays (D)"
+              >
+                Decks
               </button>
               <button onClick={() => toMode('play')} title="the picture alone, every change a transition (F)">
                 Play
@@ -647,8 +662,8 @@ export function App() {
               </label>
             )}
             <span className="dim keys">
-              Tab hides · E edit · Space pause · 1-0 looks · [ ] presets · ← → chips · ↑ ↓ knob · M MIDI learn · S save
-              · P preset · A B side · , . fader · X swap · L loop · F play · O autopilot · N next
+              Tab hides · E edit · D decks · Space pause · 1-0 looks · [ ] presets · ← → chips · ↑ ↓ knob · M MIDI learn
+              · S save · P preset · A B side · , . fader · X swap · L loop · F play · O autopilot · N next
             </span>
           </header>
         )}
@@ -689,6 +704,46 @@ export function App() {
             <section className="panel bottom">
               <KnobDetail />
               <Section chip={pickedChip} />
+            </section>
+          </>
+        ) : mode === 'decks' ? (
+          <>
+            {(['a', 'b'] as const).map((s) => (
+              <div key={s} className={`deck-column ${s}`}>
+                <Deck
+                  side={s}
+                  scene={pair[s]}
+                  preset={pair[s].presets[presets[s]]?.name}
+                  share={s === 'a' ? 1 - fader : fader}
+                  editing={side === s}
+                  looks={looks}
+                  canvas={(el) => {
+                    decks.current[s] = el
+                  }}
+                  onEdit={() => setSide(s)}
+                  onLoad={(look, presetIndex) => put(keyframe(look, presetIndex), presetIndex, s)}
+                />
+                {s === 'a' ? (
+                  <nav className="panel">
+                    <Chain picked={pickedChip} />
+                  </nav>
+                ) : (
+                  <aside className="panel">
+                    <Modulators />
+                    <Macros />
+                    {midiBlock}
+                    {looksPanel}
+                    {bankPanel}
+                  </aside>
+                )}
+              </div>
+            ))}
+            <section className="mixer">
+              <div className="panel">{faderPanel}</div>
+              <div className="panel">
+                <KnobDetail />
+                <Section chip={pickedChip} />
+              </div>
             </section>
           </>
         ) : (

@@ -3,7 +3,8 @@
 // draws as if it were gone, a swap draws what it swapped, a loop's first and last frames draw the same, and the
 // frames of Play's transitions along an autopilot walk are finite and not blank. Every shape draws alone and
 // joined, screen lines hold their width through a warp, spill draws only what reaches over, and dots fade from one
-// count to the next and crawl.
+// count to the next and crawl. The Decks' three pictures, each drawn at its own size in the canvas's corner, are
+// finite and not blank.
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
@@ -53,10 +54,11 @@ afterAll(() => browser?.close())
 
 type Phases = Pick<Live, 'drift' | 'colour' | 'crawl'>
 
-// Draw a live scene into a float framebuffer and read back its pixels.
-const pixels = (live: Scene, { drift, colour, crawl }: Phases, toward?: Toward) =>
+// Draw a live scene into a float framebuffer, over the whole canvas or at a size in its corner, and read back its
+// pixels.
+const pixels = (live: Scene, { drift, colour, crawl }: Phases, toward?: Toward, size?: [number, number]) =>
   page.evaluate(
-    (live, phases, toward) => {
+    (live, phases, toward, size) => {
       const canvas = document.querySelector('canvas')!
       const renderer = (window.renderer ??= window.Bermuda.createRenderer(canvas))
       const { gl } = renderer
@@ -68,19 +70,21 @@ const pixels = (live: Scene, { drift, colour, crawl }: Phases, toward?: Toward) 
       gl.bindFramebuffer(gl.FRAMEBUFFER, fb)
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, target, 0)
       gl.activeTexture(gl.TEXTURE0)
-      renderer.draw(live, phases, toward)
-      const px = new Float32Array(canvas.width * canvas.height * 4)
-      gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.FLOAT, px)
+      renderer.draw(live, phases, toward, size)
+      const [width, height] = size ?? [canvas.width, canvas.height]
+      const px = new Float32Array(width * height * 4)
+      gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, px)
       return Array.from(px)
     },
     live,
     { drift, colour, crawl },
     toward,
+    size,
   )
 
 // the pixels' stats: all finite, their mean lightness and its spread
-async function shoot(live: Scene, phases: Phases, toward?: Toward) {
-  const px = await pixels(live, phases, toward)
+async function shoot(live: Scene, phases: Phases, toward?: Toward, size?: [number, number]) {
+  const px = await pixels(live, phases, toward, size)
   let finite = true
   let sum = 0
   let sq = 0
@@ -374,6 +378,24 @@ describe("Play's transitions", () => {
       expect(finite, `at ${t}`).toBe(true)
       expect(mean, `mean at ${t}`).toBeGreaterThan(0.01)
       expect(spread, `spread at ${t}`).toBeGreaterThan(0.01)
+    }
+  })
+})
+
+describe('the Decks view', () => {
+  it('draws A, the mix and B, each at its own size in the corner, finite and not blank', async () => {
+    const edge: Edge = { seconds: 2, stagger: 0.4, deepFirst: false }
+    const m = morphAt(LOOKS[0], look('Tapestry 7 '), 0.5, edge, 7.3)
+    const views: [string, Scene, Phases, Toward | undefined, [number, number]][] = [
+      ['A', m.sa, m.la, undefined, [64, 36]],
+      ['the mix', m.scene, m.la, m.toward, [160, 90]],
+      ['B', m.sb, m.lb, undefined, [64, 36]],
+    ]
+    for (const [name, scene, phases, toward, size] of views) {
+      const { finite, mean, spread } = await shoot(scene, phases, toward, size)
+      expect(finite, name).toBe(true)
+      expect(mean, name).toBeGreaterThan(0.01)
+      expect(spread, name).toBeGreaterThan(0.01)
     }
   })
 })

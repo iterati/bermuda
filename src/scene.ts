@@ -78,9 +78,9 @@ export type Macro = { id: string; name: string; value: number; targets: { knob: 
 // takes pickup: it drives only once it passes the value it drives.
 export type MidiTarget = { knob: Address } | { macro: string }
 export type Midi = { channel: number; control: number; pickup?: true } & MidiTarget
-// A controller's button, a note on its channel, for the whole app: it loads a bank slot or picks a mode, and its
-// LED is lit while that slot or mode is on.
-export type TriggerTarget = { slot: number } | { mode: 'stage' | 'edit' }
+// A controller's button, a note on its channel, for the whole app: it loads a bank slot or picks a view, and its
+// LED is lit while that slot or view is on.
+export type TriggerTarget = { slot: number } | { mode: View }
 export type Trigger = { channel: number; note: number } & TriggerTarget
 // The app's own MIDI, kept in the browser beside the looks: its buttons, and the CC on the A/B fader (with pickup
 // for a fader, as a look's mappings take it).
@@ -156,6 +156,9 @@ export const FORMLESS: readonly ShapeKind[] = ['star', 'heart', 'coolS']
 export const LINES = ['glow', 'smooth', 'hard', 'band', 'dots'] as const
 export const WAVES = ['cos', 'tri', 'beat', 'ramp', 'steps'] as const
 export const MIXES = ['straight', 'short', 'long'] as const
+// the views a MIDI button can pick
+export const VIEWS = ['stage', 'edit', 'decks'] as const
+export type View = (typeof VIEWS)[number]
 // the scene's fixed parts beside its levels, each a chip of the chain: no level may take one's name
 export const CHIPS = ['frame', 'contour', 'line', 'palette', 'post'] as const
 export const MAX_LEVELS = 32
@@ -522,7 +525,7 @@ export function parseControls(input: unknown): Controls {
       const x = obj(item, at, ['channel', 'note'], ['slot', 'mode'])
       const [channel, note] = midiControl(x, at, 'note', notes)
       if ((x.slot === undefined) === (x.mode === undefined)) fail(at, 'must name one slot or one mode')
-      if (x.mode !== undefined) return { channel, note, mode: oneOf(x.mode, `${at}.mode`, ['stage', 'edit'] as const) }
+      if (x.mode !== undefined) return { channel, note, mode: oneOf(x.mode, `${at}.mode`, VIEWS) }
       const slot = num(x.slot, `${at}.slot`, [0, 255])
       if (!Number.isInteger(slot)) fail(`${at}.slot`, 'must be a whole number')
       return { channel, note, slot }

@@ -3,7 +3,7 @@
 // drop), and learning a button.
 import { useState } from 'react'
 import { HAS_MIDI, keyOf, label, mappingOf, positionOf, same, unmap, waiting, type Learning } from '../midi'
-import type { Controls, MidiTarget, Scene, TriggerTarget } from '../scene'
+import { VIEWS, type Controls, type MidiTarget, type Scene, type TriggerTarget, type View } from '../scene'
 import { useCtl } from './controls'
 import { short } from './Knob'
 
@@ -18,6 +18,7 @@ type Props = {
 }
 
 const percent = (v: number) => `${Math.round(v * 100)}%`
+const VIEW_NAMES: Record<View, string> = { stage: 'Stage', edit: 'Edit', decks: 'Decks' }
 
 export function Midi({ connected, inputs, onConnect, looks, controls, fader, onControls }: Props) {
   const { scene, edit, setFocus, learning, learn, positions } = useCtl()
@@ -32,12 +33,10 @@ export function Midi({ connected, inputs, onConnect, looks, controls, fader, onC
           ? 'the A/B fader'
           : 'slot' in t
             ? `look ${t.slot + 1}${looks[t.slot] ? ` · ${looks[t.slot].name}` : ''}`
-            : t.mode === 'stage'
-              ? 'Stage'
-              : 'Edit'
+            : VIEW_NAMES[t.mode]
   const picked: TriggerTarget = button.startsWith('slot ')
     ? { slot: Number(button.slice(5)) }
-    : { mode: button as 'stage' | 'edit' }
+    : { mode: button as View }
   const learningPicked = !!learning && same(learning, picked)
   return (
     <div className="panel-block">
@@ -166,8 +165,11 @@ export function Midi({ connected, inputs, onConnect, looks, controls, fader, onC
                     look {i + 1} · {look.name}
                   </option>
                 ))}
-                <option value="stage">Stage</option>
-                <option value="edit">Edit</option>
+                {VIEWS.map((v) => (
+                  <option key={v} value={v}>
+                    {VIEW_NAMES[v]}
+                  </option>
+                ))}
               </select>
             </label>
             <button
