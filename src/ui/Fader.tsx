@@ -3,7 +3,7 @@
 import { useMemo } from 'react'
 import { depthWindow, morphSize } from '../morph'
 import { parseFader, type Edge, type Fader as Pair, type Scene } from '../scene'
-import { download } from './Bank'
+import { download } from './Looks'
 import type { Side } from './Picture'
 
 type Props = {

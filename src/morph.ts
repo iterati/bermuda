@@ -26,7 +26,7 @@ type Stop = Scene['palette']['stops'][number]
 type Slot = { a: Level; b: Level; moved?: 'out' | 'in'; variants: { below?: Slot[] }[] }
 
 const mix = (a: number, b: number, t: number) => a * (1 - t) + b * t
-const smooth = (from: number, to: number, x: number) => {
+export const smooth = (from: number, to: number, x: number) => {
   const t = clamp((x - from) / (to - from), [0, 1])
   return t * t * (3 - 2 * t)
 }

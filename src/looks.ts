@@ -1,7 +1,20 @@
 // The built-in looks: the nine Tapestries re-made in spirit through the level chain, then remixes across levels.
 // Periods are in clock units, one a second at the default 60 bpm; angles are in degrees.
 import { stopsFromCosine } from './colour'
-import type { Address, Knob, LatticeKind, Level, Macro, Modulator, Preset, Scene, Shape, VariationKind } from './scene'
+import { entryName } from './play'
+import type {
+  Address,
+  Bank,
+  Knob,
+  LatticeKind,
+  Level,
+  Macro,
+  Modulator,
+  Preset,
+  Scene,
+  Shape,
+  VariationKind,
+} from './scene'
 
 type K = number | Knob
 // a fresh knob each time: linked levels built from one spec must not share knob objects
@@ -166,7 +179,13 @@ export const LOOKS: Scene[] = [
     name: 'Tapestry 2 - Hexagram bands',
     zoom: 1.78,
     levels: [
-      ...linked('star', 2, { scale: 1.75, shape: star(6, 3, 0.5), at: 0, speed: 0.4, cellSpread: 0.15 }),
+      ...linked('star', 2, {
+        scale: 1.75,
+        shape: star(6, { value: 3, play: [2, 4.5] }, 0.5),
+        at: 0,
+        speed: 0.4,
+        cellSpread: 0.15,
+      }),
       ...linked('hex', 2, {
         scale: 1.75,
         shape: star(6, 2, 0.5, { twist: 30 }),
@@ -178,7 +197,7 @@ export const LOOKS: Scene[] = [
     rings: { value: 3.8, spread: -2.5 },
     drift: 0.25,
     line: 'band',
-    width: { value: 0.012, spread: 0.03 },
+    width: { value: 0.012, spread: 0.03, play: [0.006, 0.02] },
     falloff: 0.3,
     time: 1 / 3,
     gamma: 1,
@@ -196,12 +215,12 @@ export const LOOKS: Scene[] = [
   }),
   scene({
     name: 'Tapestry 3 - sdStar is fun',
-    zoom: 1.78,
+    zoom: { value: 1.78, play: [1.5, 2.1] },
     levels: linked('st', 4, {
       scale: 1.5,
       variants: [4, 6, 8, 12].map((n) => ({ share: 0.25, shape: star(n, n - 0.1, 0.5, { round: 0.5 }) })),
       at: { value: 0, spread: 1 },
-      speed: 0.4,
+      speed: { value: 0.4, play: [0.2, 1] },
     }),
     radialWeight: 1,
     falloff: 1.1,
@@ -242,7 +261,7 @@ export const LOOKS: Scene[] = [
     zoom: 1.78,
     levels: [
       level('core', {
-        scale: 0.15,
+        scale: { value: 0.15, play: [0.1, 0.3] },
         variants: [4, 8, 12, 16].map((n) => ({ share: 0.25, shape: spokes(n, 0.5) })),
         at: 0,
       }),
@@ -265,7 +284,7 @@ export const LOOKS: Scene[] = [
     line: 'smooth',
     width: { value: 0.004, spread: 0.03 },
     falloff: 1,
-    radius: 0.5,
+    radius: { value: 0.5, play: [0.2, 0.8] },
     modulators: [
       mod('spin', 'ramp', 283, [['frame.turn', 180]]),
       mod('pulse', 'cos', 30, [
@@ -335,13 +354,14 @@ export const LOOKS: Scene[] = [
       turn: { value: 45, spread: 315 },
       shape: spokes(4, 0.5),
       at: { value: 0, spread: 1 },
-      speed: 0.6,
+      speed: { value: 0.6, play: [0.3, 0.9] },
       cellSpread: 0.2,
     }),
     line: 'smooth',
     width: { value: 0.003, spread: 0.026 },
     falloff: 1,
     radius: 0.3,
+    contrast: { value: 1, play: [0.7, 1.3] },
     modulators: [
       mod('panX', 'cos', 45, [['frame.origin[0]', 0.3]]),
       mod('panY', 'cos', 45, [['frame.origin[1]', 0.3]], { phase: 0.14 }),
@@ -441,8 +461,8 @@ export const LOOKS: Scene[] = [
       level('hexA', { scale: 1.5, turn: 30, e2: HEX, shape: star(6, 3, 0.45), at: 0.4 }),
       level('hexB', { scale: R3, turn: 30, e2: HEX, shape: star(6, 2, 0.4), at: 0.7 }),
     ],
-    rings: 3,
-    drift: 0.4,
+    rings: { value: 3, play: [1, 5] },
+    drift: { value: 0.4, play: [0.1, 0.8] },
     falloff: 1.15,
     width: 0.0035,
     modulators: [
@@ -458,7 +478,8 @@ export const LOOKS: Scene[] = [
       level('six', { scale: R3, turn: 30, e2: HEX, shape: star(6, 5.9, 0.42, { round: 0.3 }), at: 0.33 }),
       level('eight', { scale: R3, turn: 30, e2: HEX, shape: star(8, 7.9, 0.4, { round: 0.3 }), at: 0.66 }),
     ],
-    width: 0.003,
+    width: { value: 0.003, play: [0.002, 0.006] },
+    radius: { value: 0.4, play: [0.1, 0.8] },
     modulators: [
       mod('morph', 'cos', 9, [
         ['levels[four].variants[0].shape.round', 0.3],
@@ -473,13 +494,14 @@ export const LOOKS: Scene[] = [
     name: 'Remix - Pinwheel crosses',
     levels: [
       level('wheel', { scale: 0.7, e2: HEX, by: 'parity', cellTurn: 15, shape: star(6, 3, 0.45), at: 0.05 }),
-      level('cross', { scale: 2, turn: 45, shape: spokes(4, 0.45), at: 0.4 }),
+      level('cross', { scale: 2, turn: { value: 45, play: [30, 60] }, shape: spokes(4, 0.45), at: 0.4 }),
       level('hex', { scale: 2, e2: HEX, shape: star(6, 2, 0.4), at: 0.75 }),
     ],
     line: 'smooth',
     width: { value: 0.012, spread: 0.01 },
     falloff: 1,
     palette: 'warm',
+    radius: { value: 0.4, play: [0.2, 0.7] },
     modulators: [
       mod('pinwheel', 'beat', 24, [['levels[wheel].cell.turn', 30]], { harmonics: [3, 2] }),
       mod('cross', 'tri', 7, [['levels[cross].variants[0].shape.r', 0.15]]),
@@ -512,11 +534,11 @@ export const LOOKS: Scene[] = [
   }),
   scene({
     name: 'Remix - Branching cells',
-    zoom: 0.9,
+    zoom: { value: 0.9, play: [0.7, 1.2] },
     levels: [
       level('root', {
         scale: 0.55,
-        turn: 45,
+        turn: { value: 45, play: [30, 60] },
         variants: [
           {
             share: 0.5,
@@ -675,9 +697,9 @@ export const LOOKS: Scene[] = [
     ],
     line: 'smooth',
     width: { value: 0.03, spread: -0.012 },
-    falloff: 1.5,
+    falloff: { value: 1.5, play: [1.1, 1.8] },
     palette: 'ember',
-    radius: 0.25,
+    radius: { value: 0.25, play: [0.1, 0.5] },
     modulators: [
       mod('bond', 'cos', 16, [['levels[wall].lattice.e2[0]', 0.25]], { phase: 0.5 }),
       mod('stretch', 'tri', 22, [['levels[course].lattice.e2[1]', 0.2]]),
@@ -725,8 +747,8 @@ export const LOOKS: Scene[] = [
       level('lace', { scale: 2.6, turn: 30, e2: HEX, shape: star(6, 2, 0.42, { twist: 30 }), at: 0.4 }),
       level('seed', { scale: R3, turn: 30, e2: HEX, shape: star(6, 4, 0.4), at: 0.7 }),
     ],
-    rings: 2,
-    drift: 0.3,
+    rings: { value: 2, play: [1, 4] },
+    drift: { value: 0.3, play: [0.1, 0.6] },
     radialWeight: 0.15,
     width: { value: 0.004, spread: 0.004 },
     palette: 'dusk',
@@ -753,10 +775,10 @@ export const LOOKS: Scene[] = [
       }),
       level('inner', { scale: R3, turn: 30, e2: HEX, shape: star(6, 3, 0.4), at: 0.5 }),
     ],
-    rings: 2.5,
+    rings: { value: 2.5, play: [1, 4] },
     drift: 0.4,
     width: { value: 0.006, spread: 0.002 },
-    falloff: 1.2,
+    falloff: { value: 1.2, play: [0.9, 1.5] },
     palette: 'rainbow',
     radius: 0,
     modulators: [
@@ -812,12 +834,12 @@ export const LOOKS: Scene[] = [
       level('weave', { scale: R3, turn: 30, e2: HEX, by: 'hash', cellTurn: 30, shape: star(3, 2, 0.5), at: 0.5 }),
     ],
     rings: 2,
-    drift: 0.3,
+    drift: { value: 0.3, play: [0.1, 0.6] },
     radialWeight: 0.2,
     width: { value: 0.005, spread: 0.003 },
     falloff: 1.3,
     palette: 'ice',
-    radius: 0.3,
+    radius: { value: 0.3, play: [0.1, 0.6] },
     modulators: [
       mod('sway', 'cos', 32, [['levels[tiles].cell.turn', 15]]),
       mod('weave', 'tri', 27, [['levels[weave].cell.turn', 15]], { phase: 0.5 }),
@@ -885,9 +907,9 @@ export const LOOKS: Scene[] = [
       level('glass', { scale: 2.4, lattice: 'triangle', e2: HEX, by: 'parity', cellTurn: 60, shape: star(3, 2, 0.2) }),
     ],
     width: { value: 0.004, spread: 0.002 },
-    falloff: 1.1,
+    falloff: { value: 1.1, play: [0.8, 1.4] },
     palette: 'ember',
-    radius: 0.35,
+    radius: { value: 0.35, play: [0.15, 0.6] },
     modulators: [
       mod('turn', 'cos', 45, [['levels[rose].cell.turn', 20]]),
       mod('reach', 'cos', 27, [['levels[tracery].lattice.e2[1]', 0.15]]),
@@ -917,8 +939,8 @@ export const LOOKS: Scene[] = [
         at: 0.5,
       }),
     ],
-    rings: 2,
-    drift: 0.6,
+    rings: { value: 2, play: [1, 4] },
+    drift: { value: 0.6, play: [0.3, 0.9] },
     width: 0.005,
     palette: 'dusk',
     radius: 0,
@@ -930,3 +952,76 @@ export const LOOKS: Scene[] = [
     ],
   }),
 ]
+
+// The built-in bank: every look and preset above, the Tapestries in a ring and the lattices in another, each preset
+// beside its look, and each remix and lattice linked to the looks it draws on.
+const named = (start: string) => LOOKS.find((l) => l.name.startsWith(start))!.name
+const T = (n: string) => named(`Tapestry ${n} `)
+const remix = (n: string) => named(`Remix - ${n}`)
+const lattice = (n: string) => named(`Lattice - ${n}`)
+const ring = ['1', '2', '3', '4', '5', '6', '7', '8', '7b'].map(T)
+const lattices = [
+  'Rhombic walk',
+  'Brick bond',
+  'Triangle gears',
+  'Mandala',
+  'Endless zoom',
+  'Kaleidoscope',
+  'Truchet',
+  'Organic cells',
+].map(lattice)
+export const BANK: Bank = {
+  scenes: LOOKS.flatMap((l) => [l.name, ...l.presets.map((p) => entryName(l.name, p.name))]),
+  links: [
+    ...[ring, lattices].flatMap((r) => r.map((name, i): [string, string] => [name, r[(i + 1) % r.length]])),
+    ...LOOKS.flatMap((l) => {
+      const presets = l.presets.map((p) => entryName(l.name, p.name))
+      return presets.flatMap((p, i): [string, string][] =>
+        i
+          ? [
+              [l.name, p],
+              [presets[i - 1], p],
+            ]
+          : [[l.name, p]],
+      )
+    }),
+    [remix('Square into hex'), T('1')],
+    [remix('Square into hex'), T('7')],
+    [remix('Star ladder'), T('2')],
+    [remix('Star ladder'), T('3')],
+    [remix('Pinwheel crosses'), T('6')],
+    [remix('Pinwheel crosses'), T('8')],
+    [remix('Swirled lattice'), T('5')],
+    [remix('Swirled lattice'), T('7b')],
+    [remix('Branching cells'), T('4')],
+    [remix('Branching cells'), remix('Square into hex')],
+    [remix('Square to hex'), T('7')],
+    [remix('Square to hex'), remix('Breathing lattice')],
+    [entryName(remix('Square to hex'), 'Square'), T('1')],
+    [entryName(remix('Square to hex'), 'Hex'), T('7')],
+    [remix('Breathing lattice'), T('7b')],
+    [remix('Breathing lattice'), T('1')],
+    [lattice('Rhombic walk'), remix('Square to hex')],
+    [lattice('Brick bond'), T('1')],
+    [lattice('Triangle gears'), T('7')],
+    [lattice('Mandala'), T('4')],
+    [lattice('Endless zoom'), T('5')],
+    [lattice('Kaleidoscope'), T('6')],
+    [lattice('Truchet'), T('8')],
+    [lattice('Organic cells'), remix('Branching cells')],
+    [remix('Rose window'), lattice('Mandala')],
+    [remix('Rose window'), lattice('Kaleidoscope')],
+    [remix('Spiral Truchet'), lattice('Truchet')],
+    [remix('Spiral Truchet'), lattice('Endless zoom')],
+  ],
+  autopilot: {
+    // a keyframe every 2 beats, as long as a change takes: it never rests, passing through each on its curve
+    on: true,
+    every: 2,
+    busy: 0.35,
+    change: 0.25,
+    wander: 0.15,
+    edge: { seconds: 2, stagger: 0.4, deepFirst: false },
+  },
+  moods: [],
+}

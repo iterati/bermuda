@@ -784,3 +784,119 @@ kbd {
 .midi-buttons select {
   width: 100%;
 }
+
+/* the bank: its entries round a ring, the links between them and the autopilot's handles */
+.graph {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
+  aspect-ratio: 1;
+  user-select: none;
+}
+.bank > .block-title {
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.bank .block-title .actions {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  margin-left: auto;
+}
+.graph path {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.13);
+  stroke-width: 1;
+}
+.graph path.lit {
+  stroke: rgba(127, 216, 255, 0.55);
+}
+.graph path.going {
+  stroke: var(--mod);
+  stroke-width: 2;
+}
+.graph .entry {
+  cursor: pointer;
+}
+.graph .entry circle {
+  fill: #0b0d13;
+  stroke: var(--dim);
+  stroke-width: 1.2;
+}
+.graph .entry text {
+  font-size: 9px;
+  fill: var(--dim);
+}
+.graph .entry:hover text,
+.graph .entry.near text {
+  fill: var(--text);
+}
+.graph .entry.near circle {
+  stroke: var(--accent);
+}
+.graph .entry.current circle {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+.graph .entry.current text {
+  fill: var(--accent);
+  font-weight: 700;
+}
+.graph .entry.next circle {
+  stroke: var(--mod);
+  stroke-width: 2;
+}
+.graph .entry.next text {
+  fill: var(--mod);
+}
+.hint {
+  text-align: center;
+  font-size: 10px;
+  margin-bottom: 6px;
+}
+.auto {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: center;
+}
+.auto .slide {
+  flex: 1 1 130px;
+}
+.auto .slide input {
+  flex: 1;
+  min-width: 50px;
+}
+/* Play: the picture alone, the bank in a corner over it */
+.playbar {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 340px;
+  max-height: calc(100% - 20px);
+  overflow: auto;
+  padding: 8px 10px;
+}
+.playbar .now {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+.playbar .now .dim {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.playbar .now b {
+  flex: 0 1 auto;
+  min-width: 4em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.playbar .now .mini {
+  margin-left: auto;
+}

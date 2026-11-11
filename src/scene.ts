@@ -66,10 +66,12 @@ export type Trigger = { channel: number; note: number } & TriggerTarget
 // for a fader, as a look's mappings take it).
 export type Controls = { buttons: Trigger[]; fader?: { channel: number; control: number; pickup?: true } }
 export type Edge = { seconds: number; stagger: number; deepFirst: boolean }
+// scenes: its entries, each a look's name or a look's and one of its presets' ('look / preset'); links: pairs of
+// entries, either way round; every: the autopilot's pace, in clock units between its changes
 export type Bank = {
   scenes: string[]
   links: [string, string][]
-  autopilot: { on: boolean; every: number; wander: number; edge: Edge }
+  autopilot: { on: boolean; every: number; busy: number; change: number; wander: number; edge: Edge }
   moods: Macro[]
 }
 export type Timeline = {
@@ -527,29 +529,7 @@ export function parseScene(input: unknown): Scene {
     if (m.wave === 'beat' && !m.harmonics) fail(`${at}.harmonics`, 'is missing for a beat wave')
     return m
   })
-  const macroIds = new Set<string>()
-  scene.macros = list(o.macros, 'macros', 0, 64).map((item, i) => {
-    const at = `macros[${i}]`
-    const x = obj(item, at, ['id', 'name', 'value', 'targets'])
-    const id = str(x.id, `${at}.id`)
-    if (macroIds.has(id)) fail(`${at}.id`, `${id} is used twice`)
-    macroIds.add(id)
-    return {
-      id,
-      name: str(x.name, `${at}.name`),
-      value: num(x.value, `${at}.value`, [0, 1]),
-      targets: list(x.targets, `${at}.targets`, 0, 256).map((t, j) => {
-        const p = `${at}.targets[${j}]`
-        const tt = obj(t, p, ['knob', 'from', 'to'])
-        const knobAt = address(scene, tt.knob, `${p}.knob`)
-        return {
-          knob: knobAt,
-          from: num(tt.from, `${p}.from`, hardRange(knobAt)),
-          to: num(tt.to, `${p}.to`, hardRange(knobAt)),
-        }
-      }),
-    }
-  })
+  scene.macros = macros(o.macros, 'macros', (v, path) => address(scene, v, path))
   scene.presets = list(o.presets, 'presets', 0, 256).map((item, i) => {
     const at = `presets[${i}]`
     const x = obj(item, at, ['name', 'values'])
@@ -570,7 +550,7 @@ export function parseScene(input: unknown): Scene {
       if ((x.knob === undefined) === (x.macro === undefined)) fail(at, 'must name one knob or one macro')
       if (x.knob !== undefined) return { channel, control, ...pickup, knob: address(scene, x.knob, `${at}.knob`) }
       const macro = str(x.macro, `${at}.macro`)
-      if (!macroIds.has(macro)) fail(`${at}.macro`, `${macro} names no macro`)
+      if (!scene.macros.some((m) => m.id === macro)) fail(`${at}.macro`, `${macro} names no macro`)
       return { channel, control, ...pickup, macro }
     })
   }
@@ -579,6 +559,33 @@ export function parseScene(input: unknown): Scene {
     scene.loop = { seconds: num(loop.seconds, 'loop.seconds', [0.1, 3600]) }
   }
   return scene
+}
+
+// A list of macros, each target's knob read by address (which refuses one that names no knob).
+function macros(v: unknown, path: string, address: (v: unknown, path: string) => Address): Macro[] {
+  const ids = new Set<string>()
+  return list(v, path, 0, 64).map((item, i) => {
+    const at = `${path}[${i}]`
+    const x = obj(item, at, ['id', 'name', 'value', 'targets'])
+    const id = str(x.id, `${at}.id`)
+    if (ids.has(id)) fail(`${at}.id`, `${id} is used twice`)
+    ids.add(id)
+    return {
+      id,
+      name: str(x.name, `${at}.name`),
+      value: num(x.value, `${at}.value`, [0, 1]),
+      targets: list(x.targets, `${at}.targets`, 0, 256).map((t, j) => {
+        const p = `${at}.targets[${j}]`
+        const tt = obj(t, p, ['knob', 'from', 'to'])
+        const knobAt = address(tt.knob, `${p}.knob`)
+        return {
+          knob: knobAt,
+          from: num(tt.from, `${p}.from`, hardRange(knobAt)),
+          to: num(tt.to, `${p}.to`, hardRange(knobAt)),
+        }
+      }),
+    }
+  })
 }
 
 function edge(v: unknown, path: string): Edge {
@@ -603,4 +610,47 @@ export function parseFader(input: unknown): Fader {
     }
   }
   return { a: side(o.a, 'a'), b: side(o.b, 'b'), at: num(o.at, 'at', [0, 1]), edge: edge(o.edge, 'edge') }
+}
+
+// Parse a bank's JSON. Its entries are names, checked against the looks where it loads; a mood's targets are
+// addresses of any scene's knobs, so each is checked only for naming a knob kind.
+export function parseBank(input: unknown): Bank {
+  const v = typeof input === 'string' ? (JSON.parse(input) as unknown) : input
+  const o = obj(v, '', ['scenes', 'links', 'autopilot', 'moods'])
+  const scenes = list(o.scenes, 'scenes', 0, 256).map((s, i) => str(s, `scenes[${i}]`))
+  scenes.forEach((s, i) => {
+    if (scenes.indexOf(s) < i) fail(`scenes[${i}]`, `${s} is in the bank twice`)
+  })
+  const seen = new Set<string>()
+  const links = list(o.links, 'links', 0, 4096).map((l, i) =>
+    pair(l, `links[${i}]`, (s, at) => {
+      const name = str(s, at)
+      if (!scenes.includes(name)) fail(at, `${name} is not in the bank`)
+      return name
+    }),
+  )
+  links.forEach(([a, b], i) => {
+    if (a === b) fail(`links[${i}]`, `links ${a} to itself`)
+    const key = JSON.stringify([a, b].sort())
+    if (seen.has(key)) fail(`links[${i}]`, `${a} and ${b} are linked twice`)
+    seen.add(key)
+  })
+  const auto = obj(o.autopilot, 'autopilot', ['on', 'every', 'busy', 'change', 'wander', 'edge'])
+  return {
+    scenes,
+    links,
+    autopilot: {
+      on: bool(auto.on, 'autopilot.on'),
+      every: num(auto.every, 'autopilot.every', [0.25, 1024]),
+      busy: num(auto.busy, 'autopilot.busy', [0, 1]),
+      change: num(auto.change, 'autopilot.change', [0, 1]),
+      wander: num(auto.wander, 'autopilot.wander', [0, 1]),
+      edge: edge(auto.edge, 'autopilot.edge'),
+    },
+    moods: macros(o.moods, 'moods', (a, path) => {
+      const knob = str(a, path)
+      if (!HARD[kindOf(knob)]) fail(path, `${knob} names no knob kind`)
+      return knob
+    }),
+  }
 }

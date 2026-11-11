@@ -1,6 +1,7 @@
 // The one shader compiles in WebGL2 (headless Chrome), every look and preset renders finite and not blank, a morph
 // between two presets is finite and not blank at its middle and lands on each end exactly, and a collapsed level
-// draws as if it were gone, a swap draws what it swapped, and a loop's first and last frames draw the same.
+// draws as if it were gone, a swap draws what it swapped, a loop's first and last frames draw the same, and the
+// frames of Play's transitions along an autopilot walk are finite and not blank.
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
@@ -8,9 +9,10 @@ import { build, type Rollup } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { findLevel, removeLevel, setLattice } from './edit'
 import { snapLoop } from './loop'
-import { level, LOOKS, scene, star } from './looks'
-import { morph } from './morph'
+import { BANK, level, LOOKS, scene, star } from './looks'
+import { morph, smooth } from './morph'
 import { advance, applyPreset, newLive, update } from './motion'
+import { bend, bendOf, entryScene, step, tangent, valuesOf, type Keyframe } from './play'
 import type { Toward } from './render'
 import { CELLS, LATTICES, type Edge, type Scene } from './scene'
 
@@ -248,5 +250,35 @@ describe('a loop', () => {
     for (let i = 1; i < 100; i++) advance(s, live, 0.1, 97)
     const last = advance(s, live, 0.1, 97)
     expect(furthest(await pixels(last, live.drift, live.colour), want)).toBeLessThan(1e-4)
+  })
+})
+
+describe("Play's transitions", () => {
+  // an autopilot walk of the built-in bank, the same each run
+  let seed = 11
+  const random = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646
+  const walk: Keyframe[] = [{ entry: BANK.scenes[0], scene: entryScene(LOOKS, BANK.scenes[0])! }]
+  while (walk.length < 9) walk.push(step(BANK, LOOKS, walk[walk.length - 1], random)!)
+  const legs = walk.slice(1, -1).map((to, i) => ({
+    name: `${walk[i].entry} into ${to.entry}`,
+    before: walk[i - 1] ?? walk[i],
+    from: walk[i],
+    to,
+    after: walk[i + 2],
+  }))
+
+  it.each(legs)('$name is finite and not blank through its curve', async ({ before, from, to, after }) => {
+    const [vb, vf, vt, va] = [before, from, to, after].map((k) => valuesOf(k.scene))
+    const curve = bendOf(from.scene, to.scene, tangent(vb, vt), tangent(vf, va))
+    for (const t of [0.25, 0.5, 0.75]) {
+      const [la, lb] = [newLive(), newLive()]
+      const [a, b] = [advance(from.scene, la, 7.3 + 2 * t, 60), advance(to.scene, lb, 2 * t, 60)]
+      const { scene, toward } = morph(a, b, smooth(0, 1, t), BANK.autopilot.edge, lb)
+      bend(scene, curve, t)
+      const { finite, mean, spread } = await shoot(scene, la.drift, la.colour, toward)
+      expect(finite, `at ${t}`).toBe(true)
+      expect(mean, `mean at ${t}`).toBeGreaterThan(0.01)
+      expect(spread, `spread at ${t}`).toBeGreaterThan(0.01)
+    }
   })
 })

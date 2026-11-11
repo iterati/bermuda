@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { LOOKS } from './looks'
+import { BANK, LOOKS } from './looks'
 import { capturePreset } from './motion'
-import { kindOf, knobsOf, parseFader, parseScene, resolve, type Fader, type Scene } from './scene'
+import { kindOf, knobsOf, parseBank, parseFader, parseScene, resolve, type Bank, type Fader, type Scene } from './scene'
 
 const broken = (fn: (s: Record<string, unknown> & Scene) => void) => {
   const s = structuredClone(LOOKS[0]) as Record<string, unknown> & Scene
@@ -63,6 +63,58 @@ describe('a fader pair as JSON', () => {
     const f = pair()
     breakIt(f)
     expect(() => parseFader(JSON.stringify(f))).toThrow(message)
+  })
+})
+
+describe('a bank as JSON', () => {
+  const bank = (): Bank => ({
+    ...structuredClone(BANK),
+    moods: [
+      {
+        id: 'dark',
+        name: 'Dark to light',
+        value: 0.25,
+        targets: [{ knob: 'palette.contrast', from: 0.6, to: 1.4 }],
+      },
+    ],
+  })
+
+  it('round-trips with its entries, links, autopilot and moods', () => {
+    const b = bank()
+    expect(parseBank(JSON.stringify(b))).toEqual(b)
+    expect(parseBank(JSON.stringify(BANK))).toEqual(BANK)
+  })
+
+  it.each([
+    ['an entry twice', (b: Bank) => b.scenes.push(b.scenes[0]), /^scenes\[\d+\]: .* is in the bank twice/],
+    ['a link to an entry not in it', (b: Bank) => (b.links[0][1] = 'nowhere'), /^links\[0\]\[1\]: nowhere is not in/],
+    ['an entry linked to itself', (b: Bank) => (b.links[0][1] = b.links[0][0]), /^links\[0\]: links .* to itself/],
+    [
+      'a link made twice, either way round',
+      (b: Bank) => b.links.push([b.links[0][1], b.links[0][0]]),
+      /^links\[\d+\]: .* linked twice/,
+    ],
+    ['a busy off its range', (b: Bank) => (b.autopilot.busy = 2), /^autopilot\.busy: 2 is outside/],
+    [
+      'a missing change',
+      (b: Bank) => delete (b.autopilot as Partial<Bank['autopilot']>).change,
+      /^autopilot\.change: is missing/,
+    ],
+    ['a broken edge', (b: Bank) => (b.autopilot.edge.seconds = -1), /^autopilot\.edge\.seconds: -1 is outside/],
+    [
+      'a mood whose knob is no kind',
+      (b: Bank) => (b.moods[0].targets[0].knob = 'palette.nope'),
+      /^moods\[0\]\.targets\[0\]\.knob: palette\.nope names no knob kind/,
+    ],
+    [
+      "a mood off its knob kind's range",
+      (b: Bank) => (b.moods[0].targets[0].to = 9),
+      /^moods\[0\]\.targets\[0\]\.to: 9 is outside/,
+    ],
+  ])('refuses %s', (_, breakIt, message) => {
+    const b = bank()
+    breakIt(b)
+    expect(() => parseBank(JSON.stringify(b))).toThrow(message)
   })
 })
 
