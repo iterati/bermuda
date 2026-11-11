@@ -12,11 +12,16 @@ function frames(look: Scene, bpm: number, seconds: number, warm = 0) {
   const steps = Math.round(seconds / dt)
   const s = snapLoop(look, bpm)
   const live = newLive()
-  const shots: { values: number[]; drift: number; colour: number }[] = []
+  const shots: { values: number[]; drift: number; colour: number; crawl: number }[] = []
   for (let i = 1; i <= warm + steps + 1; i++) {
     const frame = advance(s, live, dt, bpm)
     if (i === warm + 1 || i === warm + steps + 1)
-      shots.push({ values: knobsOf(frame).map((k) => k.knob.value), drift: live.drift, colour: live.colour })
+      shots.push({
+        values: knobsOf(frame).map((k) => k.knob.value),
+        drift: live.drift,
+        colour: live.colour,
+        crawl: live.crawl,
+      })
   }
   return shots
 }
@@ -25,6 +30,7 @@ function matches([first, last]: ReturnType<typeof frames>) {
   last.values.forEach((v, i) => expect(v).toBeCloseTo(first.values[i], 6))
   expect(turnsApart(last.drift, first.drift, Math.PI)).toBeLessThan(1e-6)
   expect(turnsApart(last.colour, first.colour, 1)).toBeLessThan(1e-6)
+  expect(turnsApart(last.crawl, first.crawl, 1)).toBeLessThan(1e-6)
 }
 
 // a glided modulator starts on its wave and settles behind it, so its look loops from its second loop on
@@ -82,5 +88,15 @@ describe('a loop', () => {
     expect(s.modulators.at(-1)!.targets[0].depth).toBe(180)
     expect(s.palette.time.value).toBeCloseTo(0.1, 9)
     expect((s.contour.drift.value * 10) / Math.PI).toBeCloseTo(1, 9)
+  })
+
+  it("makes the dots' crawl whole dots over the loop", () => {
+    const look = update(LOOKS[0], (d) => {
+      d.loop = { seconds: 10 }
+      d.line.kind = 'dots'
+      d.line.dots = { count: { value: 12 }, size: { value: 0.3 }, crawl: { value: 0.37 } }
+    })
+    expect(snapLoop(look, 60).line.dots!.crawl.value).toBeCloseTo(0.4, 9)
+    matches(frames(look, 60, 10))
   })
 })

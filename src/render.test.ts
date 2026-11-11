@@ -1,7 +1,9 @@
 // The one shader compiles in WebGL2 (headless Chrome), every look and preset renders finite and not blank, a morph
 // between two presets is finite and not blank at its middle and lands on each end exactly, and a collapsed level
 // draws as if it were gone, a swap draws what it swapped, a loop's first and last frames draw the same, and the
-// frames of Play's transitions along an autopilot walk are finite and not blank.
+// frames of Play's transitions along an autopilot walk are finite and not blank. Every shape draws alone and
+// joined, screen lines hold their width through a warp, spill draws only what reaches over, and dots fade from one
+// count to the next and crawl.
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
@@ -9,12 +11,12 @@ import { build, type Rollup } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { findLevel, removeLevel, setLattice } from './edit'
 import { snapLoop } from './loop'
-import { BANK, level, LOOKS, scene, star } from './looks'
+import { BANK, join, level, LOOKS, scene, shape, star } from './looks'
 import { morph, smooth } from './morph'
-import { advance, applyPreset, newLive, update } from './motion'
+import { advance, applyPreset, newLive, update, type Live } from './motion'
 import { bend, bendOf, entryScene, step, tangent, valuesOf, type Keyframe } from './play'
 import type { Toward } from './render'
-import { CELLS, LATTICES, type Edge, type Scene } from './scene'
+import { CELLS, LATTICES, SHAPES, type Edge, type Scene, type ShapeKind, type VariationKind } from './scene'
 
 declare global {
   interface Window {
@@ -49,10 +51,12 @@ beforeAll(async () => {
 
 afterAll(() => browser?.close())
 
+type Phases = Pick<Live, 'drift' | 'colour' | 'crawl'>
+
 // Draw a live scene into a float framebuffer and read back its pixels.
-const pixels = (live: Scene, drift: number, colour: number, toward?: Toward) =>
+const pixels = (live: Scene, { drift, colour, crawl }: Phases, toward?: Toward) =>
   page.evaluate(
-    (live, drift, colour, toward) => {
+    (live, phases, toward) => {
       const canvas = document.querySelector('canvas')!
       const renderer = (window.renderer ??= window.Bermuda.createRenderer(canvas))
       const { gl } = renderer
@@ -64,20 +68,19 @@ const pixels = (live: Scene, drift: number, colour: number, toward?: Toward) =>
       gl.bindFramebuffer(gl.FRAMEBUFFER, fb)
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, target, 0)
       gl.activeTexture(gl.TEXTURE0)
-      renderer.draw(live, { drift, colour }, toward)
+      renderer.draw(live, phases, toward)
       const px = new Float32Array(canvas.width * canvas.height * 4)
       gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.FLOAT, px)
       return Array.from(px)
     },
     live,
-    drift,
-    colour,
+    { drift, colour, crawl },
     toward,
   )
 
 // the pixels' stats: all finite, their mean lightness and its spread
-async function shoot(live: Scene, drift: number, colour: number, toward?: Toward) {
-  const px = await pixels(live, drift, colour, toward)
+async function shoot(live: Scene, phases: Phases, toward?: Toward) {
+  const px = await pixels(live, phases, toward)
   let finite = true
   let sum = 0
   let sq = 0
@@ -123,7 +126,7 @@ describe('the one shader', () => {
     for (const t of [0, 7.3, 41]) {
       const live = newLive()
       const frame = advance(scene, live, t, 60)
-      const { finite, mean, spread } = await shoot(frame, live.drift, live.colour)
+      const { finite, mean, spread } = await shoot(frame, live)
       expect(finite, `at ${t} s`).toBe(true)
       expect(mean, `mean at ${t} s`).toBeGreaterThan(0.01)
       expect(spread, `spread at ${t} s`).toBeGreaterThan(0.01)
@@ -146,7 +149,7 @@ describe('the one shader', () => {
   it.each(kinds)('renders a $kind lattice by $by finite and not blank', async ({ scene }) => {
     for (const t of [0, 7.3]) {
       const live = newLive()
-      const { finite, mean, spread } = await shoot(advance(scene, live, t, 60), live.drift, live.colour)
+      const { finite, mean, spread } = await shoot(advance(scene, live, t, 60), live)
       expect(finite, `at ${t} s`).toBe(true)
       expect(mean, `mean at ${t} s`).toBeGreaterThan(0.01)
       expect(spread, `spread at ${t} s`).toBeGreaterThan(0.01)
@@ -156,7 +159,7 @@ describe('the one shader', () => {
   it('draws voronoi at jitter 0 as the oblique pad, so the two swap without a jump', async () => {
     const oblique = kinds.find((k) => k.kind === 'oblique' && k.by === 'parity')!.scene
     const voronoi = update(oblique, (d) => ['a', 'b'].forEach((id) => setLattice(d, id, 'voronoi')))
-    expect(furthest(await pixels(voronoi, 0, 0), await pixels(oblique, 0, 0))).toBeLessThan(1e-4)
+    expect(furthest(await pixels(voronoi, newLive()), await pixels(oblique, newLive()))).toBeLessThan(1e-4)
   })
 
   it("zooms log-polar by one of its pad's vectors back onto the same picture, so the zoom loops", async () => {
@@ -169,7 +172,10 @@ describe('the one shader', () => {
         rings: 2,
       })
     // e^(√3 · 2π / 9): the shift (0, √3) along log r, the pad's vector (-1, 2)
-    const [a, b] = [await pixels(at(1), 0, 0), await pixels(at(Math.exp((Math.sqrt(3) * 2 * Math.PI) / 9)), 0, 0)]
+    const [a, b] = [
+      await pixels(at(1), newLive()),
+      await pixels(at(Math.exp((Math.sqrt(3) * 2 * Math.PI) / 9)), newLive()),
+    ]
     expect(furthest(a, b)).toBeLessThan(1e-3)
   })
 })
@@ -190,7 +196,7 @@ describe('the morph', () => {
   it.each(pairs)('%s is finite and not blank at its middle', async (_, a, b) => {
     for (const edge of [staggered, { ...staggered, stagger: 1, deepFirst: true }]) {
       const { scene, toward, la } = morphAt(a, b, 0.5, edge, 7.3)
-      const { finite, mean, spread } = await shoot(scene, la.drift, la.colour, toward)
+      const { finite, mean, spread } = await shoot(scene, la, toward)
       expect(finite).toBe(true)
       expect(mean).toBeGreaterThan(0.01)
       expect(spread).toBeGreaterThan(0.01)
@@ -204,6 +210,9 @@ describe('the morph', () => {
     ['Tapestry 8 into Branching cells', look('Tapestry 8'), look('Remix - Branching cells')],
     ['Square into hex into its reorder', look('Remix - Square into hex'), reordered],
     ['Tapestry 2 into Tapestry 7b', look('Tapestry 2'), look('Tapestry 7b')],
+    ['Marching ants into Metaballs', look('Shapes - Marching ants'), look('Shapes - Metaballs')],
+    ["iq's garden into Stairs and S", look("Shapes - iq's garden"), look('Shapes - Stairs')],
+    ['Onion skins into Through the sphere', look('Shapes - Onion skins'), look('Shapes - Through the sphere')],
   ]
   it.each(ends)('%s lands on A and B exactly at its ends', async (_, a, b) => {
     for (const [x, end] of [
@@ -212,8 +221,8 @@ describe('the morph', () => {
     ] as const) {
       const m = morphAt(a, b, x, staggered, 7.3)
       const [scene, live] = end === 'a' ? [m.sa, m.la] : [m.sb, m.lb]
-      const want = await pixels(scene, live.drift, live.colour)
-      expect(furthest(await pixels(m.scene, m.la.drift, m.la.colour, m.toward), want), `at ${x}`).toBeLessThan(1e-4)
+      const want = await pixels(scene, live)
+      expect(furthest(await pixels(m.scene, m.la, m.toward), want), `at ${x}`).toBeLessThan(1e-4)
     }
   })
 
@@ -221,8 +230,8 @@ describe('the morph', () => {
     const edge: Edge = { seconds: 2, stagger: 1, deepFirst: false }
     const there = morphAt(a, b, 0.4, edge, 7.3)
     const back = morph(there.sb, there.sa, 0.6, { ...edge, deepFirst: true }, there.la)
-    const want = await pixels(there.scene, there.la.drift, there.la.colour, there.toward)
-    expect(furthest(await pixels(back.scene, there.lb.drift, there.lb.colour, back.toward), want)).toBeLessThan(1e-3)
+    const want = await pixels(there.scene, there.la, there.toward)
+    expect(furthest(await pixels(back.scene, there.lb, back.toward), want)).toBeLessThan(1e-3)
   })
 
   it.each([
@@ -236,8 +245,73 @@ describe('the morph', () => {
     }
     const collapsed = at(update(look(name), (d) => (findLevel(d, id).level.weight.value = 0)))
     const gone = at(update(look(name), (d) => removeLevel(d, id)))
-    const x = await pixels(collapsed.scene, collapsed.live.drift, collapsed.live.colour)
-    expect(furthest(x, await pixels(gone.scene, gone.live.drift, gone.live.colour))).toBeLessThan(1e-4)
+    const x = await pixels(collapsed.scene, collapsed.live)
+    expect(furthest(x, await pixels(gone.scene, gone.live))).toBeLessThan(1e-4)
+  })
+})
+
+describe('the shapes and lines', () => {
+  const still = { drift: 0, colour: 0, crawl: 0 }
+  const drawn = (s: Scene, phases: Phases = still) => pixels(advance(s, newLive(), 0, 60), phases)
+  const of = (kind: ShapeKind, r: number) => (kind === 'star' ? star(5, 2.5, r) : shape(kind, r, 0.5, { n: 5 }))
+
+  it.each(SHAPES)('a %s draws finite and not blank, alone and joined into a star', async (kind) => {
+    const s = scene({
+      name: kind,
+      zoom: 1.4,
+      levels: [
+        level('alone', { scale: 0.8, shape: of(kind, 0.4) }),
+        level('joined', { scale: 2, shape: star(6, 2, 0.25, { join: join(of(kind, 0.2), [0.15, 0], 0.08) }) }),
+      ],
+      line: 'smooth',
+      width: 0.01,
+    })
+    const { finite, mean, spread } = await shoot(s, still)
+    expect(finite).toBe(true)
+    expect(mean).toBeGreaterThan(0.01)
+    expect(spread).toBeGreaterThan(0.01)
+  })
+
+  it("in screen units holds a line's width through a variation's stretch as through an affine scale", async () => {
+    const lines = (s: Parameters<typeof level>[1]) =>
+      scene({ name: 's', levels: [level('a', { shape: star(6, 2, 0.4), ...s })], units: 'screen', width: 0.01 })
+    const scaled = await drawn(lines({ scale: 2 }))
+    // the fisheye's touch makes the shader measure the stretch rather than read the linear weight
+    const stretched: [VariationKind, number][][] = [
+      [['linear', 2]],
+      [
+        ['linear', 2],
+        ['fisheye', 1e-7],
+      ],
+    ]
+    for (const vary of stretched) expect(furthest(await drawn(lines({ vary })), scaled)).toBeLessThan(0.02)
+  })
+
+  it('spill draws what the cells round a cell reach into it, and nothing where they do not reach', async () => {
+    const hexes = (r: number, spill?: number) =>
+      scene({ name: 's', levels: [level('a', { shape: star(6, 2, r), spill })], line: 'smooth', width: 0.01 })
+    expect(furthest(await drawn(hexes(0.3, 1)), await drawn(hexes(0.3)))).toBeLessThan(1e-4)
+    expect(furthest(await drawn(hexes(0.8, 1)), await drawn(hexes(0.8)))).toBeGreaterThan(0.1)
+  })
+
+  it('dots fade from one whole count to the next, and crawl round their outlines', async () => {
+    const dots = (count: number) =>
+      scene({
+        name: 's',
+        levels: [level('a', { shape: shape('box', 0.35, 0.8) })],
+        line: 'dots',
+        dots: { count, size: 0.3, crawl: 1 },
+        width: 0.02,
+        gamma: 1,
+      })
+    const [twelve, half, thirteen] = await Promise.all([12, 12.5, 13].map((n) => drawn(dots(n))))
+    expect(
+      furthest(
+        half,
+        twelve.map((v, i) => (v + thirteen[i]) / 2),
+      ),
+    ).toBeLessThan(1e-4)
+    expect(furthest(await drawn(dots(12), { ...still, crawl: 0.5 }), twelve)).toBeGreaterThan(0.1)
   })
 })
 
@@ -246,10 +320,10 @@ describe('a loop', () => {
     const s = snapLoop({ ...look(name), loop: { seconds: 10 } }, 97)
     const live = newLive()
     const first = advance(s, live, 0.1, 97)
-    const want = await pixels(first, live.drift, live.colour)
+    const want = await pixels(first, live)
     for (let i = 1; i < 100; i++) advance(s, live, 0.1, 97)
     const last = advance(s, live, 0.1, 97)
-    expect(furthest(await pixels(last, live.drift, live.colour), want)).toBeLessThan(1e-4)
+    expect(furthest(await pixels(last, live), want)).toBeLessThan(1e-4)
   })
 })
 
@@ -275,7 +349,7 @@ describe("Play's transitions", () => {
       const [a, b] = [advance(from.scene, la, 7.3 + 2 * t, 60), advance(to.scene, lb, 2 * t, 60)]
       const { scene, toward } = morph(a, b, smooth(0, 1, t), BANK.autopilot.edge, lb)
       bend(scene, curve, t)
-      const { finite, mean, spread } = await shoot(scene, la.drift, la.colour, toward)
+      const { finite, mean, spread } = await shoot(scene, la, toward)
       expect(finite, `at ${t}`).toBe(true)
       expect(mean, `mean at ${t}`).toBeGreaterThan(0.01)
       expect(spread, `spread at ${t}`).toBeGreaterThan(0.01)

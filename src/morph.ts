@@ -1,5 +1,6 @@
 // The morph from scene A to scene B at fader x, made each frame from the two live scenes, each on its own clock.
-// Every knob morphs; star n and the other switches swap inside a dip where they show nothing. Levels pair by id
+// Every knob morphs; star n, the shape's kind and the other switches swap inside a dip where they show nothing, and a
+// knob one side lacks morphs from the value that draws as if it were not there. Levels pair by id
 // and depth; a level weight collapses what has no pair and grows what is new (padding at the deep end; a reorder
 // collapses the level where it was, then grows it where it goes). Each depth runs its own window of the fader,
 // staggered by the edge, and depth-indexed values stay with the depth (the shader counts depth by weight).
@@ -11,6 +12,7 @@ import {
   clamp,
   depthOf,
   hardRange,
+  SPILLS,
   VARIATIONS,
   variationWeight,
   type Edge,
@@ -51,6 +53,10 @@ function vector(a: [Knob, Knob], b: [Knob, Knob], t: number): [Knob, Knob] {
     { ...knob(a[1], b[1], t), value: clamp(l * Math.sin(th), hardRange('levels[].lattice.e2[1]')) },
   ]
 }
+
+// a knob either side may lack, from none (the value that draws as if it were not there); undefined if both lack it
+const either = (a: Knob | undefined, b: Knob | undefined, none: number, t: number) =>
+  a || b ? knob(a ?? { value: none }, b ?? { value: none }, t) : undefined
 
 // The part of the fader depth k of n morphs over: with stagger 0 every depth takes the whole fader, with 1 each
 // takes its own nth in turn, the shallowest first unless the edge runs deep first.
@@ -122,17 +128,37 @@ function align(as: Level[], bs: Level[]): Slot[] {
   return slots
 }
 
-// star n is whole: it swaps inside a circle dip, where every n draws the same circle
+// star n and the kind are whole: they swap inside a circle dip, where every n and kind draws the same circle; a star
+// has no form, so it takes the other side's; a join one side lacks is there at weight 0
 function shape(a: Shape, b: Shape, t: number): Shape {
   const round = knob(a.round, b.round, t)
-  if (a.n !== b.n) round.value = mix(round.value, 1, dip(t, 0.1))
-  return {
+  if (a.n !== b.n || (a.kind ?? 'star') !== (b.kind ?? 'star')) round.value = mix(round.value, 1, dip(t, 0.1))
+  const out: Shape = {
     n: t < 0.5 ? a.n : b.n,
     m: knob(a.m, b.m, t),
     r: knob(a.r, b.r, t),
     round,
     twist: knob(a.twist, b.twist, t),
   }
+  const kind = t < 0.5 ? a.kind : b.kind
+  if (kind) out.kind = kind
+  const form = a.form ?? b.form
+  if (form) out.form = knob(a.form ?? form, b.form ?? form, t)
+  const corner = either(a.corner, b.corner, 0, t)
+  if (corner) out.corner = corner
+  const onion = either(a.onion, b.onion, 0, t)
+  if (onion) out.onion = onion
+  if (a.join || b.join) {
+    const ja = a.join ?? { ...b.join!, weight: { value: 0 } }
+    const jb = b.join ?? { ...a.join!, weight: { value: 0 } }
+    out.join = {
+      shape: shape(ja.shape, jb.shape, t),
+      offset: [knob(ja.offset[0], jb.offset[0], t), knob(ja.offset[1], jb.offset[1], t)],
+      blend: knob(ja.blend, jb.blend, t),
+      weight: knob(ja.weight, jb.weight, t),
+    }
+  }
+  return out
 }
 
 // far: each drawn level whose far end has another id, that id and how far through its window the level is
@@ -176,6 +202,8 @@ function mixLevels(
     }
     if (voronoi) lattice.jitter = k(a.lattice.jitter ?? { value: 0 }, b.lattice.jitter ?? { value: 0 })
     if (swap.lattice.sectors !== undefined) lattice.sectors = swap.lattice.sectors
+    // spill only where the lattice can, so it drops where a swap's weight is nothing
+    const spill = SPILLS.includes(lattice.kind) ? either(a.cell.spill, b.cell.spill, 0, t) : undefined
     const level: Level = {
       id: a.id,
       weight: scaled(k(a.weight, b.weight), hidden),
@@ -193,6 +221,7 @@ function mixLevels(
         by: swap.cell.by,
         turn: scaled(k(a.cell.turn, b.cell.turn), by),
         phase: scaled(k(a.cell.phase, b.cell.phase), by),
+        ...(spill ? { spill } : {}),
       },
       variants: variants.map(({ below }, v) => {
         // a variant that is not there has no share
@@ -253,7 +282,7 @@ export function morph(
   b: Scene,
   x: number,
   edge: Edge,
-  phases: Pick<Live, 'drift' | 'colour'>,
+  phases: Pick<Live, 'drift' | 'colour' | 'crawl'>,
 ): { scene: Scene; toward: Toward } {
   const slots = align(a.levels, b.levels)
   const far = new Map<Level, { id: string; at: number }>()
@@ -299,6 +328,12 @@ export function morph(
     macros: [],
     presets: [],
   }
+  // dots one side lacks morph from the other side's, which that side does not draw
+  const dots = a.line.dots ?? b.line.dots
+  if (dots) {
+    const [da, db] = [a.line.dots ?? dots, b.line.dots ?? dots]
+    scene.line.dots = { count: k(da.count, db.count), size: k(da.size, db.size), crawl: k(da.crawl, db.crawl) }
+  }
   const toward: Toward = {
     line: b.line.kind,
     rings: [b.contour.rings.value, b.contour.rings.spread ?? 0],
@@ -308,6 +343,7 @@ export function morph(
     levels: allLevels(scene.levels).map(({ level }) => far.get(level) ?? null),
     drift: phases.drift,
     colour: phases.colour,
+    crawl: phases.crawl,
     at: x,
   }
   return { scene, toward }

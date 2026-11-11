@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { paletteAt } from './colour'
-import { level, scene, star } from './looks'
+import { join, level, scene, shape, star } from './looks'
 import { depthWindow, morph } from './morph'
 import type { Edge, Scene } from './scene'
 
 const together: Edge = { seconds: 2, stagger: 0, deepFirst: false }
-const full = (a: Scene, b: Scene, x: number, edge = together) => morph(a, b, x, edge, { drift: 0, colour: 0 })
+const full = (a: Scene, b: Scene, x: number, edge = together) => morph(a, b, x, edge, { drift: 0, colour: 0, crawl: 0 })
 const at = (a: Scene, b: Scene, x: number, edge = together) => full(a, b, x, edge).scene
 const ids = (s: Scene) => s.levels.map((l) => l.id)
 const weights = (s: Scene) => s.levels.map((l) => l.weight.value)
@@ -53,6 +53,51 @@ describe('the morph', () => {
     expect(shape(0.45)).toMatchObject({ n: 4, round: { value: 1 } })
     expect(shape(0.55)).toMatchObject({ n: 8, round: { value: 1 } })
     expect(shape(1)).toMatchObject({ n: 8, round: { value: 0 } })
+  })
+
+  it("swaps a shape's kind inside a circle dip, the star taking the other side's form", () => {
+    const a = scene({ name: 'a', levels: [level('s', { shape: star(6, 2, 0.4) })] })
+    const b = scene({ name: 'b', levels: [level('s', { shape: shape('moon', 0.4, 0.8) })] })
+    const shapeAt = (x: number) => at(a, b, x).levels[0].variants[0].shape
+    expect(shapeAt(0.05)).toMatchObject({ form: { value: 0.8 } })
+    expect(shapeAt(0.05).kind).toBeUndefined()
+    expect(shapeAt(0.05).round.value).toBeLessThan(0.1)
+    expect(shapeAt(0.45)).toMatchObject({ round: { value: 1 } })
+    expect(shapeAt(0.45).kind).toBeUndefined()
+    expect(shapeAt(0.55)).toMatchObject({ kind: 'moon', round: { value: 1 } })
+    expect(shapeAt(1)).toMatchObject({ kind: 'moon', round: { value: 0 }, form: { value: 0.8 } })
+  })
+
+  it('grows what one side lacks from what draws as if it were not there: a join, corner, onion, spill, dots', () => {
+    const a = scene({ name: 'a', levels: [level('s', { shape: star(6, 2, 0.4) })] })
+    const b = scene({
+      name: 'b',
+      levels: [
+        level('s', {
+          spill: 1,
+          shape: star(6, 2, 0.4, { corner: 0.1, onion: 0.04, join: join(star(5, 2, 0.2), [0.2, 0], 0.1) }),
+        }),
+      ],
+      line: 'dots',
+      dots: { count: 20, size: 0.5, crawl: 2 },
+    })
+    const mid = at(a, b, 0.5)
+    const s = mid.levels[0].variants[0].shape
+    expect(s.corner!.value).toBeCloseTo(0.05, 9)
+    expect(s.onion!.value).toBeCloseTo(0.02, 9)
+    expect(s.join).toMatchObject({
+      weight: { value: 0.5 },
+      blend: { value: 0.1 },
+      offset: [{ value: 0.2 }, { value: 0 }],
+    })
+    expect(mid.levels[0].cell.spill!.value).toBe(0.5)
+    // the side without dots does not draw them, so the knobs keep the other side's
+    expect(mid.line.dots).toEqual({ count: { value: 20 }, size: { value: 0.5 }, crawl: { value: 2 } })
+    expect(full(a, b, 0.5).toward.line).toBe('dots')
+    const none = at(a, a, 0.5)
+    expect(none.levels[0].variants[0].shape).toEqual(a.levels[0].variants[0].shape)
+    expect(none.levels[0].cell.spill).toBeUndefined()
+    expect(none.line.dots).toBeUndefined()
   })
 
   it('swaps parity where the cells do not turn', () => {

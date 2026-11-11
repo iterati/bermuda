@@ -2,7 +2,21 @@
 // Angles are in degrees, periods in clock units (beats), and the palette index runs 0 to 1 round the stops.
 
 export type Knob = { value: number; spread?: number; glide?: number; play?: [number, number] } // play: inside the kind's hard range
-export type Shape = { n: number; m: Knob; r: Knob; round: Knob; twist: Knob }
+export type Shape = {
+  kind?: ShapeKind // after milestone 1's shapes: absent, the star
+  n: number
+  m: Knob
+  r: Knob
+  round: Knob
+  twist: Knob
+  form?: Knob // every kind but the star has one: its own proportion, 0 to 1 (shader.ts SHAPE_GLSL)
+  corner?: Knob // iq's opRound: the outline rounded this far out, the shape shrunk by as much first
+  onion?: Knob // iq's opOnion: the outline split in two this far either side, after the join
+  join?: Join
+}
+// A second shape smooth-unioned into the first (iq's quadratic smooth minimum, blend wide), offset from the cell's
+// middle, by weight from not there (0) to all of it (1); it holds no join and no onion of its own.
+export type Join = { shape: Shape; offset: [Knob, Knob]; blend: Knob; weight: Knob }
 export type Level = {
   id: string
   link?: string
@@ -15,7 +29,7 @@ export type Level = {
     jitter?: Knob // voronoi's, and only voronoi's
     sectors?: number // polar's and logpolar's: the whole number of cells round the centre
   }
-  cell: { by: 'none' | 'parity' | 'hash' | 'ring'; turn: Knob; phase: Knob }
+  cell: { by: 'none' | 'parity' | 'hash' | 'ring'; turn: Knob; phase: Knob; spill?: Knob } // spill: after milestone 1
   variants: { share: Knob; shape: Shape; below?: Level[] }[] // below: a per-cell sub-chain
   colour: { at: Knob; speed: Knob; cellSpread: Knob }
 }
@@ -25,7 +39,13 @@ export type Scene = {
   frame: { origin: [Knob, Knob]; zoom: Knob; turn: Knob }
   levels: Level[]
   contour: { rings: Knob; drift: Knob; radialWeight: Knob }
-  line: { kind: 'glow' | 'smooth' | 'hard' | 'band'; width: Knob; falloff: Knob; units: 'cell' | 'screen' }
+  line: {
+    kind: (typeof LINES)[number]
+    width: Knob
+    falloff: Knob
+    units: 'cell' | 'screen'
+    dots?: Dots // after milestone 1's shapes, and there whenever the kind is dots
+  }
   palette: {
     stops: { at: number; lch: [Knob, Knob, Knob]; mix: 'straight' | 'short' | 'long' }[]
     hue: Knob
@@ -79,6 +99,9 @@ export type Timeline = {
   keys: { at: number; scene: string; edge: Edge }[]
   curves: { knob: Address; points: [number, number][] }[]
 }
+// Dotted lines: count dots round each outline, each size of the gap to the next along it (round dots of the line's
+// width near 0, dashes, a whole line at 1), crawling round at crawl dots a beat.
+export type Dots = { count: Knob; size: Knob; crawl: Knob }
 // The two scenes on the hand fader, where it sits and the edge it runs along: a pair kept as one file.
 export type Fader = { a: Scene; b: Scene; at: number; edge: Edge }
 
@@ -100,7 +123,35 @@ export type LatticeKind = (typeof LATTICES)[number]
 export const LATTICES = ['oblique', 'brick', 'triangle', 'polar', 'logpolar', 'fold', 'voronoi'] as const
 // the Cell step: parity turns odd cells the other way, hash turns each cell either way by its id (Truchet)
 export const CELLS = ['none', 'parity', 'hash'] as const
-export const LINES = ['glow', 'smooth', 'hard', 'band'] as const
+// the lattices whose cells are translates of each other, so a shape can spill into the cells round it
+export const SPILLS: readonly LatticeKind[] = ['oblique', 'brick', 'triangle', 'voronoi']
+export type ShapeKind = (typeof SHAPES)[number]
+// iq's 2D distance functions, each a shape module beside the star (shader.ts draws them)
+export const SHAPES = [
+  'star',
+  'box',
+  'rhombus',
+  'triangle',
+  'trapezoid',
+  'parallelogram',
+  'capsule',
+  'pie',
+  'arc',
+  'horseshoe',
+  'vesica',
+  'moon',
+  'heart',
+  'cross',
+  'roundX',
+  'blobbyCross',
+  'ellipse',
+  'cutDisk',
+  'circleWave',
+  'segment',
+  'stairs',
+  'coolS',
+] as const
+export const LINES = ['glow', 'smooth', 'hard', 'band', 'dots'] as const
 export const WAVES = ['cos', 'tri', 'beat', 'ramp', 'steps'] as const
 export const MIXES = ['straight', 'short', 'long'] as const
 // the scene's fixed parts beside its levels, each a chip of the chain: no level may take one's name
@@ -128,11 +179,25 @@ export const HARD: Record<string, [number, number]> = {
   'levels[].lattice.jitter': [0, 1],
   'levels[].cell.turn': [-180, 180],
   'levels[].cell.phase': [-1, 1],
+  'levels[].cell.spill': [0, 1],
   'levels[].variants[].share': [0, 1],
   'levels[].variants[].shape.m': [1.01, 16],
   'levels[].variants[].shape.r': [0.02, 2],
   'levels[].variants[].shape.round': [0, 1],
   'levels[].variants[].shape.twist': [-180, 180],
+  'levels[].variants[].shape.form': [0, 1],
+  'levels[].variants[].shape.corner': [0, 0.5],
+  'levels[].variants[].shape.onion': [0, 0.5],
+  'levels[].variants[].shape.join.shape.m': [1.01, 16],
+  'levels[].variants[].shape.join.shape.r': [0.02, 2],
+  'levels[].variants[].shape.join.shape.round': [0, 1],
+  'levels[].variants[].shape.join.shape.twist': [-180, 180],
+  'levels[].variants[].shape.join.shape.form': [0, 1],
+  'levels[].variants[].shape.join.shape.corner': [0, 0.5],
+  'levels[].variants[].shape.join.offset[0]': [-1, 1],
+  'levels[].variants[].shape.join.offset[1]': [-1, 1],
+  'levels[].variants[].shape.join.blend': [0, 0.5],
+  'levels[].variants[].shape.join.weight': [0, 1],
   'levels[].colour.at': [0, 1],
   'levels[].colour.speed': [0, 1],
   'levels[].colour.cellSpread': [0, 1],
@@ -141,6 +206,9 @@ export const HARD: Record<string, [number, number]> = {
   'contour.radialWeight': [-3, 3],
   'line.width': [0.0002, 0.2],
   'line.falloff': [0.3, 3],
+  'line.dots.count': [1, 64],
+  'line.dots.size': [0, 1],
+  'line.dots.crawl': [-8, 8],
   'palette.stops[].lch[0]': [0, 1],
   'palette.stops[].lch[1]': [0, 0.37],
   'palette.stops[].lch[2]': [0, 360],
@@ -160,6 +228,7 @@ export const PERIOD: Record<string, number> = {
   'levels[].cell.turn': 360,
   'levels[].cell.phase': 1,
   'levels[].variants[].shape.twist': 360,
+  'levels[].variants[].shape.join.shape.twist': 360,
   'levels[].colour.at': 1,
   'palette.stops[].lch[2]': 360,
   'palette.hue': 360,
@@ -304,17 +373,42 @@ function knob(v: unknown, path: string): Knob {
   return out
 }
 
-function shape(v: unknown, path: string): Shape {
-  const o = obj(v, path, ['n', 'm', 'r', 'round', 'twist'])
+// A shape: the star's knobs, a kind's form for every kind but the star, and corner, onion and join when given;
+// a joined shape holds no join or onion of its own.
+function shape(v: unknown, path: string, joined = false): Shape {
+  const o = obj(
+    v,
+    path,
+    ['n', 'm', 'r', 'round', 'twist'],
+    joined ? ['kind', 'form', 'corner'] : ['kind', 'form', 'corner', 'onion', 'join'],
+  )
   const n = num(o.n, `${path}.n`, STAR_N)
   if (!Number.isInteger(n)) fail(`${path}.n`, 'must be a whole number')
-  return {
+  const out: Shape = {
     n,
     m: knob(o.m, `${path}.m`),
     r: knob(o.r, `${path}.r`),
     round: knob(o.round, `${path}.round`),
     twist: knob(o.twist, `${path}.twist`),
   }
+  if (o.kind !== undefined) out.kind = oneOf(o.kind, `${path}.kind`, SHAPES)
+  if ((out.kind ?? 'star') === 'star') {
+    if (o.form !== undefined) fail(`${path}.form`, 'is not a field of a star')
+  } else if (o.form === undefined) fail(`${path}.form`, `is missing for a ${out.kind}`)
+  else out.form = knob(o.form, `${path}.form`)
+  if (o.corner !== undefined) out.corner = knob(o.corner, `${path}.corner`)
+  if (o.onion !== undefined) out.onion = knob(o.onion, `${path}.onion`)
+  if (o.join !== undefined) {
+    const at = `${path}.join`
+    const j = obj(o.join, at, ['shape', 'offset', 'blend', 'weight'])
+    out.join = {
+      shape: shape(j.shape, `${at}.shape`, true),
+      offset: pair(j.offset, `${at}.offset`, knob),
+      blend: knob(j.blend, `${at}.blend`),
+      weight: knob(j.weight, `${at}.weight`),
+    }
+  }
+  return out
 }
 
 function levelList(v: unknown, path: string, ids: Set<string>): Level[] {
@@ -370,11 +464,15 @@ function level(v: unknown, path: string, before: Level[], ids: Set<string>): Lev
     if (!Number.isInteger(sectors)) fail(`${path}.lattice.sectors`, 'must be a whole number')
     out.lattice.sectors = sectors
   } else if (lattice.sectors !== undefined) fail(`${path}.lattice.sectors`, 'is polar and logpolar only')
-  const cell = obj(o.cell, `${path}.cell`, ['by', 'turn', 'phase'])
+  const cell = obj(o.cell, `${path}.cell`, ['by', 'turn', 'phase'], ['spill'])
   out.cell = {
     by: oneOf(cell.by, `${path}.cell.by`, CELLS),
     turn: knob(cell.turn, `${path}.cell.turn`),
     phase: knob(cell.phase, `${path}.cell.phase`),
+  }
+  if (cell.spill !== undefined) {
+    if (!SPILLS.includes(kind)) fail(`${path}.cell.spill`, `is not for a ${kind} lattice`)
+    out.cell.spill = knob(cell.spill, `${path}.cell.spill`)
   }
   out.variants = list(o.variants, `${path}.variants`, 1, MAX_VARIANTS).map((item, i) => {
     const at = `${path}.variants[${i}]`
@@ -448,7 +546,7 @@ export function parseScene(input: unknown): Scene {
   const ids = new Set<string>()
   const frame = obj(o.frame, 'frame', ['origin', 'zoom', 'turn'])
   const contour = obj(o.contour, 'contour', ['rings', 'drift', 'radialWeight'])
-  const line = obj(o.line, 'line', ['kind', 'width', 'falloff', 'units'])
+  const line = obj(o.line, 'line', ['kind', 'width', 'falloff', 'units'], ['dots'])
   const palette = obj(o.palette, 'palette', ['stops', 'hue', 'contrast', 'radius', 'time'])
   const post = obj(o.post, 'post', ['aa', 'gamma'])
   const scene: Scene = {
@@ -492,6 +590,14 @@ export function parseScene(input: unknown): Scene {
     macros: [],
     presets: [],
   }
+  if (line.dots !== undefined) {
+    const dots = obj(line.dots, 'line.dots', ['count', 'size', 'crawl'])
+    scene.line.dots = {
+      count: knob(dots.count, 'line.dots.count'),
+      size: knob(dots.size, 'line.dots.size'),
+      crawl: knob(dots.crawl, 'line.dots.crawl'),
+    }
+  } else if (scene.line.kind === 'dots') fail('line.dots', 'is missing for dotted lines')
   scene.palette.stops.forEach((s, i, all) => {
     if (i > 0 && s.at <= all[i - 1].at) fail(`palette.stops[${i}].at`, 'must be above the stop before it')
   })

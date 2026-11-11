@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { BANK, LOOKS } from './looks'
+import { BANK, join, level, LOOKS, scene, shape, star } from './looks'
 import { capturePreset } from './motion'
-import { kindOf, knobsOf, parseBank, parseFader, parseScene, resolve, type Bank, type Fader, type Scene } from './scene'
+import {
+  kindOf,
+  knobsOf,
+  parseBank,
+  parseFader,
+  parseScene,
+  resolve,
+  SHAPES,
+  type Bank,
+  type Fader,
+  type Scene,
+} from './scene'
 
 const broken = (fn: (s: Record<string, unknown> & Scene) => void) => {
   const s = structuredClone(LOOKS[0]) as Record<string, unknown> & Scene
@@ -19,6 +30,24 @@ describe('a scene as JSON', () => {
     look.presets.push(capturePreset(look, 'all of it'))
     look.loop = { seconds: 60 }
     expect(parseScene(JSON.stringify(look))).toEqual(look)
+  })
+
+  // every shape kind, alone and joined into a star, with corner, onion and spill, under a dotted line
+  it.each(SHAPES.filter((k) => k !== 'star'))('round-trips a %s, alone and joined, dotted', (kind) => {
+    const look = scene({
+      name: kind,
+      levels: [
+        level('a', { shape: shape(kind, 0.4, 0.3, { n: 5, corner: 0.05, onion: 0.02 }), spill: 0.5 }),
+        level('b', {
+          shape: star(6, 3, 0.3, { join: join(shape(kind, 0.2, 0.7, { corner: 0.02 }), [0.1, -0.2], 0.1) }),
+        }),
+      ],
+      line: 'dots',
+      dots: { count: { value: 12, spread: 4 }, size: 0.3, crawl: -1 },
+    })
+    expect(parseScene(JSON.stringify(look))).toEqual(look)
+    expect(resolve(look, 'levels[b].variants[0].shape.join.shape.form')!.value).toBe(0.7)
+    expect(kindOf('levels[b].variants[0].shape.join.offset[1]')).toBe('levels[].variants[].shape.join.offset[1]')
   })
 
   it('names every knob by a path through level ids, sub-chains included', () => {
@@ -207,6 +236,50 @@ describe('the parse refuses a broken scene, naming its field', () => {
     ],
     ['stops out of order', broken((s) => (s.palette.stops[1].at = 0)), /^palette\.stops\[1\]\.at: must be above/],
     ['a NaN', broken((s) => (s.post.gamma.value = NaN)), /^post\.gamma\.value: must be a finite number/],
+    [
+      'a shape of no kind',
+      broken((s) => ((s.levels[0].variants[0].shape as { kind?: string }).kind = 'blob')),
+      /^levels\[sq1\]\.variants\[0\]\.shape\.kind: must be one of star, box/,
+    ],
+    [
+      'a kind without its form',
+      broken((s) => (s.levels[0].variants[0].shape.kind = 'box')),
+      /^levels\[sq1\]\.variants\[0\]\.shape\.form: is missing for a box/,
+    ],
+    [
+      'a star with a form',
+      broken((s) => (s.levels[0].variants[0].shape.form = { value: 0.5 })),
+      /^levels\[sq1\]\.variants\[0\]\.shape\.form: is not a field of a star/,
+    ],
+    [
+      'a join inside a join',
+      broken((s) => {
+        const inner = join(star(5, 2, 0.2), [0, 0], 0.1)
+        s.levels[0].variants[0].shape.join = join({ ...star(5, 2, 0.2), join: inner }, [0, 0], 0.1)
+      }),
+      /^levels\[sq1\]\.variants\[0\]\.shape\.join\.shape\.join: is not a field/,
+    ],
+    [
+      'an onion on a joined shape',
+      broken((s) => (s.levels[0].variants[0].shape.join = join(star(5, 2, 0.2, { onion: 0.1 }), [0, 0], 0.1))),
+      /^levels\[sq1\]\.variants\[0\]\.shape\.join\.shape\.onion: is not a field/,
+    ],
+    [
+      'a join blend off its range',
+      broken((s) => (s.levels[0].variants[0].shape.join = join(star(5, 2, 0.2), [0, 0], 0.9))),
+      /^levels\[sq1\]\.variants\[0\]\.shape\.join\.blend\.value: 0\.9 is outside 0 to 0\.5/,
+    ],
+    [
+      'a spill off its range',
+      broken((s) => (s.levels[0].cell.spill = { value: 2 })),
+      /^levels\[sq1\]\.cell\.spill\.value: 2 is outside 0 to 1/,
+    ],
+    ['a dotted line without its dots', broken((s) => (s.line.kind = 'dots')), /^line\.dots: is missing for dotted/],
+    [
+      'a dot count off its range',
+      broken((s) => (s.line.dots = { count: { value: 0 }, size: { value: 0 }, crawl: { value: 0 } })),
+      /^line\.dots\.count\.value: 0 is outside 1 to 64/,
+    ],
     [
       'a MIDI mapping that names no knob',
       broken((s) => (s.midi = [{ channel: 1, control: 21, knob: 'levels[nope].weight' }])),

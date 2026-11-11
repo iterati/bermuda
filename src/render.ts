@@ -6,12 +6,14 @@ import {
   LINES,
   MAX_LEVELS,
   MIXES,
+  SHAPES,
   VARIATIONS,
   variationWeight,
   type Level,
   type Scene,
+  type Shape,
 } from './scene'
-import { generateShader, ROW_TEXELS } from './shader'
+import { generateShader, ROW_TEXELS, VARIANT_TEXELS } from './shader'
 import type { Live } from './motion'
 
 const RAD = Math.PI / 180
@@ -37,7 +39,7 @@ function heaviest(levels: Level[]): number {
 // A morph's far end, which the scene's own knobs cannot carry: its line kind, units and composite, its rings
 // (value, spread: the shader morphs their count and fades each end's echo apart), its stops' mixes, for each drawn
 // level in allLevels order whose far end has another id that id and how far through its window it is, its running
-// phases, and how far in it is (0 none, 1 all of it).
+// phases (rings, palette, dots' crawl), and how far in it is (0 none, 1 all of it).
 export type Toward = {
   line: Scene['line']['kind']
   rings: [number, number]
@@ -47,8 +49,11 @@ export type Toward = {
   levels: ({ id: string; at: number } | null)[]
   drift: number
   colour: number
+  crawl: number
   at: number
 }
+
+const shapeIndex = (shape: Shape) => SHAPES.indexOf(shape.kind ?? 'star')
 
 // The level rows as shader.ts lays them out: every level, sub-chains included, gets a row; a level's next
 // row is the one after it in its own list, and a variant's sub-chain replaces the rest of the chain below it.
@@ -77,11 +82,19 @@ export function packLevels(levels: Level[], far: Toward['levels']): Float32Array
       variants.reduce((s, v) => s + v.share.value, 0),
     )
     const other = far[row]
-    at(6, seedOf(level.id), seedOf(other?.id ?? level.id), other?.at ?? 0, 0)
+    at(6, seedOf(level.id), seedOf(other?.id ?? level.id), other?.at ?? 0, cell.spill?.value ?? 0)
     at(7, LATTICES.indexOf(lattice.kind), lattice.sectors ?? 0, lattice.jitter?.value ?? 0, 0)
     variants.forEach(({ share, shape, below }, v) => {
-      at(8 + 2 * v, share.value, shape.n, shape.m.value, shape.r.value)
-      at(9 + 2 * v, shape.round.value, shape.twist.value * RAD, below ? rows.get(below[0])! : -1, 0)
+      const base = 8 + VARIANT_TEXELS * v
+      const { join } = shape
+      at(base, share.value, shape.n, shape.m.value, shape.r.value)
+      at(base + 1, shape.round.value, shape.twist.value * RAD, below ? rows.get(below[0])! : -1, shapeIndex(shape))
+      at(base + 2, shape.form?.value ?? 0, shape.corner?.value ?? 0, shape.onion?.value ?? 0, join?.weight.value ?? 0)
+      if (!join) return
+      const s = join.shape
+      at(base + 3, shapeIndex(s), s.n, s.m.value, s.r.value)
+      at(base + 4, s.round.value, s.twist.value * RAD, s.form?.value ?? 0, s.corner?.value ?? 0)
+      at(base + 5, join.offset[0].value, join.offset[1].value, join.blend.value, 0)
     })
   })
   return data
@@ -89,7 +102,7 @@ export function packLevels(levels: Level[], far: Toward['levels']): Float32Array
 
 export type Renderer = {
   gl: WebGL2RenderingContext
-  draw: (scene: Scene, live: Pick<Live, 'drift' | 'colour'>, toward?: Toward) => void
+  draw: (scene: Scene, live: Pick<Live, 'drift' | 'colour' | 'crawl'>, toward?: Toward) => void
 }
 
 export function createRenderer(canvas: HTMLCanvasElement): Renderer {
@@ -124,6 +137,8 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     radial: u('uRadial'),
     line: u('uLine'),
     falloff: u('uFalloff'),
+    dots: u('uDots'),
+    crawl: u('uCrawl'),
     stopCount: u('uStopCount'),
     stops: u('uStops'),
     stopMix: u('uStopMix'),
@@ -156,6 +171,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
       levels: [],
       drift: live.drift,
       colour: live.colour,
+      crawl: live.crawl,
       at: 0,
     }
     const mixed = (a: boolean, b: boolean) => Number(a) * (1 - far.at) + Number(b) * far.at
@@ -185,6 +201,15 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
       mixed(line.units === 'screen', far.units === 'screen'),
     )
     gl.uniform2f(loc.falloff, line.falloff.value, line.falloff.spread ?? 0)
+    const { dots } = line
+    gl.uniform4f(
+      loc.dots,
+      dots?.count.value ?? 1,
+      dots?.count.spread ?? 0,
+      dots?.size.value ?? 0,
+      dots?.size.spread ?? 0,
+    )
+    gl.uniform2f(loc.crawl, live.crawl, far.crawl)
     gl.uniform1i(loc.stopCount, palette.stops.length)
     gl.uniform4fv(
       loc.stops,

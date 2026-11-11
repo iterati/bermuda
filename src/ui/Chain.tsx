@@ -1,7 +1,7 @@
 // The chain as chips: frame, the levels with their sub-chains under the variants that carry them,
 // then contour, line, palette and post. Click a chip to pick it.
 import { duplicateLevel, newId } from '../edit'
-import type { Level } from '../scene'
+import type { Level, Shape } from '../scene'
 import { useCtl } from './controls'
 
 const latticeName = (l: Level) => {
@@ -14,6 +14,9 @@ const latticeName = (l: Level) => {
   return s < 0.02 ? 'rect' : 'rhombic'
 }
 
+// a star by its points, another kind by its name, a + for a joined shape
+const shapeName = (s: Shape) => `${(s.kind ?? 'star') === 'star' ? `★${s.n}` : s.kind}${s.join ? '+' : ''}`
+
 function Levels({ levels, picked, depth }: { levels: Level[]; picked: string; depth: number }) {
   const { pick } = useCtl()
   return levels.map((l) => (
@@ -25,7 +28,7 @@ function Levels({ levels, picked, depth }: { levels: Level[]; picked: string; de
       >
         <b>{l.id}</b>
         <span className="dim">
-          {l.link ? `→ ${l.link}` : `${latticeName(l)} · ${l.variants.map((v) => `★${v.shape.n}`).join(' ')}`}
+          {l.link ? `→ ${l.link}` : `${latticeName(l)} · ${l.variants.map((v) => shapeName(v.shape)).join(' ')}`}
         </span>
       </button>
       {l.variants.map(

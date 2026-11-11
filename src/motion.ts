@@ -22,9 +22,10 @@ export type Live = {
   smooth: Map<string, number> // glided knob bases by address, glided modulator outputs by target
   drift: number // the contour's ring phase, in radians
   colour: number // the palette's running index
+  crawl: number // the dots' running crawl, in dots
 }
 
-export const newLive = (): Live => ({ phases: new Map(), smooth: new Map(), drift: 0, colour: 0 })
+export const newLive = (): Live => ({ phases: new Map(), smooth: new Map(), drift: 0, colour: 0, crawl: 0 })
 
 // A wave's value at phase p (cycles), 0 to 1; cos and tri start at 1 as the Tapestries' sinT and sawT did.
 export function wave(m: Modulator, p: number): number {
@@ -107,6 +108,7 @@ export function advance(scene: Scene, live: Live, dt: number, bpm: number): Scen
   }
   live.drift = (live.drift + out.contour.drift.value * beats) % (2 * Math.PI)
   live.colour = (live.colour + out.palette.time.value * beats) % 1
+  live.crawl = (live.crawl + (out.line.dots?.crawl.value ?? 0) * beats) % 1
   return out
 }
 

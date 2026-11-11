@@ -25,12 +25,16 @@ import {
   MIXES,
   resolve,
   SECTORS,
+  SHAPES,
+  SPILLS,
   STAR_N,
   VARIATIONS,
   type Address,
   type LatticeKind,
   type Level,
   type Scene,
+  type Shape,
+  type ShapeKind,
 } from '../scene'
 import type { Learning } from '../midi'
 import { Knob } from './Knob'
@@ -137,6 +141,24 @@ function Stepper({
   )
 }
 
+// A knob a scene may lack: the knob and a × that drops it, or a + that adds it.
+function Extra({ label, at, has, set }: { label: string; at: Address; has: boolean; set: (on: boolean) => void }) {
+  if (!has)
+    return (
+      <button className="mini" onClick={() => set(true)}>
+        + {label}
+      </button>
+    )
+  return (
+    <span className="pair">
+      <Knob label={label} at={at} />
+      <button className="mini" title={`drop ${label}`} onClick={() => set(false)}>
+        ×
+      </button>
+    </span>
+  )
+}
+
 const Group = ({ title, children, actions }: { title: string; children: ReactNode; actions?: ReactNode }) => (
   <div className="group">
     <div className="group-title">
@@ -181,7 +203,18 @@ function LineSection() {
   const { scene, edit } = useCtl()
   return (
     <Group title="Line">
-      <Choice label="kind" value={scene.line.kind} options={LINES} onChange={(v) => edit((d) => (d.line.kind = v))} />
+      <Choice
+        label="kind"
+        value={scene.line.kind}
+        options={LINES}
+        onChange={(v) =>
+          edit((d) => {
+            d.line.kind = v
+            // dots keep their knobs when the kind moves on, so a way back finds them as they were
+            if (v === 'dots') d.line.dots ??= { count: { value: 16 }, size: { value: 0.3 }, crawl: { value: 1 } }
+          })
+        }
+      />
       <Choice
         label="units"
         value={scene.line.units}
@@ -190,6 +223,13 @@ function LineSection() {
       />
       <Knob label="width" at="line.width" />
       <Knob label="falloff" at="line.falloff" />
+      {scene.line.kind === 'dots' && (
+        <>
+          <Knob label="dots" at="line.dots.count" />
+          <Knob label="dot size" at="line.dots.size" />
+          <Knob label="crawl" at="line.dots.crawl" />
+        </>
+      )}
     </Group>
   )
 }
@@ -473,21 +513,68 @@ function LevelSection({ id }: { id: string }) {
         />
         <Knob label="cell turn" at={`${at}.cell.turn`} />
         <Knob label="ring phase" at={`${at}.cell.phase`} />
+        {SPILLS.includes(kind) && (
+          <Extra
+            label="spill"
+            at={`${at}.cell.spill`}
+            has={!!level.cell.spill}
+            set={(on) =>
+              edit((d) => {
+                const { cell } = findLevel(d, id).level
+                if (on) cell.spill = { value: 1 }
+                else delete cell.spill
+                prune(d)
+              })
+            }
+          />
+        )}
       </div>
       {level.variants.map((v, i) => (
         <div className="row variant" key={i}>
           <span className="row-title">{level.variants.length > 1 ? `variant ${i + 1}` : 'shape'}</span>
           {level.variants.length > 1 && <Knob label="share" at={`${at}.variants[${i}].share`} />}
-          <Stepper
-            label="points"
-            value={v.shape.n}
-            range={STAR_N}
-            onChange={(n) => edit((d) => (findLevel(d, id).level.variants[i].shape.n = n))}
+          <ShapeKnobs
+            at={`${at}.variants[${i}].shape`}
+            shape={v.shape}
+            change={(fn) =>
+              edit((d) => {
+                fn(findLevel(d, id).level.variants[i].shape)
+                prune(d)
+              })
+            }
           />
-          <Knob label="m" at={`${at}.variants[${i}].shape.m`} />
-          <Knob label="r" at={`${at}.variants[${i}].shape.r`} />
-          <Knob label="round" at={`${at}.variants[${i}].shape.round`} />
-          <Knob label="twist" at={`${at}.variants[${i}].shape.twist`} />
+          <Extra
+            label="onion"
+            at={`${at}.variants[${i}].shape.onion`}
+            has={!!v.shape.onion}
+            set={(on) =>
+              edit((d) => {
+                const { shape } = findLevel(d, id).level.variants[i]
+                if (on) shape.onion = { value: 0.03 }
+                else delete shape.onion
+                prune(d)
+              })
+            }
+          />
+          {!v.shape.join && (
+            <button
+              className="mini"
+              title="smooth-union a second shape into this one"
+              onClick={() =>
+                edit((d) => {
+                  const { shape } = findLevel(d, id).level.variants[i]
+                  shape.join = {
+                    shape: { n: 6, m: { value: 2 }, r: { value: 0.15 }, round: { value: 1 }, twist: { value: 0 } },
+                    offset: [{ value: 0.25 }, { value: 0 }],
+                    blend: { value: 0.1 },
+                    weight: { value: 1 },
+                  }
+                })
+              }
+            >
+              + join
+            </button>
+          )}
           {!v.below && (
             <button
               className="mini"
@@ -512,6 +599,40 @@ function LevelSection({ id }: { id: string }) {
           )}
         </div>
       ))}
+      {level.variants.map(
+        ({ shape }, i) =>
+          shape.join && (
+            <div className="row variant" key={`join${i}`}>
+              <span className="row-title">{level.variants.length > 1 ? `join ${i + 1}` : 'join'}</span>
+              <ShapeKnobs
+                at={`${at}.variants[${i}].shape.join.shape`}
+                shape={shape.join.shape}
+                change={(fn) =>
+                  edit((d) => {
+                    fn(findLevel(d, id).level.variants[i].shape.join!.shape)
+                    prune(d)
+                  })
+                }
+              />
+              <Knob label="offset x" at={`${at}.variants[${i}].shape.join.offset[0]`} />
+              <Knob label="offset y" at={`${at}.variants[${i}].shape.join.offset[1]`} />
+              <Knob label="blend" at={`${at}.variants[${i}].shape.join.blend`} />
+              <Knob label="weight" at={`${at}.variants[${i}].shape.join.weight`} />
+              <button
+                className="mini"
+                title="drop the joined shape"
+                onClick={() =>
+                  edit((d) => {
+                    delete findLevel(d, id).level.variants[i].shape.join
+                    prune(d)
+                  })
+                }
+              >
+                ×
+              </button>
+            </div>
+          ),
+      )}
       <div className="row">
         {level.variants.length < MAX_VARIANTS && (
           <button
@@ -536,6 +657,80 @@ function LevelSection({ id }: { id: string }) {
         <Knob label="cell spread" at={`${at}.colour.cellSpread`} />
       </div>
     </Group>
+  )
+}
+
+// each kind's form, by what it sets (shader.ts SHAPE_GLSL); the heart and the cool S have none
+const FORM: Partial<Record<ShapeKind, string>> = {
+  box: 'aspect',
+  rhombus: 'aspect',
+  triangle: 'base',
+  trapezoid: 'top',
+  parallelogram: 'lean',
+  capsule: 'top',
+  pie: 'opening',
+  arc: 'opening',
+  horseshoe: 'opening',
+  vesica: 'width',
+  moon: 'bite',
+  cross: 'thickness',
+  roundX: 'thickness',
+  blobbyCross: 'blob',
+  ellipse: 'aspect',
+  cutDisk: 'cut',
+  circleWave: 'depth',
+  segment: 'thickness',
+  stairs: 'steepness',
+}
+
+// A shape's controls: its kind, the star's points and m (the stairs' steps), a kind's form, its size, round, twist
+// and corner; change edits the shape on a draft, then prunes what pointed at a knob it dropped.
+function ShapeKnobs({ at, shape, change }: { at: Address; shape: Shape; change: (fn: (s: Shape) => void) => void }) {
+  const kind = shape.kind ?? 'star'
+  const form = FORM[kind]
+  return (
+    <>
+      <Choice
+        label="shape"
+        value={kind}
+        options={SHAPES}
+        onChange={(k) =>
+          change((s) => {
+            if (k === 'star') {
+              delete s.kind
+              delete s.form
+            } else {
+              s.kind = k
+              s.form ??= { value: 0.5 }
+            }
+          })
+        }
+      />
+      {(kind === 'star' || kind === 'stairs') && (
+        <Stepper
+          label={kind === 'star' ? 'points' : 'steps'}
+          value={shape.n}
+          range={STAR_N}
+          onChange={(n) => change((s) => (s.n = n))}
+        />
+      )}
+      {kind === 'star' && <Knob label="m" at={`${at}.m`} />}
+      {form && <Knob label={form} at={`${at}.form`} />}
+      <Knob label="r" at={`${at}.r`} />
+      <Knob label="round" at={`${at}.round`} />
+      <Knob label="twist" at={`${at}.twist`} />
+      <Extra
+        label="corner"
+        at={`${at}.corner`}
+        has={!!shape.corner}
+        set={(on) =>
+          change((s) => {
+            if (on) s.corner = { value: 0.05 }
+            else delete s.corner
+          })
+        }
+      />
+    </>
   )
 }
 

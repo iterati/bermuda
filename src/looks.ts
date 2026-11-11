@@ -5,6 +5,8 @@ import { entryName } from './play'
 import type {
   Address,
   Bank,
+  Dots,
+  Join,
   Knob,
   LatticeKind,
   Level,
@@ -13,6 +15,7 @@ import type {
   Preset,
   Scene,
   Shape,
+  ShapeKind,
   VariationKind,
 } from './scene'
 
@@ -23,12 +26,40 @@ const R3 = Math.sqrt(3)
 const SQUARE: [number, number] = [0, 1]
 const HEX: [number, number] = [0.5, R3 / 2]
 
-export const star = (n: number, m: K, r: K, o: { round?: K; twist?: K } = {}): Shape => ({
+type ShapeSpec = { round?: K; twist?: K; corner?: K; onion?: K; join?: Join }
+const extras = (o: ShapeSpec) => ({
+  ...(o.corner === undefined ? {} : { corner: k(o.corner) }),
+  ...(o.onion === undefined ? {} : { onion: k(o.onion) }),
+  ...(o.join ? { join: structuredClone(o.join) } : {}),
+})
+
+export const star = (n: number, m: K, r: K, o: ShapeSpec = {}): Shape => ({
   n,
   m: k(m),
   r: k(r),
   round: k(o.round ?? 0),
   twist: k(o.twist ?? 0),
+  ...extras(o),
+})
+
+// one of iq's shapes beside the star, at size r with its form (n: the stairs' steps)
+export const shape = (kind: Exclude<ShapeKind, 'star'>, r: K, form: K, o: ShapeSpec & { n?: number } = {}): Shape => ({
+  kind,
+  n: o.n ?? 6,
+  m: k(2),
+  r: k(r),
+  round: k(o.round ?? 0),
+  twist: k(o.twist ?? 0),
+  form: k(form),
+  ...extras(o),
+})
+
+// a second shape smooth-unioned in, offset from the cell's middle
+export const join = (s: Shape, offset: [K, K], blend: K, weight: K = 1): Join => ({
+  shape: s,
+  offset: [k(offset[0]), k(offset[1])],
+  blend: k(blend),
+  weight: k(weight),
 })
 
 type LevelSpec = {
@@ -45,6 +76,7 @@ type LevelSpec = {
   by?: Level['cell']['by']
   cellTurn?: K
   cellPhase?: K
+  spill?: K
   shape?: Shape
   variants?: { share: K; shape: Shape; below?: Level[] }[]
   at?: K
@@ -59,7 +91,12 @@ export function level(id: string, s: LevelSpec = {}): Level {
     affine: { scale: k(s.scale ?? 1), turn: k(s.turn ?? 0), offset: [k(s.offset?.[0] ?? 0), k(s.offset?.[1] ?? 0)] },
     variations: (s.vary ?? [['linear', 1]]).map(([kind, weight]) => ({ kind, weight: k(weight) })),
     lattice: { kind: s.lattice ?? 'oblique', e2: [k(s.e2?.[0] ?? SQUARE[0]), k(s.e2?.[1] ?? SQUARE[1])] },
-    cell: { by: s.by ?? 'none', turn: k(s.cellTurn ?? 0), phase: k(s.cellPhase ?? 0) },
+    cell: {
+      by: s.by ?? 'none',
+      turn: k(s.cellTurn ?? 0),
+      phase: k(s.cellPhase ?? 0),
+      ...(s.spill === undefined ? {} : { spill: k(s.spill) }),
+    },
     variants: (s.variants ?? [{ share: 1, shape: s.shape ?? star(6, 2, 0.4) }]).map((v) => ({
       share: k(v.share),
       shape: structuredClone(v.shape),
@@ -111,6 +148,7 @@ type SceneSpec = {
   width?: K
   falloff?: K
   units?: Scene['line']['units']
+  dots?: { count: K; size: K; crawl: K }
   palette?: string
   hue?: K
   contrast?: K
@@ -129,7 +167,15 @@ export const scene = (s: SceneSpec): Scene => ({
   frame: { origin: [k(s.origin?.[0] ?? 0), k(s.origin?.[1] ?? 0)], zoom: k(s.zoom ?? 1), turn: k(s.turn ?? 0) },
   levels: s.levels,
   contour: { rings: k(s.rings ?? 0), drift: k(s.drift ?? 0), radialWeight: k(s.radialWeight ?? 0) },
-  line: { kind: s.line ?? 'glow', width: k(s.width ?? 0.0025), falloff: k(s.falloff ?? 1.2), units: s.units ?? 'cell' },
+  line: {
+    kind: s.line ?? 'glow',
+    width: k(s.width ?? 0.0025),
+    falloff: k(s.falloff ?? 1.2),
+    units: s.units ?? 'cell',
+    ...(s.dots
+      ? { dots: { count: k(s.dots.count), size: k(s.dots.size), crawl: k(s.dots.crawl) } satisfies Dots }
+      : {}),
+  },
   palette: {
     stops: stopsFromCosine(s.palette ?? 'rainbow', 6),
     hue: k(s.hue ?? 0),
@@ -951,14 +997,288 @@ export const LOOKS: Scene[] = [
       mod('hue', 'cos', 64, [['palette.hue', 90]]),
     ],
   }),
+  // ---- shapes and lines: iq's shapes, joins, corners and onions, spill, screen lines and dots ----
+  scene({
+    name: "Shapes - iq's garden",
+    zoom: 1.2,
+    levels: [
+      level('garden', {
+        scale: 0.55,
+        turn: 30,
+        e2: HEX,
+        variants: [
+          { share: 0.25, shape: shape('heart', 0.3, 0.5) },
+          { share: 0.25, shape: shape('moon', 0.34, { value: 0.5, play: [0.2, 0.8] }) },
+          { share: 0.25, shape: shape('vesica', 0.38, 0.45) },
+          { share: 0.25, shape: shape('pie', 0.32, { value: 0.75, play: [0.3, 1] }) },
+        ],
+        at: 0,
+        cellSpread: 0.5,
+      }),
+      ...linked('bed', 2, {
+        scale: R3,
+        turn: 30,
+        e2: HEX,
+        variants: [
+          { share: 0.25, shape: shape('box', 0.32, 0.7, { corner: 0.06 }) },
+          { share: 0.25, shape: shape('cross', 0.36, 0.35) },
+          { share: 0.25, shape: shape('ellipse', 0.36, 0.55) },
+          { share: 0.25, shape: shape('roundX', 0.32, 0.4) },
+        ],
+        at: { value: 0.35, spread: 0.4 },
+        speed: 0.6,
+        cellSpread: 0.3,
+      }),
+    ],
+    line: 'smooth',
+    width: { value: 0.006, spread: 0.01 },
+    falloff: 1,
+    palette: 'warm',
+    radius: 0.3,
+    modulators: [
+      mod('bite', 'cos', 13, [['levels[garden].variants[1].shape.form', 0.3]]),
+      mod('open', 'tri', 17, [['levels[garden].variants[3].shape.form', 0.35]]),
+      mod('spin', 'ramp', 90, [['levels[garden].affine.turn', 180]]),
+      mod(
+        'turn',
+        'cos',
+        21,
+        [0, 1, 2, 3].map((v) => [`levels[bed1].variants[${v}].shape.twist`, 45, 0.5] as [Address, number, number]),
+      ),
+      mod('hue', 'cos', 40, [['palette.hue', 60]]),
+    ],
+  }),
+  scene({
+    name: 'Shapes - Marching ants',
+    zoom: 1.3,
+    levels: [
+      level('ants', {
+        scale: 0.6,
+        by: 'parity',
+        shape: shape('box', 0.38, 0.8, { corner: 0.08 }),
+        at: 0,
+        speed: 0.8,
+        cellSpread: 0.7,
+      }),
+      level('crumbs', {
+        scale: 2,
+        turn: 45,
+        by: 'parity',
+        cellTurn: 45,
+        shape: shape('cross', 0.4, 0.3, { corner: 0.04 }),
+        at: 0.5,
+        speed: 0.8,
+        cellSpread: 0.4,
+      }),
+    ],
+    line: 'dots',
+    dots: { count: { value: 20, play: [8, 32] }, size: { value: 0.25, play: [0, 0.8] }, crawl: 1 },
+    width: { value: 0.016, spread: 0.008 },
+    falloff: 0.5,
+    palette: 'rainbow',
+    radius: 0.2,
+    modulators: [
+      mod('dash', 'cos', 16, [['line.dots.size', 0.25]]),
+      mod('breathe', 'cos', 32, [['levels[ants].affine.scale', 0.08]]),
+      mod('hue', 'cos', 48, [['palette.hue', 90]]),
+    ],
+    presets: [
+      { name: 'Dashes', values: { 'line.dots.size': 0.75, 'line.dots.count': 10 } },
+      { name: 'Pearls', values: { 'line.dots.size': 0, 'line.dots.count': 28, 'line.width': 0.012 } },
+    ],
+  }),
+  scene({
+    name: 'Shapes - Metaballs',
+    zoom: 1.2,
+    levels: [
+      ...linked('blob', 2, {
+        scale: { value: 0.8, spread: 1.4 },
+        turn: { value: 0, spread: 30 },
+        e2: HEX,
+        spill: 1,
+        shape: shape(
+          'ellipse',
+          0.17,
+          { value: 0.8, play: [0.5, 1] },
+          {
+            onion: 0.015,
+            join: join(star(6, 2, 0.12, { round: 1 }), [0.22, 0], { value: 0.05, play: [0.01, 0.1] }),
+          },
+        ),
+        at: { value: 0, spread: 0.5 },
+        speed: 0.6,
+        cellSpread: 0.25,
+      }),
+    ],
+    line: 'smooth',
+    width: { value: 0.006, spread: 0.006 },
+    falloff: 1,
+    palette: 'ice',
+    radius: 0.25,
+    modulators: [
+      mod('orbitX', 'cos', 12, [['levels[blob1].variants[0].shape.join.offset[0]', 0.2]]),
+      mod('orbitY', 'cos', 12, [['levels[blob1].variants[0].shape.join.offset[1]', 0.2]], { phase: 0.25 }),
+      mod('melt', 'tri', 23, [['levels[blob1].variants[0].shape.join.blend', 0.04]]),
+      mod('hue', 'cos', 50, [['palette.hue', 70]]),
+    ],
+    presets: [
+      { name: 'Apart', values: { 'levels[blob1].variants[0].shape.join.blend': 0 } },
+      { name: 'Melted', values: { 'levels[blob1].variants[0].shape.join.blend': 0.12 } },
+    ],
+  }),
+  scene({
+    name: 'Shapes - Onion skins',
+    zoom: 1.4,
+    levels: [
+      level('skin', {
+        scale: 0.6,
+        turn: 30,
+        e2: HEX,
+        shape: star(6, 3, 0.42, { corner: 0.03, onion: { value: 0.04, play: [0.01, 0.1] } }),
+        at: 0,
+      }),
+      level('core', {
+        scale: R3,
+        turn: 30,
+        e2: HEX,
+        shape: shape('roundX', 0.3, 0.3, { onion: 0.025, twist: 15 }),
+        at: 0.45,
+      }),
+    ],
+    line: 'band',
+    width: { value: 0.006, spread: 0.008 },
+    falloff: 0.5,
+    palette: 'ember',
+    radius: 0.35,
+    modulators: [
+      mod('peel', 'cos', 9, [['levels[skin].variants[0].shape.onion', 0.04]]),
+      mod('round', 'tri', 19, [['levels[skin].variants[0].shape.corner', 0.03]]),
+      mod('twist', 'ramp', 60, [['levels[core].variants[0].shape.twist', 180]]),
+      mod('hue', 'cos', 45, [['palette.hue', 40]]),
+    ],
+  }),
+  scene({
+    name: 'Shapes - Woven waves',
+    zoom: { value: 1.1, play: [0.9, 1.4] },
+    levels: [
+      // at form .6 a wave's period is 2r: r .5 runs it seamless from cell to cell
+      level('warp', {
+        scale: 1.5,
+        shape: shape('circleWave', 0.5, 0.6, { onion: { value: 0.03, play: [0.01, 0.05] } }),
+        at: 0,
+        cellSpread: 0.3,
+      }),
+      level('weft', { scale: 2, turn: 90, shape: shape('circleWave', 0.5, 0.6), at: 0.5, cellSpread: 0.3 }),
+    ],
+    line: 'smooth',
+    width: { value: 0.01, spread: 0.006 },
+    falloff: 1,
+    palette: 'ice',
+    radius: 0.2,
+    modulators: [
+      mod('flowA', 'ramp', 16, [['levels[warp].affine.offset[0]', 0.5]]),
+      mod('flowB', 'ramp', 24, [['levels[weft].affine.offset[0]', -0.5]]),
+      mod('ply', 'cos', 20, [['levels[warp].variants[0].shape.onion', 0.025]]),
+      mod('hue', 'cos', 40, [['palette.hue', 60]]),
+    ],
+  }),
+  scene({
+    name: 'Shapes - Through the sphere',
+    levels: [
+      level('lens', {
+        scale: 0.7,
+        e2: HEX,
+        vary: [
+          ['linear', 0.25],
+          ['spherical', { value: 0.75, play: [0.3, 1] }],
+        ],
+        variants: [
+          { share: 0.5, shape: shape('arc', 0.4, 0.5) },
+          { share: 0.5, shape: shape('segment', 0.4, 0.2) },
+        ],
+        at: 0,
+        cellSpread: 0.6,
+      }),
+      level('grain', { scale: R3, turn: 30, e2: HEX, shape: star(6, 2, 0.38), at: 0.5 }),
+    ],
+    line: 'smooth',
+    width: 0.003,
+    falloff: 1,
+    units: 'screen',
+    palette: 'rainbow',
+    radius: 0.2,
+    modulators: [
+      mod('lens', 'cos', 30, [['levels[lens].variations[1].weight', 0.25]]),
+      mod('spin', 'ramp', 80, [['levels[lens].affine.turn', 180]]),
+      mod('hue', 'ramp', 60, [['palette.hue', 180]]),
+    ],
+  }),
+  scene({
+    name: 'Shapes - Stairs and S',
+    zoom: 1.2,
+    levels: [
+      level('steps', {
+        scale: 1.4,
+        e2: HEX,
+        by: 'parity',
+        cellTurn: 60,
+        variants: [
+          { share: 0.5, shape: shape('stairs', 0.32, 0.5, { n: 4 }) },
+          { share: 0.5, shape: shape('coolS', 0.36, 0.5) },
+        ],
+        at: 0,
+        cellSpread: 0.4,
+      }),
+      level('flecks', {
+        scale: R3,
+        turn: 30,
+        e2: HEX,
+        shape: shape('blobbyCross', 0.25, { value: 0.3, play: [0, 1] }),
+        at: 0.5,
+      }),
+    ],
+    line: 'hard',
+    width: { value: 0.006, spread: 0.008 },
+    palette: 'warm',
+    radius: 0.3,
+    modulators: [
+      mod('turn', 'beat', 24, [['levels[steps].cell.turn', 30]], { harmonics: [3, 2] }),
+      mod('blob', 'cos', 14, [['levels[flecks].variants[0].shape.form', 0.4]]),
+      mod('hue', 'cos', 36, [['palette.hue', 90]]),
+    ],
+  }),
+  scene({
+    name: 'Remix - Dotted hexes',
+    zoom: 1.4,
+    levels: linked('d', 3, {
+      scale: { value: 1.56, play: [1.35, 1.75] },
+      turn: 30,
+      e2: HEX,
+      shape: star(6, { value: 3.5, play: [1.01, 6] }, 0.35),
+      at: { value: 0, spread: 1 },
+      speed: 0.3,
+    }),
+    line: 'dots',
+    dots: { count: { value: 24, spread: -12 }, size: 0.3, crawl: 0.5 },
+    width: { value: 0.012, spread: 0.012 },
+    falloff: 0.5,
+    radius: 0.2,
+    modulators: [
+      mod('nest', 'cos', 36, [['levels[d1].affine.scale', 0.17]], { phase: 0.5 }),
+      mod('character', 'tri', 15, [['levels[d1].variants[0].shape.m', 2.5]], { phase: 0.25 }),
+      mod('dash', 'cos', 20, [['line.dots.size', 0.35]]),
+      mod('hue', 'cos', 60, [['palette.hue', 180]]),
+    ],
+  }),
 ]
 
-// The built-in bank: every look and preset above, the Tapestries in a ring and the lattices in another, each preset
-// beside its look, and each remix and lattice linked to the looks it draws on.
+// The built-in bank: every look and preset above, the Tapestries in a ring and the lattices and the shapes in
+// others, each preset beside its look, and each remix, lattice and shape linked to the looks it draws on.
 const named = (start: string) => LOOKS.find((l) => l.name.startsWith(start))!.name
 const T = (n: string) => named(`Tapestry ${n} `)
 const remix = (n: string) => named(`Remix - ${n}`)
 const lattice = (n: string) => named(`Lattice - ${n}`)
+const shapes = (n: string) => named(`Shapes - ${n}`)
 const ring = ['1', '2', '3', '4', '5', '6', '7', '8', '7b'].map(T)
 const lattices = [
   'Rhombic walk',
@@ -970,10 +1290,19 @@ const lattices = [
   'Truchet',
   'Organic cells',
 ].map(lattice)
+const shapeRing = [
+  "iq's garden",
+  'Marching ants',
+  'Metaballs',
+  'Onion skins',
+  'Woven waves',
+  'Through the sphere',
+  'Stairs and S',
+].map(shapes)
 export const BANK: Bank = {
   scenes: LOOKS.flatMap((l) => [l.name, ...l.presets.map((p) => entryName(l.name, p.name))]),
   links: [
-    ...[ring, lattices].flatMap((r) => r.map((name, i): [string, string] => [name, r[(i + 1) % r.length]])),
+    ...[ring, lattices, shapeRing].flatMap((r) => r.map((name, i): [string, string] => [name, r[(i + 1) % r.length]])),
     ...LOOKS.flatMap((l) => {
       const presets = l.presets.map((p) => entryName(l.name, p.name))
       return presets.flatMap((p, i): [string, string][] =>
@@ -1013,6 +1342,10 @@ export const BANK: Bank = {
     [remix('Rose window'), lattice('Kaleidoscope')],
     [remix('Spiral Truchet'), lattice('Truchet')],
     [remix('Spiral Truchet'), lattice('Endless zoom')],
+    [shapes("iq's garden"), T('3')],
+    [shapes('Through the sphere'), T('5')],
+    [remix('Dotted hexes'), T('7')],
+    [remix('Dotted hexes'), shapes('Marching ants')],
   ],
   autopilot: {
     // a keyframe every 2 beats, as long as a change takes: it never rests, passing through each on its curve

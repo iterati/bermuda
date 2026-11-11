@@ -1,6 +1,16 @@
 // Edits of a scene's structure, made on a draft (motion.ts update): adding, removing and moving levels,
 // then pruning what pointed at a level that is gone.
-import { allLevels, clamp, hardRange, knobsOf, resolve, type LatticeKind, type Level, type Scene } from './scene'
+import {
+  allLevels,
+  clamp,
+  hardRange,
+  knobsOf,
+  resolve,
+  SPILLS,
+  type LatticeKind,
+  type Level,
+  type Scene,
+} from './scene'
 
 export function findLevel(scene: Scene, id: string): { level: Level; list: Level[] } {
   const found = allLevels(scene.levels).find(({ level }) => level.id === id)
@@ -66,6 +76,7 @@ export function setLattice(scene: Scene, id: string, kind: LatticeKind) {
   else lattice.jitter ??= { value: 0 }
   if (kind !== 'polar' && kind !== 'logpolar') delete lattice.sectors
   else lattice.sectors ??= 6
+  if (!SPILLS.includes(kind)) delete findLevel(scene, id).level.cell.spill
   prune(scene)
 }
 
