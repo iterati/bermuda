@@ -9,7 +9,7 @@ export type Shape = {
   r: Knob
   round: Knob
   twist: Knob
-  form?: Knob // every kind but the star has one: its own proportion, 0 to 1 (shader.ts SHAPE_GLSL)
+  form?: Knob // every kind but the FORMLESS has one: its own proportion, 0 to 1 (shader.ts SHAPE_GLSL)
   corner?: Knob // iq's opRound: the outline rounded this far out, the shape shrunk by as much first
   onion?: Knob // iq's opOnion: the outline split in two this far either side, after the join
   join?: Join
@@ -151,6 +151,8 @@ export const SHAPES = [
   'stairs',
   'coolS',
 ] as const
+// the kinds with no proportion of their own, so no form
+export const FORMLESS: readonly ShapeKind[] = ['star', 'heart', 'coolS']
 export const LINES = ['glow', 'smooth', 'hard', 'band', 'dots'] as const
 export const WAVES = ['cos', 'tri', 'beat', 'ramp', 'steps'] as const
 export const MIXES = ['straight', 'short', 'long'] as const
@@ -373,7 +375,7 @@ function knob(v: unknown, path: string): Knob {
   return out
 }
 
-// A shape: the star's knobs, a kind's form for every kind but the star, and corner, onion and join when given;
+// A shape: the star's knobs, a kind's form for every kind but the FORMLESS, and corner, onion and join when given;
 // a joined shape holds no join or onion of its own.
 function shape(v: unknown, path: string, joined = false): Shape {
   const o = obj(
@@ -392,9 +394,10 @@ function shape(v: unknown, path: string, joined = false): Shape {
     twist: knob(o.twist, `${path}.twist`),
   }
   if (o.kind !== undefined) out.kind = oneOf(o.kind, `${path}.kind`, SHAPES)
-  if ((out.kind ?? 'star') === 'star') {
-    if (o.form !== undefined) fail(`${path}.form`, 'is not a field of a star')
-  } else if (o.form === undefined) fail(`${path}.form`, `is missing for a ${out.kind}`)
+  const kind = out.kind ?? 'star'
+  if (FORMLESS.includes(kind)) {
+    if (o.form !== undefined) fail(`${path}.form`, `is not a field of a ${kind}`)
+  } else if (o.form === undefined) fail(`${path}.form`, `is missing for a ${kind}`)
   else out.form = knob(o.form, `${path}.form`)
   if (o.corner !== undefined) out.corner = knob(o.corner, `${path}.corner`)
   if (o.onion !== undefined) out.onion = knob(o.onion, `${path}.onion`)

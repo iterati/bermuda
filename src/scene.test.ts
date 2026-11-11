@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { BANK, join, level, LOOKS, scene, shape, star } from './looks'
 import { capturePreset } from './motion'
 import {
+  FORMLESS,
   kindOf,
   knobsOf,
   parseBank,
@@ -46,7 +47,9 @@ describe('a scene as JSON', () => {
       dots: { count: { value: 12, spread: 4 }, size: 0.3, crawl: -1 },
     })
     expect(parseScene(JSON.stringify(look))).toEqual(look)
-    expect(resolve(look, 'levels[b].variants[0].shape.join.shape.form')!.value).toBe(0.7)
+    expect(resolve(look, 'levels[b].variants[0].shape.join.shape.form')?.value).toBe(
+      FORMLESS.includes(kind) ? undefined : 0.7,
+    )
     expect(kindOf('levels[b].variants[0].shape.join.offset[1]')).toBe('levels[].variants[].shape.join.offset[1]')
   })
 
@@ -250,6 +253,11 @@ describe('the parse refuses a broken scene, naming its field', () => {
       'a star with a form',
       broken((s) => (s.levels[0].variants[0].shape.form = { value: 0.5 })),
       /^levels\[sq1\]\.variants\[0\]\.shape\.form: is not a field of a star/,
+    ],
+    [
+      'a heart with a form',
+      broken((s) => Object.assign(s.levels[0].variants[0].shape, { kind: 'heart', form: { value: 0.5 } })),
+      /^levels\[sq1\]\.variants\[0\]\.shape\.form: is not a field of a heart/,
     ],
     [
       'a join inside a join',

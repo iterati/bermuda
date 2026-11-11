@@ -696,13 +696,10 @@ function ShapeKnobs({ at, shape, change }: { at: Address; shape: Shape; change: 
         options={SHAPES}
         onChange={(k) =>
           change((s) => {
-            if (k === 'star') {
-              delete s.kind
-              delete s.form
-            } else {
-              s.kind = k
-              s.form ??= { value: 0.5 }
-            }
+            if (k === 'star') delete s.kind
+            else s.kind = k
+            if (FORM[k]) s.form ??= { value: 0.5 }
+            else delete s.form
           })
         }
       />

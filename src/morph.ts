@@ -128,8 +128,8 @@ function align(as: Level[], bs: Level[]): Slot[] {
   return slots
 }
 
-// star n and the kind are whole: they swap inside a circle dip, where every n and kind draws the same circle; a star
-// has no form, so it takes the other side's; a join one side lacks is there at weight 0
+// star n and the kind are whole: they swap inside a circle dip, where every n and kind draws the same circle; a
+// FORMLESS kind has no form, so it takes the other side's; a join one side lacks is there at weight 0
 function shape(a: Shape, b: Shape, t: number): Shape {
   const round = knob(a.round, b.round, t)
   if (a.n !== b.n || (a.kind ?? 'star') !== (b.kind ?? 'star')) round.value = mix(round.value, 1, dip(t, 0.1))

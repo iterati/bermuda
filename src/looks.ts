@@ -1,6 +1,7 @@
 // The built-in looks: the nine Tapestries re-made in spirit through the level chain, then remixes across levels.
 // Periods are in clock units, one a second at the default 60 bpm; angles are in degrees.
 import { stopsFromCosine } from './colour'
+import { FORMLESS } from './scene'
 import { entryName } from './play'
 import type {
   Address,
@@ -42,7 +43,7 @@ export const star = (n: number, m: K, r: K, o: ShapeSpec = {}): Shape => ({
   ...extras(o),
 })
 
-// one of iq's shapes beside the star, at size r with its form (n: the stairs' steps)
+// one of iq's shapes beside the star, at size r with its form, which the FORMLESS drop (n: the stairs' steps)
 export const shape = (kind: Exclude<ShapeKind, 'star'>, r: K, form: K, o: ShapeSpec & { n?: number } = {}): Shape => ({
   kind,
   n: o.n ?? 6,
@@ -50,7 +51,7 @@ export const shape = (kind: Exclude<ShapeKind, 'star'>, r: K, form: K, o: ShapeS
   r: k(r),
   round: k(o.round ?? 0),
   twist: k(o.twist ?? 0),
-  form: k(form),
+  ...(FORMLESS.includes(kind) ? {} : { form: k(form) }),
   ...extras(o),
 })
 

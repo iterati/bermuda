@@ -143,7 +143,8 @@ mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, s, -s, c); }
 vec4 row(int j, int k) { return texelFetch(uLevels, ivec2(k, j), 0); }
 float hash(vec2 id) { return fract(sin(dot(id, vec2(127.1, 311.7))) * 43758.5453); }
 
-// iq's sdStar (the first of the shapes below, from his 2D distance functions): n points, m from 1 (a dual star) through 2 (an n-gon) to n (spokes)
+// iq's sdStar (the first of the shapes below, from his 2D distance functions): n points, m from 1 (a dual star)
+// through 2 (an n-gon) to n (spokes)
 float sdStar(vec2 p, float r, float n, float m) {
   m = clamp(m, 1.01, n);
   float an = PI / n, en = PI / m;
@@ -490,9 +491,9 @@ Cell cellAt(int j, vec2 h, vec2 id, float w) {
   return c;
 }
 
-// What a cell's line draws at depth, scale its screen units a cell unit, with the far end's line in a morph mixed in: echo rings 1/rings apart, drifting
-// by the ring phase; in a morph the ring count morphs, and each end draws with its own echo, ring phase, line kind
-// and crawl, their lines mixed.
+// What a cell's line draws at depth, scale being how many screen units a cell unit spans: echo rings 1/rings apart,
+// drifting by the ring phase. In a morph the far end's line is mixed in: the ring count morphs, and each end draws
+// with its own echo, ring phase, line kind and crawl.
 float drawn(Cell c, float ringPhase, float depth, float scale) {
   float ra = uContour.x + uContour.y * depth, rb = uTowardRings.x + uTowardRings.y * depth;
   float k = PI * mix(max(ra, 1.), max(rb, 1.), uToward.y);
@@ -563,10 +564,13 @@ vec3 render(vec2 fc) {
     }
     // a level whose cells are under a few pixels fades out rather than shimmer (log-polar's centre)
     a *= exp(-r0 * (uRadial.x + uRadial.y * depth)) * w * smoothstep(1., 3., uRes.y * .5 * px);
-    // colour: the ancestry index pulls toward the level's own colour as far as the level is grown, plus a per-cell spread
+    // colour: the ancestry index pulls toward the level's own colour as far as the level is grown, plus a per-cell
+    // spread; a spilled outline wears its own cell's, by spill
+    float ni = mix(ci, t5.x + t5.z * hash(nid + near.seed * 3.7 + 11.), t5.y * w);
     ci = mix(ci, t5.x + t5.z * hash(cell.zw + own.seed * 3.7 + 11.), t5.y * w);
-    vec3 col = palette(ci + uPalette.w);
-    if (uToward.y > 0.) col = mix(col, palette(ci + uToward.w), uToward.y);
+    float li = mix(ci, ni, t6.w);
+    vec3 col = palette(li + uPalette.w);
+    if (uToward.y > 0.) col = mix(col, palette(li + uToward.w), uToward.y);
     add += col * a;
     float c = clamp(a, 0., 1.);
     first += (1. - cover) * col * c;
