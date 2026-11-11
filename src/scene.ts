@@ -105,8 +105,12 @@ export type Bank = {
   autopilot: { on: boolean; every: number; busy: number; change: number; wander: number; edge: Edge }
   moods: Macro[]
 }
+// Direct's timeline over a song: its file's name, its tempo (the clock the scenes' periods count in), ordered keys,
+// each a bank entry (a look, or 'look / preset') and the edge into it, landing at its at (seconds), and drawn curves,
+// each a knob's value over its own span (points of seconds and value), straight between its points.
 export type Timeline = {
   song: string
+  bpm: number
   keys: { at: number; scene: string; edge: Edge }[]
   curves: { knob: Address; points: [number, number][] }[]
 }
@@ -1154,4 +1158,42 @@ export function parseBank(input: unknown): Bank {
       return knob
     }),
   }
+}
+
+// Parse a timeline's JSON. Its keys' scenes are entry names, checked against the looks where it loads; a curve's
+// knob is an address of any scene's knobs, so it is checked only for naming a knob kind, and its values against
+// that kind's hard range.
+export function parseTimeline(input: unknown): Timeline {
+  const v = typeof input === 'string' ? (JSON.parse(input) as unknown) : input
+  const o = obj(v, '', ['song', 'bpm', 'keys', 'curves'])
+  const keys = list(o.keys, 'keys', 1, 4096).map((item, i) => {
+    const at = `keys[${i}]`
+    const x = obj(item, at, ['at', 'scene', 'edge'])
+    return {
+      at: num(x.at, `${at}.at`, [0, 86400]),
+      scene: str(x.scene, `${at}.scene`),
+      edge: edge(x.edge, `${at}.edge`),
+    }
+  })
+  keys.forEach((k, i) => {
+    if (i > 0 && k.at < keys[i - 1].at) fail(`keys[${i}].at`, 'must be at or after the key before it')
+  })
+  const knobs = new Set<string>()
+  const curves = list(o.curves, 'curves', 0, 256).map((item, i) => {
+    const at = `curves[${i}]`
+    const x = obj(item, at, ['knob', 'points'])
+    const knob = str(x.knob, `${at}.knob`)
+    if (!KINDS[kindOf(knob)]) fail(`${at}.knob`, `${knob} names no knob kind`)
+    if (knobs.has(knob)) fail(`${at}.knob`, `${knob} has a curve already`)
+    knobs.add(knob)
+    const points = list(x.points, `${at}.points`, 2, 100000).map((p, j): [number, number] => {
+      const [t, value] = list(p, `${at}.points[${j}]`, 2, 2)
+      return [num(t, `${at}.points[${j}][0]`, [0, 86400]), num(value, `${at}.points[${j}][1]`, hardRange(knob))]
+    })
+    points.forEach(([t], j) => {
+      if (j > 0 && t <= points[j - 1][0]) fail(`${at}.points[${j}]`, 'must come after the point before it')
+    })
+    return { knob, points }
+  })
+  return { song: str(o.song, 'song'), bpm: num(o.bpm, 'bpm', [10, 300]), keys, curves }
 }

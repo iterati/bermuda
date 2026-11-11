@@ -5,6 +5,7 @@
 // picture alone with the bank over it: every change there rides a timed transition, the fader run from the side
 // showing to the other with the change loaded on it, and the autopilot walks the bank.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { pruneTimeline, type Shot } from './direct'
 import { BANK, LOOKS } from './looks'
 import { attach, drive, echoes, HAS_MIDI, keyOf, learn, learnTrigger, takes, waiting, type Learning } from './midi'
 import { morphSize } from './morph'
@@ -33,16 +34,19 @@ import {
   parseBank,
   parseControls,
   parseScene,
+  parseTimeline,
   resolve,
   type Address,
   type Bank as BankShape,
   type Controls,
   type Edge,
   type Scene,
+  type Timeline,
   type View,
 } from './scene'
 import { Bank } from './ui/Bank'
 import { Chain } from './ui/Chain'
+import { Direct, type Video } from './ui/Direct'
 import { CtlContext, Section, type Ctl } from './ui/controls'
 import { Deck } from './ui/Deck'
 import { Fader } from './ui/Fader'
@@ -56,6 +60,7 @@ import { Picture, type Side, type Transition } from './ui/Picture'
 const STORE = 'bermuda.looks'
 const CONTROLS = 'bermuda.midi'
 const BANK_STORE = 'bermuda.bank'
+const TIMELINE = 'bermuda.timeline'
 
 // What this browser keeps under a key, parsed: a store that fails its parse is set aside whole, so the next save
 // does not write over what did parse.
@@ -88,6 +93,17 @@ function loadBank(looks: Scene[]): { bank: BankShape; error?: string } {
   }
 }
 
+// The timeline saved in this browser, if any, without the keys that name no look.
+function loadTimeline(looks: Scene[]): { timeline: Timeline | null; error?: string } {
+  const stored = loadStored<Timeline | null>('saved timeline', TIMELINE, parseTimeline, null)
+  if (!stored.value) return { timeline: null, error: stored.error }
+  const { timeline, gone } = pruneTimeline(stored.value, looks)
+  return {
+    timeline,
+    error: gone.length ? `the timeline lost its keys of ${gone.join(', ')}: no look of that name` : undefined,
+  }
+}
+
 // Why a pair of scenes cannot play, alone or morphed into each other, past the shader's limits; or undefined.
 function refusal(pair: Record<Side, Scene>): string | undefined {
   for (const s of [pair.a, pair.b])
@@ -108,9 +124,11 @@ export function App() {
     loadStored('saved MIDI controls', CONTROLS, parseControls, { buttons: [] } as Controls),
   )
   const [initialBank] = useState(() => loadBank(library(initial.value)))
+  const [initialTimeline] = useState(() => loadTimeline(library(initial.value)))
   const [saved, setSaved] = useState(initial.value)
   const [error, setError] = useState(
-    [initial.error, initialControls.error, initialBank.error].filter(Boolean).join('; ') || undefined,
+    [initial.error, initialControls.error, initialBank.error, initialTimeline.error].filter(Boolean).join('; ') ||
+      undefined,
   )
   const [pair, setPair] = useState<Record<Side, Scene>>(() => ({
     a: structuredClone(LOOKS[0]),
@@ -124,7 +142,7 @@ export function App() {
   const scene = pair[side]
   const setScene = useCallback((fn: (s: Scene) => Scene) => setPair((p) => ({ ...p, [side]: fn(p[side]) })), [side])
   const [shown, setShown] = useState(scene)
-  const [mode, setMode] = useState<View | 'play'>('stage')
+  const [mode, setMode] = useState<View | 'play' | 'direct'>('stage')
   const [hidden, setHidden] = useState(false)
   const [picked, setPicked] = useState<string>(LOOKS[0].levels[0].id)
   const [focus, setFocus] = useState<Address | null>(null)
@@ -178,6 +196,25 @@ export function App() {
     localStorage.setItem(BANK_STORE, JSON.stringify(next))
     setBank(next)
   }, [])
+  // Direct: the timeline, what its export renders, and the frame the picture draws from it
+  const [timeline, setTimeline] = useState(initialTimeline.timeline)
+  const changeTimeline = useCallback((next: Timeline | null) => {
+    if (next) localStorage.setItem(TIMELINE, JSON.stringify(next))
+    else localStorage.removeItem(TIMELINE)
+    setTimeline(next)
+  }, [])
+  const [video, setVideo] = useState<Video>({ width: 1920, height: 1080, fps: 30, format: 'mp4' })
+  const directShot = useRef<(() => Shot) | null>(null)
+  // a look gone from the library takes its entries out of the bank and its keys out of the timeline
+  const prune = (next: Scene[]) => {
+    const kept = pruneBank(bank, library(next))
+    if (kept.scenes.length < bank.scenes.length) changeBank(kept)
+    if (!timeline) return
+    const { timeline: rest, gone } = pruneTimeline(timeline, library(next))
+    if (!gone.length) return
+    changeTimeline(rest)
+    setError(`the timeline lost its keys of ${gone.join(', ')}`)
+  }
   const auto = bank.autopilot
   // seconds from one autopilot change to the next, and each Play change's length: at or under it the autopilot
   // never rests, and its keyframes pass on a curve
@@ -301,7 +338,7 @@ export function App() {
     return () => clearTimeout(id)
   }, [mode, auto.on, running, run, queue.length, cycle, seconds, refused])
 
-  const toMode = (next: View | 'play') => {
+  const toMode = (next: View | 'play' | 'direct') => {
     if (next === 'play') {
       // Play goes on from the side showing, the fader run home to it if it sat between, and fills the screen
       const showing = fader < 0.5 ? 'a' : 'b'
@@ -352,7 +389,7 @@ export function App() {
     else setScene(mutate)
   }
   const toggleLoop = useCallback(() => edit((d) => (d.loop ? delete d.loop : (d.loop = { seconds: 30 }))), [edit])
-  const save = useCallback(() => {
+  const save = () => {
     try {
       parseScene(structuredClone(scene))
     } catch (err) {
@@ -361,10 +398,8 @@ export function App() {
     const next = [...saved.filter((s) => s.name !== scene.name), structuredClone(scene)]
     localStorage.setItem(STORE, JSON.stringify(next))
     setSaved(next)
-    // a preset gone from the look takes its entry out of the bank
-    const kept = pruneBank(bank, library(next))
-    if (kept.scenes.length < bank.scenes.length) changeBank(kept)
-  }, [saved, scene, bank, changeBank])
+    prune(next)
+  }
 
   // a focused knob that an edit took away is dropped
   const focused = focus && knobsOf(scene).some((k) => k.address === focus) ? focus : null
@@ -487,7 +522,11 @@ export function App() {
       if (e.key === 'Tab') {
         e.preventDefault()
         setHidden((h) => !h)
-      } else if (e.key === 'e' || e.key === 'E') toMode(mode === 'edit' ? 'stage' : 'edit')
+      } else if (mode === 'direct') {
+        // Direct takes the song's keys itself
+        if (e.key === 't' || e.key === 'Escape') toMode('stage')
+      } else if (e.key === 't') toMode('direct')
+      else if (e.key === 'e' || e.key === 'E') toMode(mode === 'edit' ? 'stage' : 'edit')
       else if (e.key === 'd' || e.key === 'D') toMode(mode === 'decks' ? 'stage' : 'decks')
       else if (e.key === 'f') toMode(mode === 'play' ? 'stage' : 'play')
       else if (e.key === 'o') changeBank({ ...bank, autopilot: { ...auto, on: !auto.on } })
@@ -558,8 +597,7 @@ export function App() {
         const next = saved.filter((s) => s.name !== name)
         localStorage.setItem(STORE, JSON.stringify(next))
         setSaved(next)
-        const kept = pruneBank(bank, library(next))
-        if (kept.scenes.length < bank.scenes.length) changeBank(kept)
+        prune(next)
       }}
       onError={setError}
     />
@@ -641,6 +679,8 @@ export function App() {
           decks={mode === 'decks' ? decks.current : undefined}
           onLive={setShown}
           onLand={land}
+          shot={mode === 'direct' ? () => directShot.current?.() : undefined}
+          aspect={mode === 'direct' ? video.width / video.height : undefined}
         />
         {mode !== 'play' && (
           <header className="bar panel">
@@ -666,6 +706,13 @@ export function App() {
               </button>
               <button onClick={() => toMode('play')} title="the picture alone, every change a transition (F)">
                 Play
+              </button>
+              <button
+                className={mode === 'direct' ? 'on' : ''}
+                onClick={() => toMode(mode === 'direct' ? 'stage' : 'direct')}
+                title="a timeline of keys and curves over a song, and its export to video (T)"
+              >
+                Direct
               </button>
             </span>
             <button className="mini" onClick={() => setRunning((r) => !r)} title="space">
@@ -711,10 +758,18 @@ export function App() {
             >
               mutate
             </button>
-            <span className="dim keys">
-              Tab hides · E edit · D decks · Space pause · 1-0 looks · [ ] presets · ← → chips · ↑ ↓ knob · M MIDI learn
-              · S save · P preset · A B side · , . fader · X swap · L loop · R mutate · F play · O autopilot · N next
-            </span>
+            {mode === 'direct' ? (
+              <span className="dim keys">
+                Tab hides · Space play · Home to the start · wheel zooms · shift-drag the waveform loops · double-click
+                the keys adds one · T or Esc back to Stage
+              </span>
+            ) : (
+              <span className="dim keys">
+                Tab hides · E edit · D decks · T direct · Space pause · 1-0 looks · [ ] presets · ← → chips · ↑ ↓ knob ·
+                M MIDI learn · S save · P preset · A B side · , . fader · X swap · L loop · R mutate · F play · O
+                autopilot · N next
+              </span>
+            )}
           </header>
         )}
         {error && (
@@ -722,7 +777,20 @@ export function App() {
             {error} <span className="dim">(click to close)</span>
           </div>
         )}
-        {mode === 'play' ? (
+        <Direct
+          timeline={timeline}
+          looks={looks}
+          entries={looks.flatMap((l) => [l.name, ...l.presets.map((p) => entryName(l.name, p.name))])}
+          current={entries[side] ?? (looks.some((l) => l.name === scene.name) ? scene.name : looks[0].name)}
+          bpm={bpm}
+          active={mode === 'direct'}
+          video={video}
+          shot={directShot}
+          onVideo={setVideo}
+          onTimeline={changeTimeline}
+          onError={setError}
+        />
+        {mode === 'direct' ? null : mode === 'play' ? (
           <aside className="panel playbar">
             <div className="now">
               <b>{run ? pair[run.to].name : scene.name}</b>

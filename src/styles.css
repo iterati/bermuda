@@ -1026,3 +1026,236 @@ kbd {
 .playbar .now .mini {
   margin-left: auto;
 }
+
+/* Direct: the picture framed as the export will be, the timeline along the bottom */
+/* the bar's look, clock and loop are Stage's scene's, which Direct does not draw */
+.direct .bar > .look-title,
+.direct .bar > .mini,
+.direct .bar > .num,
+.direct .bar > .check {
+  display: none;
+}
+.picture.framed {
+  inset: auto;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  /* the height between the bar and the timeline panel, at most, and the width there is */
+  width: min(calc(100% - 20px), calc((100vh - 386px) * var(--aspect)));
+  height: auto;
+  aspect-ratio: var(--aspect);
+  outline: 1px solid var(--edge);
+}
+.direct-panel {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  height: 310px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+}
+.direct-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: center;
+}
+.direct-row .actions {
+  margin-left: auto;
+}
+.direct-row .actions.export {
+  gap: 8px;
+}
+.direct-row .actions.export .mini.go {
+  border-color: var(--accent);
+  padding: 3px 10px;
+}
+.direct-row progress {
+  width: 120px;
+}
+select.mini {
+  padding: 1px 4px;
+}
+.song-name {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.time {
+  font-variant-numeric: tabular-nums;
+}
+.warn {
+  color: #ffcf7a;
+}
+.lanes {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  gap: 8px;
+}
+.gutter {
+  width: 170px;
+  flex: none;
+  color: var(--dim);
+  font-size: 11px;
+}
+.lane-name {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.ruler-name {
+  height: 44px;
+}
+.keys-name {
+  height: 38px;
+  margin-top: 4px;
+}
+.curve-name {
+  height: 40px;
+  margin-top: 4px;
+}
+.curve-name span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+.tracks {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+.ruler,
+.curve {
+  display: block;
+  width: 100%;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.04);
+  touch-action: none;
+}
+.ruler {
+  height: 44px;
+  cursor: text;
+}
+.ruler .wave {
+  stroke: rgba(127, 216, 255, 0.5);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.ruler .tick {
+  stroke: rgba(255, 255, 255, 0.35);
+  vector-effect: non-scaling-stroke;
+}
+.keys-track {
+  position: relative;
+  height: 38px;
+  margin-top: 4px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+}
+.keys-track .edge {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  background: linear-gradient(to right, transparent, rgba(201, 162, 255, 0.45));
+  clip-path: polygon(0 100%, 100% 0, 100% 100%);
+  pointer-events: none;
+}
+.key {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  margin-left: -5px;
+  cursor: grab;
+  touch-action: none;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.key i {
+  display: block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  background: var(--accent);
+  transform: rotate(45deg);
+}
+.key span {
+  color: var(--dim);
+  pointer-events: none;
+}
+.key.picked i {
+  background: #fff;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.key.picked span {
+  color: var(--text);
+}
+.curve {
+  height: 40px;
+  margin-top: 4px;
+  cursor: crosshair;
+}
+.curve polyline {
+  fill: none;
+  stroke: var(--mod);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.curve polyline.drawing {
+  stroke: #fff;
+}
+.curve polyline.rub {
+  stroke: #ff7a7a;
+  stroke-dasharray: 4 3;
+}
+.curve .own {
+  stroke: rgba(255, 255, 255, 0.2);
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+}
+.tracks .overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #fff;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.5);
+}
+.tracks .loop {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid rgba(140, 255, 190, 0.45);
+  border-right: 1px solid rgba(140, 255, 190, 0.45);
+  background: rgba(140, 255, 190, 0.05);
+}
+.tracks .loop.on {
+  background: rgba(140, 255, 190, 0.13);
+}
+.tracks .tick-label {
+  position: absolute;
+  top: 2px;
+  margin-left: 3px;
+  font-size: 9px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}

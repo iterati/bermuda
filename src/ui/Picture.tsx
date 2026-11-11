@@ -3,7 +3,9 @@
 // curve, and says when it lands. It hands the edited side's live scene up a few times a second so the knobs can
 // show it. In Decks it draws A and B into their decks too, each at its deck's size in the canvas's corner and
 // copied out, before the mix goes over the whole canvas: one shader, each clock run once a frame.
+// In Direct it draws the timeline's frame instead, at the export's aspect.
 import { useEffect, useMemo, useRef } from 'react'
+import type { Shot } from '../direct'
 import { snapLoop } from '../loop'
 import { morph, smooth } from '../morph'
 import { advance, type Live } from '../motion'
@@ -26,6 +28,8 @@ type Props = {
   decks?: Record<Side, HTMLCanvasElement | null>
   onLive: (scene: Scene) => void
   onLand: () => void
+  shot?: () => Shot | undefined // Direct's frame, when it has a timeline
+  aspect?: number // width over height, else the picture fills the screen
 }
 
 const density = () => Math.min(window.devicePixelRatio, 1.5)
@@ -54,9 +58,15 @@ export function Picture(props: Props) {
     let through = 0
     let landed = false
     let raf = requestAnimationFrame(function tick(now) {
-      const { snapped, side, fader, edge, bpm, running, transition, decks, onLive, onLand } = latest.current
+      const { snapped, side, fader, edge, bpm, running, transition, decks, onLive, onLand, shot } = latest.current
       const dt = running ? Math.min(0.1, (now - last) / 1000) : 0
       last = now
+      const direct = shot?.()
+      if (direct) {
+        renderer.draw(direct.scene, direct.phases, direct.toward)
+        raf = requestAnimationFrame(tick)
+        return
+      }
       if (transition !== run) [run, through, landed] = [transition, 0, false]
       if (run) through = run.seconds > 0 ? Math.min(1, through + dt / run.seconds) : 1
       const x = run ? run.from + ((run.to === 'b' ? 1 : 0) - run.from) * smooth(0, 1, through) : fader
@@ -96,5 +106,11 @@ export function Picture(props: Props) {
       fit.disconnect()
     }
   }, [lives])
-  return <canvas ref={canvas} className="picture" />
+  return (
+    <canvas
+      ref={canvas}
+      className={`picture${props.aspect ? ' framed' : ''}`}
+      style={props.aspect ? ({ '--aspect': props.aspect } as React.CSSProperties) : undefined}
+    />
+  )
 }
