@@ -63,6 +63,23 @@ describe('the morph', () => {
     expect(at(a, b, 1).levels[0].cell.turn.value).toBe(30)
   })
 
+  it('morphs oblique into voronoi by its jitter, and swaps another lattice kind where the level weighs nothing', () => {
+    const square = scene({ name: 'a', levels: [level('l')] })
+    const organic = scene({ name: 'b', levels: [level('l', { lattice: 'voronoi', jitter: 0.8 })] })
+    expect(at(square, organic, 0).levels[0].lattice).toMatchObject({ kind: 'voronoi', jitter: { value: 0 } })
+    expect(at(square, organic, 0.5).levels[0].lattice).toMatchObject({ kind: 'voronoi', jitter: { value: 0.4 } })
+    expect(at(square, organic, 0.5).levels[0].weight.value).toBe(1)
+    expect(at(square, organic, 1).levels[0].lattice.jitter?.value).toBeCloseTo(0.8)
+    const polar = scene({ name: 'a', levels: [level('l', { lattice: 'polar', sectors: 8 })] })
+    const brick = scene({ name: 'b', levels: [level('l', { lattice: 'brick' })] })
+    const lattice = (x: number) => at(polar, brick, x).levels[0]
+    expect(lattice(0)).toMatchObject({ lattice: { kind: 'polar', sectors: 8 }, weight: { value: 1 } })
+    expect(lattice(0.47)).toMatchObject({ lattice: { kind: 'polar' }, weight: { value: 0 } })
+    expect(lattice(0.53).lattice).toEqual({ kind: 'brick', e2: expect.anything() })
+    expect(lattice(0.53).weight.value).toBe(0)
+    expect(lattice(1).weight.value).toBe(1)
+  })
+
   it('staggers each depth over its own window of the fader, deep first when asked', () => {
     expect(depthWindow(0, 2, { ...together, stagger: 1 })).toEqual([0, 0.5])
     expect(depthWindow(1, 2, { ...together, stagger: 1 })).toEqual([0.5, 1])

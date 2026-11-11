@@ -147,9 +147,20 @@ function mixLevels(
     const swap = t < 0.5 ? a : b
     const k = (ka: Knob, kb: Knob) => knob(ka, kb, t)
     const by = a.cell.by === b.cell.by ? 1 : 1 - dip(t, 0.1)
+    // oblique is voronoi at jitter 0, so the two morph as voronoi throughout; another change of kind or
+    // sectors swaps where the level's weight dips to nothing
+    const kinds = new Set([a.lattice.kind, b.lattice.kind])
+    const voronoi = kinds.has('voronoi') && (kinds.size === 1 || kinds.has('oblique'))
+    const swaps = !voronoi && (kinds.size > 1 || a.lattice.sectors !== b.lattice.sectors)
+    const lattice: Level['lattice'] = {
+      kind: voronoi ? 'voronoi' : swap.lattice.kind,
+      e2: [k(a.lattice.e2[0], b.lattice.e2[0]), k(a.lattice.e2[1], b.lattice.e2[1])],
+    }
+    if (voronoi) lattice.jitter = k(a.lattice.jitter ?? { value: 0 }, b.lattice.jitter ?? { value: 0 })
+    if (swap.lattice.sectors !== undefined) lattice.sectors = swap.lattice.sectors
     const level: Level = {
       id: a.id,
-      weight: k(a.weight, b.weight),
+      weight: scaled(k(a.weight, b.weight), swaps ? 1 - dip(t, 0.05) : 1),
       affine: {
         scale: k(a.affine.scale, b.affine.scale),
         turn: k(a.affine.turn, b.affine.turn),
@@ -158,10 +169,7 @@ function mixLevels(
       variations: VARIATIONS.filter((kind) => [a, b].some((l) => l.variations.some((v) => v.kind === kind))).map(
         (kind) => ({ kind, weight: { value: mix(variationWeight(a, kind), variationWeight(b, kind), t) } }),
       ),
-      lattice: {
-        kind: swap.lattice.kind,
-        e2: [k(a.lattice.e2[0], b.lattice.e2[0]), k(a.lattice.e2[1], b.lattice.e2[1])],
-      },
+      lattice,
       // parity swaps where the cells neither turn nor shift their rings
       cell: {
         by: swap.cell.by,
