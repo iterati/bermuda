@@ -64,6 +64,8 @@ export type Timeline = {
   keys: { at: number; scene: string; edge: Edge }[]
   curves: { knob: Address; points: [number, number][] }[]
 }
+// The two scenes on the hand fader, where it sits and the edge it runs along: a pair kept as one file.
+export type Fader = { a: Scene; b: Scene; at: number; edge: Edge }
 
 export type VariationKind = (typeof VARIATIONS)[number]
 export const VARIATIONS = [
@@ -126,6 +128,18 @@ export const HARD: Record<string, [number, number]> = {
   'post.gamma': [0.5, 3],
 }
 export const STAR_N: [number, number] = [3, 16]
+// The knob kinds that come round, by the period they repeat over: a turn, once round the palette index, once
+// round a ring's phase. Each hard range is a whole number of periods, so a value carried past one wraps.
+export const PERIOD: Record<string, number> = {
+  'frame.turn': 360,
+  'levels[].affine.turn': 360,
+  'levels[].cell.turn': 360,
+  'levels[].cell.phase': 1,
+  'levels[].variants[].shape.twist': 360,
+  'levels[].colour.at': 1,
+  'palette.stops[].lch[2]': 360,
+  'palette.hue': 360,
+}
 
 // 'levels[a].variants[1].below[b].affine.offset[0]' -> 'levels[].affine.offset[0]'
 export function kindOf(address: Address): string {
@@ -198,7 +212,7 @@ export function allLevels(levels: Level[]): { level: Level; list: Level[] }[] {
 }
 
 // The longest chain a pixel can run, counting sub-chains.
-export function depthOf(levels: Level[]): number {
+export function depthOf<T extends { variants: { below?: T[] }[] }>(levels: T[]): number {
   return Math.max(
     0,
     ...levels.map((level, i) =>
@@ -206,6 +220,10 @@ export function depthOf(levels: Level[]): number {
     ),
   )
 }
+
+// The summed weight of a level's variations of one kind.
+export const variationWeight = (level: Level, kind: VariationKind) =>
+  level.variations.filter((v) => v.kind === kind).reduce((sum, v) => sum + v.weight.value, 0)
 
 // ---- the strict parse ----
 
@@ -225,6 +243,10 @@ function obj(v: unknown, path: string, required: string[], optional: string[] = 
 function num(v: unknown, path: string, range?: [number, number]): number {
   if (typeof v !== 'number' || !Number.isFinite(v)) return fail(path, 'must be a finite number')
   if (range && (v < range[0] || v > range[1])) fail(path, `${v} is outside ${range[0]} to ${range[1]}`)
+  return v
+}
+function bool(v: unknown, path: string): boolean {
+  if (typeof v !== 'boolean') return fail(path, 'must be true or false')
   return v
 }
 function str(v: unknown, path: string): string {
@@ -476,4 +498,28 @@ export function parseScene(input: unknown): Scene {
     scene.loop = { seconds: num(loop.seconds, 'loop.seconds', [0.1, 3600]) }
   }
   return scene
+}
+
+function edge(v: unknown, path: string): Edge {
+  const o = obj(v, path, ['seconds', 'stagger', 'deepFirst'])
+  return {
+    seconds: num(o.seconds, `${path}.seconds`, [0, 600]),
+    stagger: num(o.stagger, `${path}.stagger`, [0, 1]),
+    deepFirst: bool(o.deepFirst, `${path}.deepFirst`),
+  }
+}
+
+// Parse a fader pair's JSON: both scenes as parseScene takes them, their errors named under a. and b.
+export function parseFader(input: unknown): Fader {
+  const v = typeof input === 'string' ? (JSON.parse(input) as unknown) : input
+  const o = obj(v, '', ['a', 'b', 'at', 'edge'])
+  const side = (s: unknown, key: string) => {
+    try {
+      return parseScene(s)
+    } catch (err) {
+      if (err instanceof SceneError) throw new SceneError(`${key}.${err.message}`)
+      throw err
+    }
+  }
+  return { a: side(o.a, 'a'), b: side(o.b, 'b'), at: num(o.at, 'at', [0, 1]), edge: edge(o.edge, 'edge') }
 }

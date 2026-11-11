@@ -5,7 +5,9 @@ import {
   allLevels,
   clamp,
   hardRange,
+  kindOf,
   knobsOf,
+  PERIOD,
   playRange,
   resolve,
   type Address,
@@ -48,7 +50,8 @@ const follow = (from: number | undefined, to: number, glide: number, dt: number)
   from === undefined || glide <= 0 ? to : to + (from - to) * Math.exp(-dt / glide)
 
 // The scene to draw after dt seconds at the given tempo: each knob is its glided base, plus its link
-// group's spread, plus its modulators, kept to its play range (widened to the base when a hand put it outside).
+// group's spread, plus its modulators, kept to its play range (widened to the base when a hand put it outside);
+// a knob that comes round (PERIOD) with no play range wraps round its hard range instead.
 export function advance(scene: Scene, live: Live, dt: number, bpm: number): Scene {
   const out = structuredClone(scene)
   for (const { level, list } of allLevels(out.levels))
@@ -93,7 +96,13 @@ export function advance(scene: Scene, live: Live, dt: number, bpm: number): Scen
       v += t.depth * (2 * w - 1)
     }
     const [lo, hi] = playRange(src, own)
-    knob.value = v === base ? base : clamp(v, [Math.min(lo, base), Math.max(hi, base)])
+    const wraps = !own.play && PERIOD[kindOf(src)]
+    knob.value =
+      v === base
+        ? base
+        : wraps
+          ? lo + ((((v - lo) % (hi - lo)) + (hi - lo)) % (hi - lo))
+          : clamp(v, [Math.min(lo, base), Math.max(hi, base)])
   }
   live.drift = (live.drift + out.contour.drift.value * beats) % (2 * Math.PI)
   live.colour = (live.colour + out.palette.time.value * beats) % 1

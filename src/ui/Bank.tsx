@@ -14,6 +14,15 @@ type Props = {
   onError: (message: string) => void
 }
 
+// a value downloaded as a JSON file named after name
+export function download(name: string, value: unknown) {
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }))
+  a.download = `${name.replace(/[^\w-]+/g, '-')}.json`
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
 export function Bank({ looks, saved, onLoad, onSave, onDelete, onError }: Props) {
   const { scene, edit } = useCtl()
   const [presetName, setPresetName] = useState('')
@@ -28,13 +37,7 @@ export function Bank({ looks, saved, onLoad, onSave, onDelete, onError }: Props)
           <button
             className="mini"
             title="download this look as a JSON file"
-            onClick={() => {
-              const a = document.createElement('a')
-              a.href = URL.createObjectURL(new Blob([JSON.stringify(scene, null, 2)], { type: 'application/json' }))
-              a.download = `${scene.name.replace(/[^\w-]+/g, '-')}.json`
-              a.click()
-              URL.revokeObjectURL(a.href)
-            }}
+            onClick={() => download(scene.name, scene)}
           >
             export
           </button>

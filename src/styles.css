@@ -107,6 +107,14 @@ button {
   background: rgba(127, 216, 255, 0.18);
   color: var(--text);
 }
+.bar > * {
+  flex: none;
+}
+.bar > .keys {
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: right;
+}
 .keys {
   margin-left: auto;
   white-space: nowrap;
@@ -152,6 +160,102 @@ button {
   max-height: 40%;
   overflow: auto;
   padding: 8px 10px;
+}
+
+/* the fader from A to B: on Stage it floats at the top, between the chain and the bank */
+.stage .top {
+  position: absolute;
+  top: 58px;
+  left: 210px;
+  right: 320px;
+  padding: 6px 10px;
+}
+.fader-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.fader-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.side {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  max-width: 28%;
+  flex: none;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--edge);
+  border-radius: 7px;
+  padding: 3px 8px;
+  color: var(--dim);
+}
+.side span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.side.on {
+  border-color: var(--accent);
+  background: rgba(127, 216, 255, 0.14);
+  color: var(--text);
+}
+.side kbd {
+  font-weight: 700;
+  color: var(--accent);
+}
+.fader {
+  flex: 1;
+  min-width: 80px;
+  cursor: ew-resize;
+  touch-action: none;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 5px;
+}
+.fader .span {
+  fill: rgba(255, 255, 255, 0.12);
+}
+.fader .done {
+  fill: var(--accent);
+  opacity: 0.75;
+}
+.fader .handle {
+  stroke: #fff;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.fader-at {
+  width: 34px;
+  font-variant-numeric: tabular-nums;
+}
+.slide,
+.check {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  color: var(--dim);
+  font-size: 11px;
+}
+.slide input {
+  width: 90px;
+}
+.slide b {
+  color: var(--text);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.fader-row + .fader-row {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.fader-row .actions {
+  margin-left: auto;
+}
+.fader-row .mini,
+.fader-row .check {
+  white-space: nowrap;
 }
 
 /* Edit: the picture on the left, the whole chain open on the right */

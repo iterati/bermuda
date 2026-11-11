@@ -1,28 +1,57 @@
 // The renderer: compiles the one shader once, then each frame packs a live scene into its uniforms
 // and level rows and draws one full-screen triangle into whatever framebuffer is bound.
-import { allLevels, depthOf, LINES, MAX_LEVELS, MIXES, VARIATIONS, type Level, type Scene } from './scene'
+import { allLevels, LINES, MAX_LEVELS, MIXES, VARIATIONS, variationWeight, type Level, type Scene } from './scene'
 import { generateShader, ROW_TEXELS } from './shader'
 import type { Live } from './motion'
 
 const RAD = Math.PI / 180
 
+// A level's hash seed from its id, so its cells keep their picks wherever the level sits in the chain.
+function seedOf(id: string): number {
+  let h = 2166136261
+  for (const ch of id) h = Math.imul(h ^ ch.charCodeAt(0), 16777619)
+  return ((h >>> 0) % 100000) / 1000
+}
+
+// The heaviest chain's weight, sub-chains included: with every weight 1 it is the longest chain's length.
+function heaviest(levels: Level[]): number {
+  let sum = 0
+  let best = 0
+  for (const level of levels) {
+    sum += level.weight.value
+    best = Math.max(best, sum + Math.max(0, ...level.variants.map((v) => (v.below ? heaviest(v.below) : 0))))
+  }
+  return best
+}
+
+// A morph's far end, which the scene's own knobs cannot carry: its line kind, units and composite, its rings
+// (value, spread: the shader morphs their count and fades each end's echo apart), its stops' mixes, for each drawn
+// level in allLevels order whose far end has another id that id and how far through its window it is, its running
+// phases, and how far in it is (0 none, 1 all of it).
+export type Toward = {
+  line: Scene['line']['kind']
+  rings: [number, number]
+  units: Scene['line']['units']
+  composite: Scene['composite']
+  mixes: Scene['palette']['stops'][number]['mix'][]
+  levels: ({ id: string; at: number } | null)[]
+  drift: number
+  colour: number
+  at: number
+}
+
 // The level rows as shader.ts lays them out: every level, sub-chains included, gets a row; a level's next
 // row is the one after it in its own list, and a variant's sub-chain replaces the rest of the chain below it.
-export function packLevels(levels: Level[]): Float32Array {
+export function packLevels(levels: Level[], far: Toward['levels']): Float32Array {
   const data = new Float32Array(MAX_LEVELS * ROW_TEXELS * 4)
   const rows = new Map(allLevels(levels).map(({ level }, i) => [level, i]))
-  for (const { level, list } of allLevels(levels)) {
-    const at = (texel: number, ...values: number[]) => data.set(values, (rows.get(level)! * ROW_TEXELS + texel) * 4)
+  allLevels(levels).forEach(({ level, list }, row) => {
+    const at = (texel: number, ...values: number[]) => data.set(values, (row * ROW_TEXELS + texel) * 4)
     const next = list[list.indexOf(level) + 1]
     const { affine, lattice, cell, colour, variants } = level
     at(0, level.weight.value, affine.scale.value, affine.turn.value * RAD, next ? rows.get(next)! : -1)
     at(1, affine.offset[0].value, affine.offset[1].value, lattice.e2[0].value, lattice.e2[1].value)
-    at(
-      2,
-      ...VARIATIONS.map((kind) =>
-        level.variations.filter((v) => v.kind === kind).reduce((sum, v) => sum + v.weight.value, 0),
-      ),
-    )
+    at(2, ...VARIATIONS.map((kind) => variationWeight(level, kind)))
     at(4, cell.by === 'parity' ? 1 : 0, cell.turn.value * RAD, cell.phase.value * 2 * Math.PI, variants.length)
     at(
       5,
@@ -31,17 +60,19 @@ export function packLevels(levels: Level[]): Float32Array {
       colour.cellSpread.value,
       variants.reduce((s, v) => s + v.share.value, 0),
     )
+    const other = far[row]
+    at(6, seedOf(level.id), seedOf(other?.id ?? level.id), other?.at ?? 0, 0)
     variants.forEach(({ share, shape, below }, v) => {
-      at(6 + 2 * v, share.value, shape.n, shape.m.value, shape.r.value)
-      at(7 + 2 * v, shape.round.value, shape.twist.value * RAD, below ? rows.get(below[0])! : -1, 0)
+      at(7 + 2 * v, share.value, shape.n, shape.m.value, shape.r.value)
+      at(8 + 2 * v, shape.round.value, shape.twist.value * RAD, below ? rows.get(below[0])! : -1, 0)
     })
-  }
+  })
   return data
 }
 
 export type Renderer = {
   gl: WebGL2RenderingContext
-  draw: (scene: Scene, live: Pick<Live, 'drift' | 'colour'>) => void
+  draw: (scene: Scene, live: Pick<Live, 'drift' | 'colour'>, toward?: Toward) => void
 }
 
 export function createRenderer(canvas: HTMLCanvasElement): Renderer {
@@ -83,6 +114,9 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     composite: u('uComposite'),
     aa: u('uAA'),
     gamma: u('uGamma'),
+    toward: u('uToward'),
+    towardRings: u('uTowardRings'),
+    towardMix: u('uTowardMix'),
   }
   const texture = gl.createTexture()
   gl.activeTexture(gl.TEXTURE0)
@@ -93,14 +127,37 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
   gl.uniform1i(loc.levels, 0)
   gl.bindVertexArray(gl.createVertexArray())
 
-  const draw: Renderer['draw'] = (scene, live) => {
+  const draw: Renderer['draw'] = (scene, live, toward) => {
     const { frame, contour, line, palette, post } = scene
+    // a scene drawn alone is its own far end
+    const far = toward ?? {
+      line: line.kind,
+      rings: [contour.rings.value, contour.rings.spread ?? 0],
+      units: line.units,
+      composite: scene.composite,
+      mixes: palette.stops.map((s) => s.mix),
+      levels: [],
+      drift: live.drift,
+      colour: live.colour,
+      at: 0,
+    }
+    const mixed = (a: boolean, b: boolean) => Number(a) * (1 - far.at) + Number(b) * far.at
     gl.viewport(0, 0, canvas.width, canvas.height)
     gl.uniform2f(loc.res, canvas.width, canvas.height)
     gl.uniform4f(loc.frame, frame.origin[0].value, frame.origin[1].value, frame.zoom.value, frame.turn.value * RAD)
     gl.bindTexture(gl.TEXTURE_2D, texture)
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, ROW_TEXELS, MAX_LEVELS, gl.RGBA, gl.FLOAT, packLevels(scene.levels))
-    gl.uniform1f(loc.depth, depthOf(scene.levels))
+    gl.texSubImage2D(
+      gl.TEXTURE_2D,
+      0,
+      0,
+      0,
+      ROW_TEXELS,
+      MAX_LEVELS,
+      gl.RGBA,
+      gl.FLOAT,
+      packLevels(scene.levels, far.levels),
+    )
+    gl.uniform1f(loc.depth, Math.max(heaviest(scene.levels), 1e-6))
     gl.uniform4f(loc.contour, contour.rings.value, contour.rings.spread ?? 0, live.drift, 0)
     gl.uniform2f(loc.radial, contour.radialWeight.value, contour.radialWeight.spread ?? 0)
     gl.uniform4f(
@@ -108,7 +165,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
       LINES.indexOf(line.kind),
       line.width.value,
       line.width.spread ?? 0,
-      line.units === 'screen' ? 1 : 0,
+      mixed(line.units === 'screen', far.units === 'screen'),
     )
     gl.uniform2f(loc.falloff, line.falloff.value, line.falloff.spread ?? 0)
     gl.uniform1i(loc.stopCount, palette.stops.length)
@@ -120,8 +177,14 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
       loc.stopMix,
       palette.stops.map((s) => MIXES.indexOf(s.mix)),
     )
+    gl.uniform1iv(
+      loc.towardMix,
+      far.mixes.map((m) => MIXES.indexOf(m)),
+    )
     gl.uniform4f(loc.palette, palette.hue.value * RAD, palette.contrast.value, palette.radius.value, live.colour)
-    gl.uniform1i(loc.composite, scene.composite === 'add' ? 0 : 1)
+    gl.uniform1f(loc.composite, mixed(scene.composite === 'first', far.composite === 'first'))
+    gl.uniform4f(loc.toward, LINES.indexOf(far.line), far.at, far.drift, far.colour)
+    gl.uniform2f(loc.towardRings, ...far.rings)
     gl.uniform1i(loc.aa, post.aa)
     gl.uniform1f(loc.gamma, post.gamma.value)
     gl.drawArrays(gl.TRIANGLES, 0, 3)

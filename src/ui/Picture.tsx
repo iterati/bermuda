@@ -1,17 +1,33 @@
-// The picture: one canvas and the renderer, drawing every animation frame; it hands the live scene up
-// a few times a second so the knobs can show it.
-import { useEffect, useRef } from 'react'
+// The picture: one canvas and the renderer, drawing every animation frame. Scenes A and B each run on their own
+// clock; between the fader's ends it draws the morph. It hands the edited side's live scene up a few times a
+// second so the knobs can show it.
+import { useEffect, useMemo, useRef } from 'react'
+import { snapLoop } from '../loop'
+import { morph } from '../morph'
 import { advance, type Live } from '../motion'
 import { createRenderer } from '../render'
-import type { Scene } from '../scene'
+import type { Edge, Scene } from '../scene'
 
-type Props = { scene: Scene; bpm: number; running: boolean; live: Live; onLive: (scene: Scene) => void }
+export type Side = 'a' | 'b'
+type Props = {
+  pair: Record<Side, Scene>
+  side: Side
+  fader: number
+  edge: Edge
+  bpm: number
+  running: boolean
+  lives: Record<Side, Live>
+  onLive: (scene: Scene) => void
+}
 
-export function Picture({ scene, bpm, running, live, onLive }: Props) {
+export function Picture(props: Props) {
   const canvas = useRef<HTMLCanvasElement>(null)
-  const props = useRef({ scene, bpm, running, onLive })
+  const { pair, bpm, lives } = props
+  // each side as it plays, snapped to its loop
+  const snapped = useMemo(() => ({ a: snapLoop(pair.a, bpm), b: snapLoop(pair.b, bpm) }), [pair, bpm])
+  const latest = useRef({ ...props, snapped })
   useEffect(() => {
-    props.current = { scene, bpm, running, onLive }
+    latest.current = { ...props, snapped }
   })
   useEffect(() => {
     const el = canvas.current!
@@ -25,18 +41,24 @@ export function Picture({ scene, bpm, running, live, onLive }: Props) {
     let frame = 0
     let last = performance.now()
     let raf = requestAnimationFrame(function tick(now) {
-      const { scene, bpm, running, onLive } = props.current
-      const dt = Math.min(0.1, (now - last) / 1000)
+      const { snapped, side, fader, edge, bpm, running, onLive } = latest.current
+      const dt = running ? Math.min(0.1, (now - last) / 1000) : 0
       last = now
-      const shown = advance(scene, live, running ? dt : 0, bpm)
-      renderer.draw(shown, live)
-      if (frame++ % 4 === 0) onLive(shown)
+      const a = advance(snapped.a, lives.a, dt, bpm)
+      const b = advance(snapped.b, lives.b, dt, bpm)
+      if (fader <= 0) renderer.draw(a, lives.a)
+      else if (fader >= 1) renderer.draw(b, lives.b)
+      else {
+        const { scene, toward } = morph(a, b, fader, edge, lives.b)
+        renderer.draw(scene, lives.a, toward)
+      }
+      if (frame++ % 4 === 0) onLive(side === 'a' ? a : b)
       raf = requestAnimationFrame(tick)
     })
     return () => {
       cancelAnimationFrame(raf)
       fit.disconnect()
     }
-  }, [live])
+  }, [lives])
   return <canvas ref={canvas} className="picture" />
 }

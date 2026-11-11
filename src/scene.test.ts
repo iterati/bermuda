@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { LOOKS } from './looks'
 import { capturePreset } from './motion'
-import { kindOf, knobsOf, parseScene, resolve, type Scene } from './scene'
+import { kindOf, knobsOf, parseFader, parseScene, resolve, type Fader, type Scene } from './scene'
 
 const broken = (fn: (s: Record<string, unknown> & Scene) => void) => {
   const s = structuredClone(LOOKS[0]) as Record<string, unknown> & Scene
@@ -30,6 +30,39 @@ describe('a scene as JSON', () => {
     )
     expect(kindOf('levels[root].variants[1].below[sqA].affine.offset[1]')).toBe('levels[].affine.offset[1]')
     for (const a of addresses) expect(resolve(branching, a)).toBeDefined()
+  })
+})
+
+describe('a fader pair as JSON', () => {
+  const pair = (): Fader => ({
+    a: structuredClone(LOOKS[0]),
+    b: { ...structuredClone(LOOKS[6]), loop: { seconds: 30 } },
+    at: 0.3,
+    edge: { seconds: 2, stagger: 0.4, deepFirst: true },
+  })
+
+  it('round-trips with its scenes and edge', () => {
+    const f = pair()
+    expect(parseFader(JSON.stringify(f))).toEqual(f)
+  })
+
+  it.each([
+    ['a stagger off its range', (f: Fader) => (f.edge.stagger = 2), /^edge\.stagger: 2 is outside/],
+    [
+      'a direction that is not true or false',
+      (f: Fader) => ((f.edge as { deepFirst: unknown }).deepFirst = 'yes'),
+      /^edge\.deepFirst: must be true or false/,
+    ],
+    ['a missing edge', (f: Fader) => delete (f as Partial<Fader>).edge, /^edge: is missing/],
+    [
+      'a broken scene, named under its side',
+      (f: Fader) => (f.b.levels[0].affine.scale.value = 99),
+      /^b\.levels\[h1\]\.affine\.scale\.value: 99 is outside/,
+    ],
+  ])('refuses %s', (_, breakIt, message) => {
+    const f = pair()
+    breakIt(f)
+    expect(() => parseFader(JSON.stringify(f))).toThrow(message)
   })
 })
 

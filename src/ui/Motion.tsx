@@ -20,8 +20,10 @@ function WaveLine({ m }: { m: Modulator }) {
 }
 
 export function Modulators() {
-  const { scene, edit, setFocus } = useCtl()
+  const { scene, live, edit, setFocus } = useCtl()
   const change = (id: string, fn: (m: Modulator) => void) => edit((d) => fn(d.modulators.find((m) => m.id === id)!))
+  // a loop plays each period snapped to it
+  const plays = new Map(live.modulators.map((m) => [m.id, m.period]))
   return (
     <div className="panel-block">
       <div className="block-title">
@@ -74,7 +76,17 @@ export function Modulators() {
                 })
               }
             />
-            <Num label="period" value={m.period} min={0.01} onChange={(v) => change(m.id, (x) => (x.period = v))} />
+            <Num
+              // the live scene lags an edit that adds a modulator by a frame, so a new one shows its own period
+              label={
+                Math.abs((plays.get(m.id) ?? m.period) - m.period) > 1e-9
+                  ? `period · loop ${Number(plays.get(m.id)!.toFixed(2))}`
+                  : 'period'
+              }
+              value={m.period}
+              min={0.01}
+              onChange={(v) => change(m.id, (x) => (x.period = v))}
+            />
             <Num label="phase" value={m.phase} onChange={(v) => change(m.id, (x) => (x.phase = v))} />
             <Num
               label="glide"
