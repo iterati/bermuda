@@ -1,8 +1,8 @@
 // Direct: a timeline's frame at any time of its song, and its export. Each key's scene plays on its own clock,
-// started as its edge starts (a key of the same look as the one before carries that one's clock on), stepped on a
-// fixed grid so a frame is the same however it is reached: played, scrubbed or exported. An edge morphs the key
-// before into its key, landing on it at its at; keys passed through back to back bend on a Catmull-Rom curve, as
-// Play's transitions do. A curve sets its knob over its own span, under the knob's modulators.
+// started as its edge starts (a key of the same look as the one before plays from where that one's clock started),
+// stepped on a fixed grid so a frame is the same however it is reached: played, scrubbed or exported. An edge morphs
+// the key before into its key, landing on it at its at; keys passed through back to back bend on a Catmull-Rom
+// curve, as Play's transitions do. A curve sets its knob over its own span, under the knob's modulators.
 import {
   AudioBufferSource,
   BufferTarget,
@@ -66,7 +66,8 @@ const copyLive = (live: Live): Live => ({ ...live, phases: new Map(live.phases),
 
 // A scene's clock from origin (song seconds): the scene to draw at t and its live state, stepped from the last grid
 // step it reached, or back from the checkpoint at or before t's.
-function clock(scene: Scene, origin: number, curves: Timeline['curves'], bpm: number) {
+export type Clock = (t: number) => { scene: Scene; live: Live }
+function clock(scene: Scene, origin: number, curves: Timeline['curves'], bpm: number): Clock {
   const marks = [newLive()]
   let head = { n: 0, live: newLive() }
   return (t: number) => {
@@ -84,8 +85,10 @@ function clock(scene: Scene, origin: number, curves: Timeline['curves'], bpm: nu
   }
 }
 
-// The timeline's frame at any time t of its song, over the looks its keys name.
-export function director(timeline: Timeline, looks: Scene[]): (t: number) => Shot {
+// The timeline's frame at any time t of its song, over the looks its keys name. clocks: an earlier build's, by what
+// each plays, so an edit that leaves a key's scene, start, tempo and curves as they were keeps its clock's steps;
+// it is left holding this build's.
+export function director(timeline: Timeline, looks: Scene[], clocks = new Map<string, Clock>()): (t: number) => Shot {
   const { keys, curves, bpm } = timeline
   const scenes = keys.map((k) => {
     const scene = entryScene(looks, k.scene)
@@ -96,19 +99,25 @@ export function director(timeline: Timeline, looks: Scene[]): (t: number) => Sho
   const starts = keys.map((k, j) => (j ? Math.max(keys[j - 1].at, k.at - k.edge.seconds) : 0))
   const origins: number[] = []
   scenes.forEach((s, j) => origins.push(j && s.name === scenes[j - 1].name ? origins[j - 1] : starts[j]))
-  const clocks = scenes.map((s, j) => clock(s, origins[j], curves, bpm))
-  // key j is passed through when an edge lands on it and the next one sets off from it
+  const plays = JSON.stringify(curves)
+  const ids = scenes.map((s, j) => `${origins[j]}|${bpm}|${JSON.stringify(s)}|${plays}`)
+  const own = ids.map((id, j) => clocks.get(id) ?? clock(scenes[j], origins[j], curves, bpm))
+  clocks.clear()
+  ids.forEach((id, j) => clocks.set(id, own[j]))
+  // key j is passed through when an edge lands on it and the next one sets off from it; the tangent there, for an
+  // edge d seconds long at either side of it, is Catmull-Rom's over the two edges' lengths
+  const length = (j: number) => keys[j].at - starts[j]
   const through = (j: number) => j > 0 && j + 1 < keys.length && starts[j] < keys[j].at && starts[j + 1] === keys[j].at
   const values = scenes.map(valuesOf)
   const none = new Map<string, number>()
+  const tangentAt = (j: number, d: number) => {
+    if (!through(j)) return none
+    const f = (2 * d) / (length(j) + length(j + 1))
+    return new Map([...tangent(values[j - 1], values[j + 1])].map(([k, v]) => [k, v * f]))
+  }
   const bends: Bend[] = scenes.map((s, j) =>
     j
-      ? bendOf(
-          scenes[j - 1],
-          s,
-          through(j - 1) ? tangent(values[j - 2], values[j]) : none,
-          through(j) ? tangent(values[j - 1], values[j + 1]) : none,
-        )
+      ? bendOf(scenes[j - 1], s, tangentAt(j - 1, length(j)), tangentAt(j, length(j)))
       : { from: none, to: none, range: new Map() },
   )
   return (t) => {
@@ -117,12 +126,12 @@ export function director(timeline: Timeline, looks: Scene[]): (t: number) => Sho
       keys.findLastIndex((k) => k.at <= t),
     )
     const j = i + 1
-    const a = clocks[i](t)
+    const a = own[i](t)
     if (j >= keys.length || t < starts[j]) return { scene: a.scene, phases: a.live }
     const run = (t - starts[j]) / (keys[j].at - starts[j])
     const x = smooth(0, 1, run)
     if (x <= 0) return { scene: a.scene, phases: a.live }
-    const b = clocks[j](t)
+    const b = own[j](t)
     const { scene, toward } = morph(a.scene, b.scene, x, keys[j].edge, b.live)
     bend(scene, bends[j], run)
     return { scene, phases: a.live, toward }
@@ -172,8 +181,8 @@ export async function exportVideo(job: ExportJob): Promise<{ file: Blob; video: 
     format: format === 'mp4' ? new Mp4OutputFormat({ fastStart: 'in-memory' }) : new WebMOutputFormat(),
     target: new BufferTarget(),
   })
-  const frames = new CanvasSource(canvas, { codec: video, bitrate: QUALITY_HIGH })
-  const sound = new AudioBufferSource({ codec: audio, bitrate: QUALITY_HIGH })
+  const frames = new CanvasSource(canvas, { codec: video, quality: QUALITY_HIGH })
+  const sound = new AudioBufferSource({ codec: audio, quality: QUALITY_HIGH })
   output.addVideoTrack(frames, { frameRate: fps })
   output.addAudioTrack(sound)
   try {

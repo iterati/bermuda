@@ -5,7 +5,7 @@
 // picture alone with the bank over it: every change there rides a timed transition, the fader run from the side
 // showing to the other with the change loaded on it, and the autopilot walks the bank.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { pruneTimeline, type Shot } from './direct'
+import { missingKeys, pruneTimeline, type Shot } from './direct'
 import { BANK, LOOKS } from './looks'
 import { attach, drive, echoes, HAS_MIDI, keyOf, learn, learnTrigger, takes, waiting, type Learning } from './midi'
 import { morphSize } from './morph'
@@ -93,15 +93,19 @@ function loadBank(looks: Scene[]): { bank: BankShape; error?: string } {
   }
 }
 
+// The timeline without the keys that name no look, and why, if it lost any: one left with no key is set aside.
+function keptTimeline(timeline: Timeline, looks: Scene[]): { timeline: Timeline | null; error?: string } {
+  const { timeline: kept, gone } = pruneTimeline(timeline, looks)
+  if (!gone.length) return { timeline: kept }
+  if (!kept) localStorage.setItem(`${TIMELINE}.broken`, JSON.stringify(timeline))
+  const lost = `the timeline lost its keys of ${gone.join(', ')}: no look of that name`
+  return { timeline: kept, error: kept ? lost : `${lost}, and with no key left it moved to ${TIMELINE}.broken` }
+}
+
 // The timeline saved in this browser, if any, without the keys that name no look.
 function loadTimeline(looks: Scene[]): { timeline: Timeline | null; error?: string } {
   const stored = loadStored<Timeline | null>('saved timeline', TIMELINE, parseTimeline, null)
-  if (!stored.value) return { timeline: null, error: stored.error }
-  const { timeline, gone } = pruneTimeline(stored.value, looks)
-  return {
-    timeline,
-    error: gone.length ? `the timeline lost its keys of ${gone.join(', ')}: no look of that name` : undefined,
-  }
+  return stored.value ? keptTimeline(stored.value, looks) : { timeline: null, error: stored.error }
 }
 
 // Why a pair of scenes cannot play, alone or morphed into each other, past the shader's limits; or undefined.
@@ -112,6 +116,21 @@ function refusal(pair: Record<Side, Scene>): string | undefined {
   const { levels, depth } = morphSize(pair.a, pair.b)
   if (levels > MAX_LEVELS || depth > MAX_DEPTH)
     return `A into B morphs through ${levels} levels, ${depth} deep; the shader holds ${MAX_LEVELS}, ${MAX_DEPTH} deep`
+}
+
+// Why a timeline cannot play: a key naming no look, or keys side by side that morph past the shader's limits (only
+// the pairs before does not hold are checked); or undefined.
+function timelineRefusal(next: Timeline, before: Timeline | null, looks: Scene[]): string | undefined {
+  const gone = missingKeys(next, looks)
+  if (gone.length) return `${gone.join(', ')} is not one of the looks: save it first (S)`
+  const pairs = (t: Timeline | null) => t?.keys.slice(1).map((k, j) => `${t.keys[j].scene}\n${k.scene}`) ?? []
+  const held = new Set(pairs(before))
+  for (const [j, pair] of pairs(next).entries()) {
+    if (held.has(pair)) continue
+    const [a, b] = pair.split('\n').map((entry) => entryScene(looks, entry)!)
+    const why = refusal({ a, b })
+    if (why) return `keys ${j + 1} and ${j + 2}: ${why}`
+  }
 }
 
 const other = (side: Side): Side => (side === 'a' ? 'b' : 'a')
@@ -198,11 +217,17 @@ export function App() {
   }, [])
   // Direct: the timeline, what its export renders, and the frame the picture draws from it
   const [timeline, setTimeline] = useState(initialTimeline.timeline)
-  const changeTimeline = useCallback((next: Timeline | null) => {
+  const keepTimeline = (next: Timeline | null) => {
     if (next) localStorage.setItem(TIMELINE, JSON.stringify(next))
     else localStorage.removeItem(TIMELINE)
     setTimeline(next)
-  }, [])
+  }
+  // an edit past what the timeline can play is refused
+  const changeTimeline = (next: Timeline) => {
+    const why = timelineRefusal(next, timeline, looks)
+    if (why) return setError(why)
+    keepTimeline(next)
+  }
   const [video, setVideo] = useState<Video>({ width: 1920, height: 1080, fps: 30, format: 'mp4' })
   const directShot = useRef<(() => Shot) | null>(null)
   // a look gone from the library takes its entries out of the bank and its keys out of the timeline
@@ -210,10 +235,10 @@ export function App() {
     const kept = pruneBank(bank, library(next))
     if (kept.scenes.length < bank.scenes.length) changeBank(kept)
     if (!timeline) return
-    const { timeline: rest, gone } = pruneTimeline(timeline, library(next))
-    if (!gone.length) return
-    changeTimeline(rest)
-    setError(`the timeline lost its keys of ${gone.join(', ')}`)
+    const { timeline: rest, error } = keptTimeline(timeline, library(next))
+    if (!error) return
+    keepTimeline(rest)
+    setError(error)
   }
   const auto = bank.autopilot
   // seconds from one autopilot change to the next, and each Play change's length: at or under it the autopilot
@@ -781,7 +806,7 @@ export function App() {
           timeline={timeline}
           looks={looks}
           entries={looks.flatMap((l) => [l.name, ...l.presets.map((p) => entryName(l.name, p.name))])}
-          current={entries[side] ?? (looks.some((l) => l.name === scene.name) ? scene.name : looks[0].name)}
+          current={entryName(scene.name, presets[side] < 0 ? undefined : scene.presets[presets[side]]?.name)}
           bpm={bpm}
           active={mode === 'direct'}
           video={video}

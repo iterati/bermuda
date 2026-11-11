@@ -3,7 +3,7 @@
 // timeline's frame at the song's time, framed as the export will be. The export renders the timeline (or the looped
 // span) frame by frame and saves the video with the song muxed in; the timeline saves in the browser and as a file.
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
-import { decodeSong, director, exportVideo, FORMATS, missingKeys, type Format, type Shot } from '../direct'
+import { decodeSong, director, exportVideo, FORMATS, missingKeys, type Clock, type Format, type Shot } from '../direct'
 import { entryScene } from '../play'
 import { clamp, hardRange, knobsOf, parseTimeline, type Edge, type Scene, type Timeline } from '../scene'
 import { download } from './Looks'
@@ -41,15 +41,19 @@ type Props = {
 
 // 75.5 -> '1:15.50'
 const clock = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(2).padStart(5, '0')}`
-// 'Tapestry 7 - Hexes / Ice' -> 'T7 Hexes / Ice'
-const short = (entry: string) => entry.replace(/^Tapestry (\w+) - /, 'T$1 ').replace(/^(Remix|Lattice) - /, '')
 
 export function Direct(props: Props) {
   const { timeline, looks, entries, current, active, video, shot, onTimeline, onError } = props
   const [song, setSong] = useState<Song | null>(null)
   const audio = useRef<HTMLAudioElement>(null)
   const [playing, setPlaying] = useState(false)
-  const at = useRef(0) // the song's time while it is still
+  // the song's time while it is still, and the same as state for what shows it
+  const at = useRef(0)
+  const [held, setHeld] = useState(0)
+  const hold = (t: number) => {
+    at.current = t
+    setHeld(t)
+  }
   const [loop, setLoop] = useState<[number, number] | null>(null)
   const [looping, setLooping] = useState(false)
   const marking = useRef(false) // a shift-drag on the waveform setting the loop
@@ -64,12 +68,14 @@ export function Direct(props: Props) {
   // the time the tracks run over: the song, or past the last key and curve while there is no song
   const end = Math.max(0, ...keys.map((k) => k.at), ...curves.map((c) => c.points[c.points.length - 1][0]))
   const length = song ? Math.max(song.duration, end) : end + 10
-  const [view, setView] = useState<[number, number]>([0, length])
-  const [v0, v1] = view[1] > length ? [0, length] : view
+  // the span the tracks show: all of it until the wheel zooms in
+  const [view, setView] = useState<[number, number] | null>(null)
+  const [v0, v1] = view && view[1] <= length ? view : [0, length]
   const x = (t: number) => ((t - v0) / (v1 - v0)) * W
   const pct = (t: number) => `${((t - v0) / (v1 - v0)) * 100}%`
-  // the app keeps the timeline's keys to the looks
-  const draw = useMemo(() => timeline && director(timeline, looks), [timeline, looks])
+  // the app keeps the timeline's keys to the looks; each build keeps the clocks an edit left as they were
+  const [clocks] = useState(() => new Map<string, Clock>())
+  const draw = useMemo(() => timeline && director(timeline, looks, clocks), [timeline, looks, clocks])
   const time = () => (audio.current && !audio.current.paused ? audio.current.currentTime : at.current)
 
   // the picture draws the frame at the song's time
@@ -78,10 +84,7 @@ export function Direct(props: Props) {
   })
   const playhead = useRef<HTMLDivElement>(null)
   const readout = useRef<HTMLSpanElement>(null)
-  const now = useRef({ loop, looping, v0, v1 })
-  useEffect(() => {
-    now.current = { loop, looping, v0, v1 }
-  })
+
   // while Direct is on: the looped span plays round, and the playhead and the time follow the song
   useEffect(() => {
     if (!active) {
@@ -102,7 +105,7 @@ export function Direct(props: Props) {
   }, [active])
 
   const seek = (t: number) => {
-    at.current = clamp(t, [0, length])
+    hold(clamp(t, [0, length]))
     if (audio.current) audio.current.currentTime = at.current
   }
   const play = () => {
@@ -112,15 +115,16 @@ export function Direct(props: Props) {
     a.currentTime = looping && loop && (at.current < loop[0] || at.current >= loop[1]) ? loop[0] : at.current
     void a.play()
   }
-  const latest = useRef({ play, seek, loop, looping })
+  // what the animation frames, the keys and the wheel read of the view as it is now
+  const now = useRef({ play, seek, loop, looping, v0, v1 })
   useEffect(() => {
-    latest.current = { play, seek, loop, looping }
+    now.current = { play, seek, loop, looping, v0, v1 }
   })
   useEffect(() => {
     if (!active) return
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return
-      const { play, seek, loop, looping } = latest.current
+      const { play, seek, loop, looping } = now.current
       if (e.key === ' ') {
         e.preventDefault()
         play()
@@ -177,7 +181,7 @@ export function Direct(props: Props) {
         peaks[Math.floor(i / per)] = Math.max(peaks[Math.floor(i / per)], Math.abs(data[i]))
       if (song) URL.revokeObjectURL(song.url)
       setSong({ name: file.name, url: URL.createObjectURL(file), duration: buffer.duration, buffer, peaks })
-      setView([0, buffer.duration])
+      setView(null)
       onTimeline(
         timeline
           ? { ...timeline, song: file.name }
@@ -218,13 +222,8 @@ export function Direct(props: Props) {
   const ki = Math.min(picked, keys.length - 1)
   const key = keys[ki] as Timeline['keys'][number] | undefined
   // the knobs a curve can take: those of the scene at the playhead's key
-  const here =
-    keys[
-      Math.max(
-        0,
-        keys.findLastIndex((k) => k.at <= at.current),
-      )
-    ]
+  const shown = keys.findLastIndex((k) => k.at <= held)
+  const here = keys[Math.max(0, shown)]
   const sceneNow = here && entryScene(looks, here.scene)
   const open = [...curves.map((c) => c.knob), ...lanes.filter((l) => !curves.some((c) => c.knob === l))]
   const waveform = useMemo(() => {
@@ -252,7 +251,7 @@ export function Direct(props: Props) {
         src={song?.url}
         onPlay={() => setPlaying(true)}
         onPause={(e) => {
-          at.current = e.currentTarget.currentTime
+          hold(e.currentTarget.currentTime)
           setPlaying(false)
         }}
         // the song rewinds at its end
@@ -311,7 +310,7 @@ export function Direct(props: Props) {
             className="mini"
             disabled={!timeline}
             title="a key at the playhead: the scene being edited"
-            onClick={() => addKey(at.current)}
+            onClick={() => addKey(time())}
           >
             + key
           </button>
@@ -356,6 +355,7 @@ export function Direct(props: Props) {
                   if (gone.length) return onError(`${file.name}: no look here for ${gone.join(', ')}`)
                   onTimeline(t)
                   setPicked(0)
+                  setView(null)
                 } catch (err) {
                   onError(`${file.name}: ${(err as Error).message}`)
                 }
@@ -407,7 +407,8 @@ export function Direct(props: Props) {
               if (!marking.current) return
               marking.current = false
               setLoop((l) => {
-                const [a, b] = l ? [Math.min(...l), Math.max(...l)] : [0, 0]
+                // inside the song, which plays no further
+                const [a, b] = l ? [Math.min(...l), Math.min(Math.max(...l), song?.duration ?? length)] : [0, 0]
                 return b - a < 0.2 ? null : [a, b]
               })
               setLooping(true)
@@ -433,7 +434,7 @@ export function Direct(props: Props) {
                     <div className="edge" style={{ left: pct(start), width: `calc(${pct(k.at)} - ${pct(start)})` }} />
                   )}
                   <div
-                    className={`key${i === picked ? ' picked' : ''}`}
+                    className={`key${i === ki ? ' picked' : ''}`}
                     style={{ left: pct(k.at) }}
                     title={`${k.scene} at ${clock(k.at)}: drag to move`}
                     onPointerDown={(e) => {
@@ -449,7 +450,8 @@ export function Direct(props: Props) {
                     }}
                   >
                     <i />
-                    <span>{short(k.scene)}</span>
+                    {/* 'Tapestry 7 - Hexes / Ice' -> 'T7 Hexes / Ice' */}
+                    <span>{k.scene.replace(/^Tapestry (\w+) - /, 'T$1 ').replace(/^(Remix|Lattice) - /, '')}</span>
                   </div>
                 </div>
               )
