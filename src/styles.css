@@ -1,0 +1,613 @@
+:root {
+  --glass: rgba(10, 12, 18, 0.62);
+  --edge: rgba(255, 255, 255, 0.09);
+  --text: #e7ecf3;
+  --dim: #8b95a5;
+  --accent: #7fd8ff;
+  --mod: #c9a2ff;
+  --play: rgba(127, 216, 255, 0.28);
+  color-scheme: dark;
+  font:
+    12px/1.35 ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  color: var(--text);
+  background: #000;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+button {
+  cursor: pointer;
+}
+
+.app {
+  position: relative;
+  height: 100%;
+}
+.picture {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.panel {
+  background: var(--glass);
+  backdrop-filter: blur(12px) saturate(1.2);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+}
+.app.hidden > :not(.picture) {
+  display: none;
+}
+
+/* the top bar */
+.bar {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  right: 10px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 10px;
+  z-index: 3;
+}
+.brand {
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.look-title {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 260px;
+}
+.look-title:hover,
+.look-title:focus {
+  border-color: var(--edge);
+  outline: none;
+}
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--edge);
+  border-radius: 7px;
+  overflow: hidden;
+}
+.seg button {
+  background: transparent;
+  border: 0;
+  padding: 3px 10px;
+  color: var(--dim);
+}
+.seg button.on {
+  background: rgba(127, 216, 255, 0.18);
+  color: var(--text);
+}
+.keys {
+  margin-left: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.error {
+  position: absolute;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 12px;
+  border-color: #ff7a7a88;
+  color: #ffb4b4;
+  z-index: 4;
+  cursor: pointer;
+}
+
+/* Stage: everything floats over the picture */
+.stage .left {
+  position: absolute;
+  top: 58px;
+  left: 10px;
+  width: 190px;
+  max-height: calc(100% - 300px);
+  overflow: auto;
+  padding: 8px;
+}
+.stage .right {
+  position: absolute;
+  top: 58px;
+  right: 10px;
+  bottom: 10px;
+  width: 300px;
+  overflow: auto;
+  padding: 8px;
+}
+.stage .bottom {
+  position: absolute;
+  left: 10px;
+  right: 320px;
+  bottom: 10px;
+  max-height: 40%;
+  overflow: auto;
+  padding: 8px 10px;
+}
+
+/* Edit: the picture on the left, the whole chain open on the right */
+.edit .picture {
+  width: calc(100% - 560px);
+}
+.edit .rack {
+  position: absolute;
+  top: 58px;
+  right: 10px;
+  bottom: 10px;
+  width: 540px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.edit .rack > .panel {
+  padding: 8px 10px;
+}
+.rack-section.picked {
+  border-color: rgba(127, 216, 255, 0.45);
+}
+.rack-chain .chain {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+/* the chain */
+.chain {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.chip {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  width: 100%;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--edge);
+  border-radius: 7px;
+  padding: 4px 8px;
+}
+.rack-chain .chip {
+  width: auto;
+}
+.chip:hover {
+  background: rgba(255, 255, 255, 0.09);
+}
+.chip.picked {
+  border-color: var(--accent);
+  background: rgba(127, 216, 255, 0.14);
+}
+.chip.level b {
+  color: var(--accent);
+}
+.chip.spacer {
+  opacity: 0.5;
+  border-style: dashed;
+}
+.chip.linked b {
+  color: var(--mod);
+}
+.sub {
+  color: var(--dim);
+  font-size: 10px;
+  margin: 1px 0;
+}
+.add-level {
+  align-self: flex-start;
+}
+
+/* groups of controls */
+.group-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  margin-bottom: 4px;
+  gap: 8px;
+}
+.group-body,
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  align-items: center;
+}
+.group-body > .row {
+  width: 100%;
+  border-top: 1px solid var(--edge);
+  padding-top: 4px;
+}
+.row-title {
+  color: var(--dim);
+  width: 62px;
+  font-size: 11px;
+}
+.pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.note {
+  color: var(--dim);
+  margin: 2px 0;
+}
+.actions {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+/* the knob */
+.knob {
+  width: 58px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  user-select: none;
+  touch-action: none;
+  cursor: ns-resize;
+  border-radius: 8px;
+  padding: 2px 0;
+}
+.knob.focused {
+  background: rgba(127, 216, 255, 0.12);
+}
+.knob svg path {
+  fill: none;
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+.knob .track {
+  stroke: rgba(255, 255, 255, 0.1);
+}
+.knob .play {
+  stroke: var(--play);
+  stroke-width: 8;
+}
+.knob .value {
+  stroke: var(--accent);
+}
+.knob.modulated .value {
+  stroke: var(--mod);
+}
+.knob .live {
+  fill: #fff;
+}
+.knob-value {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  margin-top: -4px;
+}
+.knob-label {
+  color: var(--dim);
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 58px;
+}
+
+.choice,
+.num {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 10px;
+  color: var(--dim);
+}
+.choice select,
+.num input,
+.preset-save input,
+.macro-name {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--edge);
+  border-radius: 5px;
+  padding: 2px 4px;
+  font-size: 11px;
+}
+.num input {
+  width: 64px;
+}
+.num.wide input {
+  width: 180px;
+}
+.mini {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--edge);
+  border-radius: 5px;
+  padding: 1px 7px;
+  font-size: 11px;
+  color: var(--text);
+}
+.mini:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+}
+.mini:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.mini.file {
+  position: relative;
+  cursor: pointer;
+}
+.mini.file input {
+  display: none;
+}
+.link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  text-decoration: underline dotted;
+}
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text);
+}
+.dim {
+  color: var(--dim);
+}
+
+/* the lattice pad */
+.pad {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  cursor: crosshair;
+  touch-action: none;
+}
+.pad .arc {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.25);
+  stroke-dasharray: 2 2;
+}
+.pad .mark {
+  fill: rgba(255, 255, 255, 0.35);
+}
+.pad text {
+  fill: var(--dim);
+  font-size: 9px;
+}
+.pad .base {
+  fill: var(--accent);
+}
+.pad .live {
+  fill: #fff;
+}
+
+/* the palette */
+.palette-bar {
+  width: 100%;
+  height: 14px;
+  border-radius: 4px;
+  margin-bottom: 4px;
+}
+.stops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  width: 100%;
+}
+.stop {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.swatch {
+  width: 14px;
+  height: 36px;
+  border-radius: 4px;
+  border: 1px solid var(--edge);
+}
+
+/* the knob detail */
+.detail {
+  border-bottom: 1px solid var(--edge);
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+}
+.detail-head {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+.detail-head code {
+  color: var(--accent);
+}
+.detail-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: flex-end;
+  margin-top: 4px;
+}
+
+/* modulators, macros, bank */
+.panel-block + .panel-block {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--edge);
+}
+.block-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.mod {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  padding: 5px 6px;
+  margin-bottom: 5px;
+}
+.mod-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: space-between;
+}
+.mod-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.mod-row .num input {
+  width: 52px;
+}
+.chip-mod {
+  background: rgba(201, 162, 255, 0.18);
+  border: 1px solid rgba(201, 162, 255, 0.5);
+  color: #eadcff;
+  border-radius: 10px;
+  padding: 1px 8px;
+  cursor: grab;
+  font-weight: 600;
+}
+.chip-macro {
+  background: rgba(255, 200, 120, 0.15);
+  border-radius: 10px;
+  padding: 1px 8px;
+}
+.wave path {
+  fill: none;
+  stroke: var(--mod);
+  stroke-width: 1.5;
+}
+.targets {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+.target {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+.target .link {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.macro-name {
+  flex: 1;
+}
+.macro-slider {
+  width: 100%;
+  accent-color: #ffc878;
+}
+.preset-save {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.preset-save input {
+  flex: 1;
+}
+.looks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.look {
+  display: flex;
+  gap: 4px;
+}
+.look-name {
+  flex: 1;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 3px 6px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.look-name:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+.looks li.current > .look .look-name {
+  border-color: var(--accent);
+  background: rgba(127, 216, 255, 0.12);
+}
+kbd {
+  font:
+    10px ui-monospace,
+    monospace;
+  color: var(--dim);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+.presets {
+  list-style: none;
+  margin: 0 0 2px 26px;
+  padding: 0;
+}
+.presets li {
+  display: flex;
+  justify-content: space-between;
+}
+
+/* Stage packs the picked chip's rows side by side, their titles turned up the side */
+.stage .bottom .group-body > .row {
+  width: auto;
+  border-top: 0;
+  border-left: 1px solid var(--edge);
+  padding: 0 6px;
+}
+.stage .bottom .row-title {
+  width: auto;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  text-align: center;
+}

@@ -1,0 +1,70 @@
+// The chain as chips: frame, the levels with their sub-chains under the variants that carry them,
+// then contour, line, palette and post. Click a chip to pick it.
+import { duplicateLevel } from '../edit'
+import type { Level } from '../scene'
+import { useCtl } from './controls'
+
+const latticeName = (l: Level) => {
+  const [s, h] = [l.lattice.e2[0].value, l.lattice.e2[1].value]
+  if (s < 0.02 && Math.abs(h - 1) < 0.02) return 'square'
+  if (Math.abs(s - 0.5) < 0.02 && Math.abs(h - Math.sqrt(3) / 2) < 0.02) return 'hex'
+  return s < 0.02 ? 'rect' : 'rhombic'
+}
+
+function Levels({ levels, picked, depth }: { levels: Level[]; picked: string; depth: number }) {
+  const { pick } = useCtl()
+  return levels.map((l) => (
+    <div key={l.id}>
+      <button
+        className={`chip level${picked === l.id ? ' picked' : ''}${l.weight.value === 0 ? ' spacer' : ''}${l.link ? ' linked' : ''}`}
+        style={{ marginLeft: depth * 14 }}
+        onClick={() => pick(l.id)}
+      >
+        <b>{l.id}</b>
+        <span className="dim">
+          {l.link ? `→ ${l.link}` : `${latticeName(l)} · ${l.variants.map((v) => `★${v.shape.n}`).join(' ')}`}
+        </span>
+      </button>
+      {l.variants.map(
+        (v, i) =>
+          v.below && (
+            <div key={i}>
+              <div className="sub" style={{ marginLeft: depth * 14 + 10 }}>
+                variant {i + 1} below
+              </div>
+              <Levels levels={v.below} picked={picked} depth={depth + 1} />
+            </div>
+          ),
+      )}
+    </div>
+  ))
+}
+
+export function Chain({ picked }: { picked: string }) {
+  const { scene, edit, pick } = useCtl()
+  const chip = (id: string, label: string) => (
+    <button className={`chip${picked === id ? ' picked' : ''}`} onClick={() => pick(id)}>
+      {label}
+    </button>
+  )
+  return (
+    <div className="chain">
+      {chip('frame', 'Frame')}
+      <Levels levels={scene.levels} picked={picked} depth={0} />
+      <button
+        className="mini add-level"
+        onClick={() => {
+          let id = ''
+          edit((d) => (id = duplicateLevel(d, d.levels[d.levels.length - 1].id)))
+          pick(id)
+        }}
+      >
+        + level
+      </button>
+      {chip('contour', 'Contour')}
+      {chip('line', 'Line')}
+      {chip('palette', 'Palette')}
+      {chip('post', 'Composite · post')}
+    </div>
+  )
+}
