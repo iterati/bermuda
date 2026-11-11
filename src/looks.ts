@@ -1000,10 +1000,9 @@ export const LOOKS: Scene[] = [
   // ---- shapes and lines: iq's shapes, joins, corners and onions, spill, screen lines and dots ----
   scene({
     name: "Shapes - iq's garden",
-    zoom: 1.2,
     levels: [
       level('garden', {
-        scale: 0.55,
+        scale: 1.2,
         turn: 30,
         e2: HEX,
         variants: [
