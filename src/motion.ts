@@ -1,6 +1,7 @@
 // Motion: the clock, modulators with running phases, glide, links with their spread, macros and presets.
 // advance() turns a scene into the scene to draw this frame, every knob at its live value.
 import { asLinked } from './edit'
+import { gcd } from './loop'
 import {
   allLevels,
   clamp,
@@ -130,13 +131,13 @@ export function setMacro(draft: Scene, id: string, v: number) {
 // that is coprime with every shorter one's, so the piece rarely repeats, as the Tapestries' periods were
 // picked (on a draft). Shorter periods keep theirs.
 export function detunePeriods(draft: Scene) {
-  const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a)
   const taken: number[] = []
   for (const m of [...draft.modulators].filter((m) => m.period >= 1).sort((a, b) => a.period - b.period)) {
     const base = Math.round(m.period)
+    // base, then one toward the period, one away, two toward, two away and so on: nearest first
+    const toward = m.period < base ? -1 : 1
     let p = base
-    // base, then one up, one down, two up, two down and so on
-    for (let i = 1; p < 1 || taken.some((t) => gcd(t, p) > 1); i++) p = base + (i % 2 ? (i + 1) / 2 : -i / 2)
+    for (let i = 1; p < 1 || taken.some((t) => gcd(t, p) > 1); i++) p = base + toward * (i % 2 ? (i + 1) / 2 : -i / 2)
     taken.push(p)
     m.period = p
   }

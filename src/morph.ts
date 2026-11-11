@@ -10,6 +10,7 @@ import {
   allLevels,
   clamp,
   depthOf,
+  hardRange,
   VARIATIONS,
   variationWeight,
   type Edge,
@@ -38,6 +39,18 @@ function knob(a: Knob, b: Knob, t: number): Knob {
   return out
 }
 const scaled = (k: Knob, f: number): Knob => ({ ...k, value: k.value * f })
+// a lattice vector morphs by its length and angle, so a square pad runs into a hex one along the rhombic arc,
+// kept inside the pad's hard ranges
+function vector(a: [Knob, Knob], b: [Knob, Knob], t: number): [Knob, Knob] {
+  if (t <= 0 || t >= 1) return [knob(a[0], b[0], t), knob(a[1], b[1], t)]
+  const polar = ([x, y]: [Knob, Knob]) => [Math.hypot(x.value, y.value), Math.atan2(y.value, x.value)]
+  const [[la, ta], [lb, tb]] = [polar(a), polar(b)]
+  const [l, th] = [mix(la, lb, t), mix(ta, tb, t)]
+  return [
+    { ...knob(a[0], b[0], t), value: clamp(l * Math.cos(th), hardRange('levels[].lattice.e2[0]')) },
+    { ...knob(a[1], b[1], t), value: clamp(l * Math.sin(th), hardRange('levels[].lattice.e2[1]')) },
+  ]
+}
 
 // The part of the fader depth k of n morphs over: with stagger 0 every depth takes the whole fader, with 1 each
 // takes its own nth in turn, the shallowest first unless the edge runs deep first.
@@ -148,19 +161,24 @@ function mixLevels(
     const k = (ka: Knob, kb: Knob) => knob(ka, kb, t)
     const by = a.cell.by === b.cell.by ? 1 : 1 - dip(t, 0.1)
     // oblique is voronoi at jitter 0, so the two morph as voronoi throughout; another change of kind or
-    // sectors swaps where the level's weight dips to nothing
+    // sectors swaps where the level's weight dips to nothing, and where only its first variant is picked, so
+    // every cell runs on down the same chain either side of the swap
     const kinds = new Set([a.lattice.kind, b.lattice.kind])
     const voronoi = kinds.has('voronoi') && (kinds.size === 1 || kinds.has('oblique'))
     const swaps = !voronoi && (kinds.size > 1 || a.lattice.sectors !== b.lattice.sectors)
+    const hidden = swaps ? 1 - dip(t, 0.05) : 1
+    const vectors = [...kinds].every((kind) => ['oblique', 'triangle', 'voronoi'].includes(kind))
     const lattice: Level['lattice'] = {
       kind: voronoi ? 'voronoi' : swap.lattice.kind,
-      e2: [k(a.lattice.e2[0], b.lattice.e2[0]), k(a.lattice.e2[1], b.lattice.e2[1])],
+      e2: vectors
+        ? vector(a.lattice.e2, b.lattice.e2, t)
+        : [k(a.lattice.e2[0], b.lattice.e2[0]), k(a.lattice.e2[1], b.lattice.e2[1])],
     }
     if (voronoi) lattice.jitter = k(a.lattice.jitter ?? { value: 0 }, b.lattice.jitter ?? { value: 0 })
     if (swap.lattice.sectors !== undefined) lattice.sectors = swap.lattice.sectors
     const level: Level = {
       id: a.id,
-      weight: scaled(k(a.weight, b.weight), swaps ? 1 - dip(t, 0.05) : 1),
+      weight: scaled(k(a.weight, b.weight), hidden),
       affine: {
         scale: k(a.affine.scale, b.affine.scale),
         turn: k(a.affine.turn, b.affine.turn),
@@ -180,7 +198,8 @@ function mixLevels(
         // a variant that is not there has no share
         const va = a.variants[v] ?? { ...b.variants[v], share: { value: 0 } }
         const vb = b.variants[v] ?? { ...a.variants[v], share: { value: 0 } }
-        const out: Level['variants'][number] = { share: k(va.share, vb.share), shape: shape(va.shape, vb.shape, t) }
+        const share = scaled(k(va.share, vb.share), v > 0 && variants.some((s) => s.below) ? hidden : 1)
+        const out: Level['variants'][number] = { share, shape: shape(va.shape, vb.shape, t) }
         if (below) out.below = mixLevels(below, top + i + 1, x, edge, n, far)
         return out
       }),

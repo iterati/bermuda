@@ -3,7 +3,7 @@
 // phase and palette index made whole over the loop, so its last frame runs into its first.
 import { hardRange, kindOf, PERIOD, type Scene } from './scene'
 
-const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a)
+export const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a)
 
 // The scene as it plays at bpm: as it is without a loop, else snapped to its loop.
 export function snapLoop(scene: Scene, bpm: number): Scene {

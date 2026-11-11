@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { moveLevel, removeLevel } from './edit'
 import { level, LOOKS, mod, scene, star } from './looks'
+import { gcd } from './loop'
 import { advance, applyPreset, capturePreset, detunePeriods, newLive, setMacro, update, wave } from './motion'
 import { knobsOf } from './scene'
 
@@ -101,8 +102,13 @@ describe('detune to coprimes', () => {
     expect(update(s, detunePeriods).modulators.map((m) => m.period)).toEqual([0.25, 12])
   })
 
+  it('takes the nearer neighbour first when its own whole period is taken', () => {
+    // 15 shares 3 with the shorter period; 14 is nearer to 14.6 than 16
+    const s = update(base(), (d) => d.modulators.push(mod('a', 'cos', 3, []), mod('b', 'cos', 14.6, [])))
+    expect(update(s, detunePeriods).modulators.map((m) => m.period)).toEqual([3, 14])
+  })
+
   it('leaves every pair coprime, whole and near where it was', () => {
-    const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a)
     for (const look of LOOKS) {
       const periods = update(look, detunePeriods).modulators.map((m) => m.period)
       periods.forEach((p, i) => {

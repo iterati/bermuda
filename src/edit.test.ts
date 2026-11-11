@@ -74,6 +74,8 @@ describe('snap to aligned nestings', () => {
     expect(nest({ scale: 1.5 }, { lattice: 'triangle' }), "under a triangle's two halves").toBeUndefined()
     expect(nest({ scale: 1.5 }, { lattice: 'voronoi', jitter: 0.3 }), 'under jittered seeds').toBeUndefined()
     expect(nest({ scale: 1.5 }, { by: 'parity', cellTurn: 15 }), 'under cells turned two ways').toBeUndefined()
+    expect(nest({ scale: 1.5, lattice: 'voronoi', jitter: 0.3 }), 'of jittered seeds').toBeUndefined()
+    expect(nest({ scale: 1.5 }, { cellTurn: { value: 0, spread: 10 } }), 'under a spread cell turn').toBeUndefined()
   })
 
   it('finds one under unjittered seeds and under cells told to turn two ways by 0°', () => {

@@ -167,9 +167,8 @@ describe('the one shader', () => {
         rings: 2,
       })
     // e^(√3 · 2π / 9): the shift (0, √3) along log r, the pad's vector (-1, 2)
-    const [a, b] = [await shoot(at(1), 0, 0), await shoot(at(Math.exp((Math.sqrt(3) * 2 * Math.PI) / 9)), 0, 0)]
-    expect(b.mean).toBeCloseTo(a.mean, 3)
-    expect(b.spread).toBeCloseTo(a.spread, 3)
+    const [a, b] = [await pixels(at(1), 0, 0), await pixels(at(Math.exp((Math.sqrt(3) * 2 * Math.PI) / 9)), 0, 0)]
+    expect(furthest(a, b)).toBeLessThan(1e-3)
   })
 })
 

@@ -656,33 +656,6 @@ export const LOOKS: Scene[] = [
       mod('character', 'tri', 17, [['levels[r1].variants[0].shape.m', 1.2, 0.8]]),
       mod('hue', 'ramp', 96, [['palette.hue', 180]]),
     ],
-    presets: [
-      {
-        name: 'Square',
-        values: {
-          'levels[r1].lattice.e2[0]': 0,
-          'levels[r1].lattice.e2[1]': 1,
-          'levels[r1].affine.scale': Math.SQRT2,
-          'levels[r1].affine.turn': 45,
-        },
-      },
-      {
-        name: 'Rhombic',
-        values: {
-          'levels[r1].lattice.e2[0]': Math.cos((75 * Math.PI) / 180),
-          'levels[r1].lattice.e2[1]': Math.sin((75 * Math.PI) / 180),
-        },
-      },
-      {
-        name: 'Hex',
-        values: {
-          'levels[r1].lattice.e2[0]': 0.5,
-          'levels[r1].lattice.e2[1]': R3 / 2,
-          'levels[r1].affine.scale': R3,
-          'levels[r1].affine.turn': 30,
-        },
-      },
-    ],
   }),
   scene({
     name: 'Lattice - Brick bond',
@@ -950,6 +923,7 @@ export const LOOKS: Scene[] = [
     palette: 'dusk',
     radius: 0,
     modulators: [
+      // a log spiral turning reads as an endless zoom
       mod('zoom', 'ramp', 30, [['levels[arms].affine.turn', 180]]),
       mod('jitter', 'cos', 25, [['levels[cells].lattice.jitter', 0.3]]),
       mod('hue', 'cos', 64, [['palette.hue', 90]]),

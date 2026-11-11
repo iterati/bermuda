@@ -2,7 +2,6 @@
 // and level rows and draws one full-screen triangle into whatever framebuffer is bound.
 import {
   allLevels,
-  CELLS,
   LATTICES,
   LINES,
   MAX_LEVELS,
@@ -65,7 +64,7 @@ export function packLevels(levels: Level[], far: Toward['levels']): Float32Array
     at(2, ...VARIATIONS.map((kind) => variationWeight(level, kind)))
     at(
       4,
-      CELLS.indexOf(cell.by as (typeof CELLS)[number]),
+      cell.by === 'parity' ? 1 : cell.by === 'hash' ? 2 : 0,
       cell.turn.value * RAD,
       cell.phase.value * 2 * Math.PI,
       variants.length,

@@ -80,6 +80,31 @@ describe('the morph', () => {
     expect(lattice(1).weight.value).toBe(1)
   })
 
+  it('runs a square pad into a hex one along the rhombic arc', () => {
+    const square = scene({ name: 'a', levels: [level('l')] })
+    const hex = scene({ name: 'b', levels: [level('l', { lattice: 'triangle', e2: [0.5, Math.sqrt(3) / 2] })] })
+    for (const x of [0.25, 0.5, 0.75]) {
+      const [e0, e1] = at(square, hex, x).levels[0].lattice.e2.map((k) => k.value)
+      expect(Math.hypot(e0, e1), `at ${x}`).toBeCloseTo(1)
+      expect((Math.atan2(e1, e0) * 180) / Math.PI, `at ${x}`).toBeCloseTo(90 - 30 * x)
+    }
+    expect(at(square, hex, 1).levels[0].lattice.e2.map((k) => k.value)).toEqual([0.5, Math.sqrt(3) / 2])
+  })
+
+  it('swaps a lattice kind where every cell runs on down its first variant, so its sub-chains do not jump', () => {
+    const variants = [
+      { share: 1, shape: star(6, 2, 0.4) },
+      { share: 1, shape: star(4, 2, 0.4), below: [level('sub')] },
+    ]
+    const a = scene({ name: 'a', levels: [level('l', { lattice: 'polar', sectors: 6, variants })] })
+    const b = scene({ name: 'b', levels: [level('l', { lattice: 'brick', variants })] })
+    const shares = (x: number) => at(a, b, x).levels[0].variants.map((v) => v.share.value)
+    expect(shares(0.2)[1]).toBeGreaterThan(0)
+    expect(shares(0.47)).toEqual([1, 0])
+    expect(shares(0.53)).toEqual([1, 0])
+    expect(shares(1)).toEqual([1, 1])
+  })
+
   it('staggers each depth over its own window of the fader, deep first when asked', () => {
     expect(depthWindow(0, 2, { ...together, stagger: 1 })).toEqual([0, 0.5])
     expect(depthWindow(1, 2, { ...together, stagger: 1 })).toEqual([0.5, 1])
