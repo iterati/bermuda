@@ -2,7 +2,7 @@
 // Stage shows the picked chip's; Edit shows every chip's at once.
 import { createContext, useContext, type ReactNode } from 'react'
 import { COSINES, css, gradient, stopsFromCosine } from '../colour'
-import { addSubChain, duplicateLevel, findLevel, moveLevel, prune, removeLevel, unlink } from '../edit'
+import { addSubChain, duplicateLevel, findLevel, moveLevel, newId, prune, removeLevel, unlink } from '../edit'
 import {
   hardRange,
   LINES,
@@ -294,8 +294,8 @@ function LevelSection({ id }: { id: string }) {
         className="mini"
         title="duplicate"
         onClick={() => {
-          let copy = ''
-          edit((d) => (copy = duplicateLevel(d, id)))
+          const copy = newId(scene, id)
+          edit((d) => duplicateLevel(d, id, copy))
           pick(copy)
         }}
       >

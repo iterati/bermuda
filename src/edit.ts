@@ -16,15 +16,14 @@ export function newId(scene: Scene, base: string): string {
   return `${stem}${n}`
 }
 
-// A copy of a level, sub-chains dropped and unlinked, under a fresh id, placed after it.
-export function duplicateLevel(scene: Scene, id: string): string {
+// A copy of a level under the id given (newId), sub-chains dropped and unlinked, placed after it.
+export function duplicateLevel(scene: Scene, id: string, as: string) {
   const { level, list } = findLevel(scene, id)
   const copy: Level = structuredClone(level)
-  copy.id = newId(scene, id)
+  copy.id = as
   delete copy.link
   for (const v of copy.variants) delete v.below
   list.splice(list.indexOf(level) + 1, 0, copy)
-  return copy.id
 }
 
 export function removeLevel(scene: Scene, id: string) {

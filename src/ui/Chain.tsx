@@ -1,6 +1,6 @@
 // The chain as chips: frame, the levels with their sub-chains under the variants that carry them,
 // then contour, line, palette and post. Click a chip to pick it.
-import { duplicateLevel } from '../edit'
+import { duplicateLevel, newId } from '../edit'
 import type { Level } from '../scene'
 import { useCtl } from './controls'
 
@@ -54,8 +54,9 @@ export function Chain({ picked }: { picked: string }) {
       <button
         className="mini add-level"
         onClick={() => {
-          let id = ''
-          edit((d) => (id = duplicateLevel(d, d.levels[d.levels.length - 1].id)))
+          const last = scene.levels[scene.levels.length - 1].id
+          const id = newId(scene, last)
+          edit((d) => duplicateLevel(d, last, id))
           pick(id)
         }}
       >

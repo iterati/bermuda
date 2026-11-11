@@ -43,7 +43,12 @@ describe('motion', () => {
     const s = update(base(), (d) => (d.levels[0].weight.glide = 1))
     const live = newLive()
     advance(s, live, 0.1, 60)
-    const half = advance(update(s, (d) => (d.levels[0].weight.value = 0)), live, Math.LN2, 60)
+    const half = advance(
+      update(s, (d) => (d.levels[0].weight.value = 0)),
+      live,
+      Math.LN2,
+      60,
+    )
     expect(half.levels[0].weight.value).toBeCloseTo(0.5)
   })
 
