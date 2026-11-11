@@ -100,6 +100,13 @@ describe('the morph', () => {
     expect(none.line.dots).toBeUndefined()
   })
 
+  it('drops spill where the lattice swaps into one that cannot spill', () => {
+    const a = scene({ name: 'a', levels: [level('s', { spill: 1 })] })
+    const b = scene({ name: 'b', levels: [level('s', { lattice: 'polar', sectors: 6 })] })
+    expect(at(a, b, 0.45).levels[0].cell.spill!.value).toBeCloseTo(0.55, 9)
+    expect(at(a, b, 0.55).levels[0].cell.spill).toBeUndefined()
+  })
+
   it('swaps parity where the cells do not turn', () => {
     const a = scene({ name: 'a', levels: [level('c', { cellTurn: 30 })] })
     const b = scene({ name: 'b', levels: [level('c', { by: 'parity', cellTurn: 30 })] })
