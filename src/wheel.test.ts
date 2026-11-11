@@ -46,7 +46,7 @@ beforeEach(async () => {
 }, 60_000)
 
 const to = async (m: Mode) => {
-  if (m !== 'stage') await page.keyboard.press(m[0])
+  if (m !== 'stage') await page.keyboard.press(m === 'edit' ? 'e' : 'd')
   await page.waitForSelector(`.${m} .knob`)
   mode = m
 }
