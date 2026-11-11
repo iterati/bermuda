@@ -11,7 +11,7 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import { build, type Rollup } from 'vite'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { findLevel, removeLevel, setLattice } from './edit'
 import { snapLoop } from './loop'
 import { background, BANK, join, level, LOOKS, scene, shape, star } from './looks'
@@ -38,6 +38,9 @@ declare global {
     renderer?: import('./render').Renderer
   }
 }
+
+// SwiftShader draws on the CPU, and the first draw of a run builds the one shader, which takes it a few seconds
+vi.setConfig({ testTimeout: 20_000 })
 
 let browser: Browser
 let page: Page
