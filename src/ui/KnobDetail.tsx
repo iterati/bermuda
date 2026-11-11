@@ -1,6 +1,6 @@
 // The focused knob in full: its value, play range, spread and glide, the modulators, macros and MIDI control
 // that drive it.
-import { clamp, hardRange, resolve, type Knob } from '../scene'
+import { clamp, knobKind, resolve, type Knob } from '../scene'
 import { Num, useCtl } from './controls'
 import { format } from './Knob'
 import { MidiLearn } from './Midi'
@@ -9,7 +9,7 @@ export function KnobDetail() {
   const { scene, live, focus, edit, setKnob } = useCtl()
   const knob = focus ? resolve(scene, focus) : undefined
   if (!focus || !knob) return null
-  const range = hardRange(focus)
+  const { range, label, help } = knobKind(focus)
   const change = (fn: (k: Knob) => void) => edit((d) => fn(resolve(d, focus)!))
   const mods = scene.modulators.flatMap((m) =>
     m.targets.map((t, i) => ({ m, t, i })).filter(({ t }) => t.knob === focus),
@@ -19,6 +19,9 @@ export function KnobDetail() {
     <div className="detail">
       <div className="detail-head">
         <code>{focus}</code>
+        <span>
+          {label}: {help}
+        </span>
         <span className="dim">
           hard {format(focus, range[0])} to {format(focus, range[1])} · live{' '}
           {format(focus, (resolve(live, focus) ?? knob).value)}

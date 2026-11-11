@@ -1,9 +1,10 @@
-// An on-screen knob: drag up and down (shift for fine), or the wheel over it. Its arc shows the value inside the
-// kind's hard range, the brighter band its play range, the dot its live value; drop a modulator chip on it to modulate it.
-// Its corner names the MIDI control that drives it, dimmed while a fader waits to pick it up.
+// An on-screen knob: drag up and down (shift for fine), or the wheel over it; its title says what it does. Its arc
+// shows the value inside the kind's hard range, the brighter band its play range, the dot its live value; drop a
+// modulator chip on it to modulate it. Its corner names the MIDI control that drives it, dimmed while a fader waits
+// to pick it up.
 import { useEffect, useRef } from 'react'
 import { label as midiLabel, mappingOf, positionOf, waiting } from '../midi'
-import { clamp, hardRange, resolve, type Address } from '../scene'
+import { clamp, knobKind, resolve, type Address } from '../scene'
 import { useCtl } from './controls'
 
 export const MOD_DRAG = 'application/x-bermuda-modulator'
@@ -56,7 +57,8 @@ export function Knob({ label, at: address }: { label: string; at: Address }) {
   const learningThis = !!learning && 'knob' in learning && learning.knob === address
   const onFocus = () => setFocus(address)
   const onChange = (v: number) => setKnob(address, v)
-  const [lo, hi] = hardRange(address)
+  const kind = knobKind(address)
+  const [lo, hi] = kind.range
   const f = (v: number) => (clamp(v, [lo, hi]) - lo) / (hi - lo)
   const drag = useRef<{ y: number; value: number } | null>(null)
   // the wheel's own listener, as React's is passive and the panel under the knob would scroll on the same turn
@@ -76,7 +78,7 @@ export function Knob({ label, at: address }: { label: string; at: Address }) {
     <div
       ref={el}
       className={`knob${focused ? ' focused' : ''}${modulated ? ' modulated' : ''}${learningThis ? ' learning' : ''}`}
-      title={`${address}\ndrag or wheel; shift for fine`}
+      title={`${kind.label}: ${kind.help}\n${address} · drag or wheel; shift for fine`}
       onPointerDown={(e) => {
         onFocus()
         e.currentTarget.setPointerCapture(e.pointerId)

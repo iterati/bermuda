@@ -1,15 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { BANK, join, level, LOOKS, scene, shape, star } from './looks'
+import { BANK, join, level, LOOKS, mod, scene, shape, star } from './looks'
 import { capturePreset } from './motion'
 import {
   FORMLESS,
+  KINDS,
   kindOf,
   knobsOf,
+  LINES,
   parseBank,
   parseFader,
   parseScene,
   resolve,
   SHAPES,
+  type Address,
   type Bank,
   type Fader,
   type Scene,
@@ -62,6 +65,103 @@ describe('a scene as JSON', () => {
     )
     expect(kindOf('levels[root].variants[1].below[sqA].affine.offset[1]')).toBe('levels[].affine.offset[1]')
     for (const a of addresses) expect(resolve(branching, a)).toBeDefined()
+  })
+})
+
+describe('the knob kinds', () => {
+  // whether the knob at address shows under the scene's settings
+  const shows = (s: Scene, address: Address) =>
+    KINDS[kindOf(address)].shows?.(
+      s,
+      knobsOf(s).find((k) => k.address === address)!,
+    ) ?? true
+
+  it.each(Object.entries(KINDS))('%s has a range, a label and one line of help', (_, kind) => {
+    expect(kind.range[0]).toBeLessThan(kind.range[1])
+    expect(kind.label).not.toBe('')
+    expect(kind.help).not.toBe('')
+    expect(kind.help).not.toMatch(/[\n—]/)
+    expect(kind.help.length).toBeLessThanOrEqual(140)
+  })
+
+  it.each(LOOKS.map((look) => [look.name, look] as const))('every knob of %s has a kind', (_, look) => {
+    for (const { address } of knobsOf(look)) expect(KINDS[kindOf(address)], address).toBeDefined()
+  })
+
+  it('flags the kinds a player reaches for as top', () => {
+    expect(
+      Object.keys(KINDS)
+        .filter((k) => KINDS[k].top)
+        .sort(),
+    ).toEqual(
+      [
+        'levels[].affine.scale',
+        'levels[].variants[].shape.r',
+        'levels[].colour.at',
+        'levels[].variants[].shape.m',
+        'levels[].variants[].shape.form',
+        'line.width',
+        'levels[].affine.turn',
+        'palette.hue',
+        'levels[].lattice.e2[0]',
+        'levels[].lattice.e2[1]',
+        'frame.zoom',
+        'contour.radialWeight',
+        'levels[].variants[].shape.round',
+      ].sort(),
+    )
+  })
+
+  it.each(LINES)('shows falloff on a %s line unless it is hard', (kind) => {
+    const s = scene({ name: kind, levels: [level('a')], line: kind, dots: { count: 8, size: 0.3, crawl: 1 } })
+    expect(shows(s, 'line.falloff')).toBe(kind !== 'hard')
+  })
+
+  it('shows drift and ring phase only when the rings can show', () => {
+    const ringed = (o: Parameters<typeof scene>[0]) => {
+      const s = scene(o)
+      return [shows(s, 'contour.drift'), shows(s, 'levels[a].cell.phase')]
+    }
+    const levels = [level('a')]
+    expect(ringed({ name: 'none', levels, rings: 0 })).toEqual([false, false])
+    expect(ringed({ name: 'one', levels, rings: 1 })).toEqual([true, true])
+    expect(ringed({ name: 'spread', levels, rings: { value: 0, spread: 2 } })).toEqual([true, true])
+    expect(ringed({ name: 'mod', levels, modulators: [mod('m', 'cos', 8, [['contour.rings', 1]])] })).toEqual([
+      true,
+      true,
+    ])
+    const macros = [{ id: 'x', name: 'x', value: 0, targets: [{ knob: 'contour.rings', from: 0, to: 2 }] }]
+    expect(ringed({ name: 'macro', levels, macros })).toEqual([true, true])
+  })
+
+  it("shows a variant's share only when its level has more than one", () => {
+    const one = scene({ name: 'one', levels: [level('a')] })
+    expect(shows(one, 'levels[a].variants[0].share')).toBe(false)
+    const tapestry = LOOKS.find((l) => l.name.startsWith('Tapestry 3'))!
+    expect(tapestry.levels.find((l) => l.id === 'st1')!.variants).toHaveLength(4)
+    expect(shows(tapestry, 'levels[st1].variants[2].share')).toBe(true)
+  })
+
+  it("shows m only on a star's, the joined shape's too", () => {
+    const s = scene({
+      name: 'm',
+      levels: [
+        level('a', { shape: star(6, 3, 0.3, { join: join(shape('box', 0.2, 0.5), [0.1, 0], 0.1) }) }),
+        level('b', { shape: shape('box', 0.3, 0.5, { join: join(star(5, 2, 0.2), [0.1, 0], 0.1) }) }),
+      ],
+    })
+    expect(shows(s, 'levels[a].variants[0].shape.m')).toBe(true)
+    expect(shows(s, 'levels[a].variants[0].shape.join.shape.m')).toBe(false)
+    expect(shows(s, 'levels[b].variants[0].shape.m')).toBe(false)
+    expect(shows(s, 'levels[b].variants[0].shape.join.shape.m')).toBe(true)
+  })
+
+  it('shows the dots knobs only on a dotted line, though they stay when the kind moves on', () => {
+    const dots = { count: 8, size: 0.3, crawl: 1 }
+    for (const at of ['line.dots.count', 'line.dots.size', 'line.dots.crawl']) {
+      expect(shows(scene({ name: 'dots', levels: [level('a')], line: 'dots', dots }), at)).toBe(true)
+      expect(shows(scene({ name: 'glow', levels: [level('a')], line: 'glow', dots }), at)).toBe(false)
+    }
   })
 })
 

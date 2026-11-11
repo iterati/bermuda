@@ -1,4 +1,4 @@
-// The durable shapes of a scene, their hard ranges, their addresses and the strict parse of a scene's JSON.
+// The durable shapes of a scene, their knob kinds, their addresses and the strict parse of a scene's JSON.
 // Angles are in degrees, periods in clock units (beats), and the palette index runs 0 to 1 round the stops.
 
 export type Knob = { value: number; spread?: number; glide?: number; play?: [number, number] } // play: inside the kind's hard range
@@ -166,62 +166,313 @@ export const MAX_DEPTH = 16
 export const MAX_VARIANTS = 4
 export const MAX_STOPS = 8
 
-// The hard range of every knob kind, keyed by its address with the level ids and list indices taken out
-// (see kindOf). Every value a scene holds and every play range sits inside its kind's range.
-export const HARD: Record<string, [number, number]> = {
-  'frame.origin[0]': [-4, 4],
-  'frame.origin[1]': [-4, 4],
-  'frame.zoom': [0.1, 8],
-  'frame.turn': [-360, 360],
-  'levels[].weight': [0, 1],
-  'levels[].affine.scale': [0.1, 8],
-  'levels[].affine.turn': [-360, 360],
-  'levels[].affine.offset[0]': [-2, 2],
-  'levels[].affine.offset[1]': [-2, 2],
-  'levels[].variations[].weight': [-1, 2],
-  'levels[].lattice.e2[0]': [0, 0.5],
-  'levels[].lattice.e2[1]': [0.5, 2],
-  'levels[].lattice.jitter': [0, 1],
-  'levels[].cell.turn': [-180, 180],
-  'levels[].cell.phase': [-1, 1],
-  'levels[].cell.spill': [0, 1],
-  'levels[].variants[].share': [0, 1],
-  'levels[].variants[].shape.m': [1.01, 16],
-  'levels[].variants[].shape.r': [0.02, 2],
-  'levels[].variants[].shape.round': [0, 1],
-  'levels[].variants[].shape.twist': [-180, 180],
-  'levels[].variants[].shape.form': [0, 1],
-  'levels[].variants[].shape.corner': [0, 0.5],
-  'levels[].variants[].shape.onion': [0, 0.5],
-  'levels[].variants[].shape.join.shape.m': [1.01, 16],
-  'levels[].variants[].shape.join.shape.r': [0.02, 2],
-  'levels[].variants[].shape.join.shape.round': [0, 1],
-  'levels[].variants[].shape.join.shape.twist': [-180, 180],
-  'levels[].variants[].shape.join.shape.form': [0, 1],
-  'levels[].variants[].shape.join.shape.corner': [0, 0.5],
-  'levels[].variants[].shape.join.offset[0]': [-1, 1],
-  'levels[].variants[].shape.join.offset[1]': [-1, 1],
-  'levels[].variants[].shape.join.blend': [0, 0.5],
-  'levels[].variants[].shape.join.weight': [0, 1],
-  'levels[].colour.at': [0, 1],
-  'levels[].colour.speed': [0, 1],
-  'levels[].colour.cellSpread': [0, 1],
-  'contour.rings': [0, 24],
-  'contour.drift': [-8, 8],
-  'contour.radialWeight': [-3, 3],
-  'line.width': [0.0002, 0.2],
-  'line.falloff': [0.3, 3],
-  'line.dots.count': [1, 64],
-  'line.dots.size': [0, 1],
-  'line.dots.crawl': [-8, 8],
-  'palette.stops[].lch[0]': [0, 1],
-  'palette.stops[].lch[1]': [0, 0.37],
-  'palette.stops[].lch[2]': [0, 360],
-  'palette.hue': [-360, 360],
-  'palette.contrast': [0, 2],
-  'palette.radius': [-2, 2],
-  'palette.time': [-2, 2],
-  'post.gamma': [0.5, 3],
+// Every knob kind, keyed by its address with the level ids and list indices taken out (see kindOf): its hard range,
+// a short label, a line of help (the knob's hover title), whether a player reaches for it (top: it fills the
+// Perform strip after the macros) and when it shows (shows false: it does nothing under the scene's settings).
+// Every value a scene holds and every play range sits inside its kind's range.
+export type Kind = {
+  range: [number, number]
+  label: string // the knob's short name, for the title and the Perform strip
+  help: string // one line: what turning it does
+  top?: true // a kind a player reaches for: it fills the Perform strip after the macros
+  shows?: (scene: Scene, at: KnobAt) => boolean // false: dead under the scene's current settings
+}
+// the echo rings can show: rings above 0, a spread on them, or a modulator or macro driving them
+const ringsShow = (scene: Scene) =>
+  scene.contour.rings.value > 0 ||
+  !!scene.contour.rings.spread ||
+  [...scene.modulators, ...scene.macros].some((m) => m.targets.some((t) => t.knob === 'contour.rings'))
+// the knob is this shape's m and the shape is a star, the one kind that reads m
+const starM = (shape: Shape | undefined, at: KnobAt) => shape?.m === at.knob && (shape.kind ?? 'star') === 'star'
+const dotted = (scene: Scene) => scene.line.kind === 'dots'
+export const KINDS: Record<string, Kind> = {
+  'frame.origin[0]': {
+    range: [-4, 4],
+    label: 'origin x',
+    help: "which point of the plane sits at the screen's centre, across: slides the whole picture sideways",
+  },
+  'frame.origin[1]': {
+    range: [-4, 4],
+    label: 'origin y',
+    help: "which point of the plane sits at the screen's centre, up and down: slides the whole picture vertically",
+  },
+  'frame.zoom': {
+    range: [0.1, 8],
+    label: 'zoom',
+    help: 'magnifies the whole picture; lines in screen units keep their width',
+    top: true,
+  },
+  'frame.turn': {
+    range: [-360, 360],
+    label: 'turn',
+    help: "turns the whole picture round the screen's centre, in degrees",
+  },
+  'levels[].weight': {
+    range: [0, 1],
+    label: 'weight',
+    help: 'how much of this level there is: 0 passes the plane through untouched and draws nothing, 1 is the whole level',
+  },
+  'levels[].affine.scale': {
+    range: [0.1, 8],
+    label: 'scale',
+    help: "how many cells fit across: higher packs this level's cells smaller and tighter",
+    top: true,
+  },
+  'levels[].affine.turn': {
+    range: [-360, 360],
+    label: 'turn',
+    help: "turns this level's grid before it tiles, in degrees",
+    top: true,
+  },
+  'levels[].affine.offset[0]': {
+    range: [-2, 2],
+    label: 'offset x',
+    help: "slides this level's grid sideways, in cells",
+  },
+  'levels[].affine.offset[1]': {
+    range: [-2, 2],
+    label: 'offset y',
+    help: "slides this level's grid up and down, in cells",
+  },
+  'levels[].variations[].weight': {
+    range: [-1, 2],
+    label: 'variation',
+    help: 'how strongly this variation (a flam3 warp) bends the plane before it tiles; linear alone at 1 leaves it straight',
+  },
+  'levels[].lattice.e2[0]': {
+    range: [0, 0.5],
+    label: 'shear',
+    help: 'slides each row of cells along, as the lattice reads it: on the oblique pad 0 is square, 0.5 (with height 0.87) is hex',
+    top: true,
+  },
+  'levels[].lattice.e2[1]': {
+    range: [0.5, 2],
+    label: 'height',
+    help: 'the distance between rows of cells, as the lattice reads it: on the oblique pad 1 is square, 0.87 (with shear 0.5) is hex',
+    top: true,
+  },
+  'levels[].lattice.jitter': {
+    range: [0, 1],
+    label: 'jitter',
+    help: "moves each voronoi cell's point at random inside its pad: 0 is the pad itself, 1 organic cells",
+  },
+  'levels[].cell.turn': {
+    range: [-180, 180],
+    label: 'cell turn',
+    help: 'turns every cell, and the levels below it, in degrees; with cell parity odd cells turn the other way, with hash each cell either way',
+  },
+  'levels[].cell.phase': {
+    range: [-1, 1],
+    label: 'ring phase',
+    help: "shifts this level's echo rings by a part of their spacing (0.5 is one whole ring); flipped cells shift the other way; needs rings",
+    shows: ringsShow,
+  },
+  'levels[].cell.spill': {
+    range: [0, 1],
+    label: 'spill',
+    help: 'fades in the outlines of the shapes of the cells round each cell, where they reach into it: 0 each cell draws its own alone',
+  },
+  'levels[].variants[].share': {
+    range: [0, 1],
+    label: 'share',
+    help: "how often cells pick this variant, against the shares of the level's other variants",
+    shows: (_, at) => at.level!.level.variants.length > 1,
+  },
+  'levels[].variants[].shape.m': {
+    range: [1.01, 16],
+    label: 'm',
+    help: "the star's character: near 1 a sharp dual star, 2 a plain polygon, up to the point count for thin spokes",
+    top: true,
+    shows: (_, at) => at.level!.level.variants.some((v) => starM(v.shape, at)),
+  },
+  'levels[].variants[].shape.r': {
+    range: [0.02, 2],
+    label: 'r',
+    help: "the shape's size in its cell: about 0.5 meets the next cell",
+    top: true,
+  },
+  'levels[].variants[].shape.round': {
+    range: [0, 1],
+    label: 'round',
+    help: 'morphs the shape into a circle: 0 is the shape, 1 a circle of radius r',
+    top: true,
+  },
+  'levels[].variants[].shape.twist': {
+    range: [-180, 180],
+    label: 'twist',
+    help: "turns this variant's shape in its cell, in degrees; the levels below don't turn with it",
+  },
+  'levels[].variants[].shape.form': {
+    range: [0, 1],
+    label: 'form',
+    help: "the shape's own proportion, as a box's height or a pie's opening; the star, the heart and the cool S have none",
+    top: true,
+  },
+  'levels[].variants[].shape.corner': {
+    range: [0, 0.5],
+    label: 'corner',
+    help: "rounds the shape's corners out by this much, shrinking it by as much first so it keeps its size",
+  },
+  'levels[].variants[].shape.onion': {
+    range: [0, 0.5],
+    label: 'onion',
+    help: 'splits the outline in two, this far either side of it, after the join',
+  },
+  'levels[].variants[].shape.join.shape.m': {
+    range: [1.01, 16],
+    label: 'join m',
+    help: "the joined star's character: near 1 a sharp dual star, 2 a plain polygon, up to the point count for thin spokes",
+    shows: (_, at) => at.level!.level.variants.some((v) => starM(v.shape.join?.shape, at)),
+  },
+  'levels[].variants[].shape.join.shape.r': {
+    range: [0.02, 2],
+    label: 'join r',
+    help: "the joined shape's size: about 0.5 meets the next cell",
+  },
+  'levels[].variants[].shape.join.shape.round': {
+    range: [0, 1],
+    label: 'join round',
+    help: 'morphs the joined shape into a circle: 0 is the shape, 1 a circle of radius r',
+  },
+  'levels[].variants[].shape.join.shape.twist': {
+    range: [-180, 180],
+    label: 'join twist',
+    help: 'turns the joined shape round its own middle, in degrees',
+  },
+  'levels[].variants[].shape.join.shape.form': {
+    range: [0, 1],
+    label: 'join form',
+    help: "the joined shape's own proportion, as a box's height or a pie's opening",
+  },
+  'levels[].variants[].shape.join.shape.corner': {
+    range: [0, 0.5],
+    label: 'join corner',
+    help: "rounds the joined shape's corners out by this much, shrinking it by as much first so it keeps its size",
+  },
+  'levels[].variants[].shape.join.offset[0]': {
+    range: [-1, 1],
+    label: 'join x',
+    help: "moves the joined shape sideways from the cell's middle",
+  },
+  'levels[].variants[].shape.join.offset[1]': {
+    range: [-1, 1],
+    label: 'join y',
+    help: "moves the joined shape up and down from the cell's middle",
+  },
+  'levels[].variants[].shape.join.blend': {
+    range: [0, 0.5],
+    label: 'blend',
+    help: 'how wide the smooth union melts the two shapes into each other: 0 is a sharp seam',
+  },
+  'levels[].variants[].shape.join.weight': {
+    range: [0, 1],
+    label: 'join weight',
+    help: 'how much of the joined shape there is: 0 none, 1 all of it smooth-unioned in',
+  },
+  'levels[].colour.at': {
+    range: [0, 1],
+    label: 'colour at',
+    help: "this level's own colour, a place round the palette (0 to 1 is once round); a spread across a link group gives each level its own",
+    top: true,
+  },
+  'levels[].colour.speed': {
+    range: [0, 1],
+    label: 'colour speed',
+    help: "how far this level's own colour takes over from the colour handed down from above: 0 keeps the inherited colour, 1 uses its own",
+  },
+  'levels[].colour.cellSpread': {
+    range: [0, 1],
+    label: 'cell spread',
+    help: "scatters each cell's colour round the palette from colour at, by up to this much",
+  },
+  'contour.rings': {
+    range: [0, 24],
+    label: 'rings',
+    help: 'echo rings round each outline: 0 draws the outline alone, up to 1 fades it into rings, and above 1 packs the rings closer',
+  },
+  'contour.drift': {
+    range: [-8, 8],
+    label: 'drift',
+    help: 'how fast the echo rings flow in or out (the sign picks which), in radians a beat; needs rings',
+    shows: ringsShow,
+  },
+  'contour.radialWeight': {
+    range: [-3, 3],
+    label: 'radial wt',
+    help: 'fades the lines with distance from the centre: positive darkens the edges, negative brightens them',
+    top: true,
+  },
+  'line.width': {
+    range: [0.0002, 0.2],
+    label: 'width',
+    help: 'how thick the lines are, in cell or screen units as the units menu says',
+    top: true,
+  },
+  'line.falloff': {
+    range: [0.3, 3],
+    label: 'falloff',
+    help: "how softly a line fades at its edge: a glow's, smooth or dotted line's power, a band's soft edge; hard lines don't use it",
+    shows: (scene) => scene.line.kind !== 'hard',
+  },
+  'line.dots.count': {
+    range: [1, 64],
+    label: 'dots',
+    help: 'how many dots round each outline; between two whole counts the next dot fades in; needs dotted lines',
+    shows: dotted,
+  },
+  'line.dots.size': {
+    range: [0, 1],
+    label: 'dot size',
+    help: "each dot's length, a part of the gap to the next: near 0 round dots of the line's width, 1 a whole line; needs dotted lines",
+    shows: dotted,
+  },
+  'line.dots.crawl': {
+    range: [-8, 8],
+    label: 'crawl',
+    help: 'how fast the dots crawl round each outline (the sign picks which way), in dots a beat; needs dotted lines',
+    shows: dotted,
+  },
+  'palette.stops[].lch[0]': {
+    range: [0, 1],
+    label: 'L',
+    help: "this stop's lightness, 0 black to 1 white",
+  },
+  'palette.stops[].lch[1]': {
+    range: [0, 0.37],
+    label: 'C',
+    help: "this stop's colourfulness, 0 grey to 0.37 the most vivid",
+  },
+  'palette.stops[].lch[2]': {
+    range: [0, 360],
+    label: 'h',
+    help: "this stop's hue, in degrees round the colour wheel",
+  },
+  'palette.hue': {
+    range: [-360, 360],
+    label: 'hue',
+    help: 'turns every colour of the palette round the colour wheel, in degrees',
+    top: true,
+  },
+  'palette.contrast': {
+    range: [0, 2],
+    label: 'contrast',
+    help: "spreads the palette's lightness away from the middle: 1 as the stops set it, 0 every colour at mid lightness",
+  },
+  'palette.radius': {
+    range: [-2, 2],
+    label: 'radius',
+    help: 'colours by distance from the centre: each unit out moves this far round the palette, before the levels take their own colours',
+  },
+  'palette.time': {
+    range: [-2, 2],
+    label: 'time',
+    help: 'cycles every colour round the palette, in turns a beat',
+  },
+  'post.gamma': {
+    range: [0.5, 3],
+    label: 'gamma',
+    help: 'lifts the mid-tones above 1 and darkens them below; 1 leaves the lines as drawn',
+  },
 }
 export const STAR_N: [number, number] = [3, 16]
 export const SECTORS: [number, number] = [1, 48]
@@ -247,10 +498,14 @@ export function kindOf(address: Address): string {
     .replace(/(\.variants\[\]\.below\[\])+/g, '')
 }
 
+export function knobKind(address: Address): Kind {
+  const kind = KINDS[kindOf(address)]
+  if (!kind) throw new Error(`${address}: no knob kind`)
+  return kind
+}
+
 export function hardRange(address: Address): [number, number] {
-  const range = HARD[kindOf(address)]
-  if (!range) throw new Error(`${address}: no knob kind`)
-  return range
+  return knobKind(address).range
 }
 
 // The range every automatic mover keeps to: the knob's play range, else its kind's hard range.
@@ -761,7 +1016,7 @@ export function parseBank(input: unknown): Bank {
     },
     moods: macros(o.moods, 'moods', (a, path) => {
       const knob = str(a, path)
-      if (!HARD[kindOf(knob)]) fail(path, `${knob} names no knob kind`)
+      if (!KINDS[kindOf(knob)]) fail(path, `${knob} names no knob kind`)
       return knob
     }),
   }
