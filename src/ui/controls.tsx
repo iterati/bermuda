@@ -46,6 +46,7 @@ export type Ctl = {
   setFocus: (address: Address) => void
   edit: (fn: (draft: Scene) => void) => void
   setKnob: (address: Address, value: number) => void
+  nudge: (address: Address, steps: number) => void // steps of 1% of its range, up for more
   pick: (chip: string) => void
   learning: Learning | null // what the next MIDI control or button maps to
   learn: (target: Learning | null) => void

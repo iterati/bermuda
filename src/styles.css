@@ -153,14 +153,28 @@ button {
   overflow: auto;
   padding: 8px;
 }
-.stage .bottom {
+/* the knobs' panel at the bottom, and the knob detail floating over it */
+.stage-bottom {
   position: absolute;
   left: 10px;
   right: 320px;
   bottom: 10px;
-  max-height: 40%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.stage-bottom > * {
+  pointer-events: auto;
+}
+.stage .bottom {
+  max-height: 40vh;
   overflow: auto;
   padding: 8px 10px;
+}
+.stage .knob-slot {
+  margin-left: 200px; /* clear of the chain */
+  padding: 6px 10px;
 }
 
 /* the fader from A to B: on Stage it floats at the top, between the chain and the bank */
@@ -277,6 +291,14 @@ button {
 .edit .rack > .panel {
   padding: 8px 10px;
 }
+.edit .rack > .knob-slot {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  flex: none;
+  height: 160px;
+  overflow: auto;
+}
 .rack-section.picked {
   border-color: rgba(127, 216, 255, 0.45);
 }
@@ -385,6 +407,13 @@ button {
   flex: 1;
   min-height: 0;
   overflow: auto;
+}
+.mixer > .knob-slot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  max-height: var(--mix-h);
 }
 
 /* the chain */
@@ -647,11 +676,6 @@ button {
 }
 
 /* the knob detail */
-.detail {
-  border-bottom: 1px solid var(--edge);
-  margin-bottom: 6px;
-  padding-bottom: 6px;
-}
 .detail-head {
   display: flex;
   gap: 10px;

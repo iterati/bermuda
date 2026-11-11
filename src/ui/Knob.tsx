@@ -1,7 +1,7 @@
-// An on-screen knob: drag up and down (shift for fine), or the wheel. Its arc shows the value inside the
+// An on-screen knob: drag up and down (shift for fine), or the wheel over it. Its arc shows the value inside the
 // kind's hard range, the brighter band its play range, the dot its live value; drop a modulator chip on it to modulate it.
 // Its corner names the MIDI control that drives it, dimmed while a fader waits to pick it up.
-import { useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { label as midiLabel, mappingOf, positionOf, waiting } from '../midi'
 import { clamp, hardRange, resolve, type Address } from '../scene'
 import { useCtl } from './controls'
@@ -35,11 +35,18 @@ export const format = (address: Address, v: number) => {
   return deg ? `${text}°` : text
 }
 
+// A wheel turn in knob steps, up for more: a mouse's notch is one, a trackpad's stream its share of one; shift for
+// fine, which some systems send as a sideways turn.
+export const wheelSteps = (e: WheelEvent) => {
+  const d = e.deltaY || (e.shiftKey ? e.deltaX : 0)
+  return (-d / (e.deltaMode === WheelEvent.DOM_DELTA_PIXEL ? 100 : 3)) * (e.shiftKey ? 0.2 : 1)
+}
+
 export const short = (address: string) => address.replace(/^levels/, '').replace(/variants\[(\d+)\]\.shape/, 'v$1')
 
 // A knob of the scene by its address.
 export function Knob({ label, at: address }: { label: string; at: Address }) {
-  const { scene, live: shown, focus, setFocus, edit, setKnob, learning, positions } = useCtl()
+  const { scene, live: shown, focus, setFocus, edit, setKnob, nudge, learning, positions } = useCtl()
   const knob = resolve(scene, address)!
   // the live scene lags the scene by a frame after a structural edit
   const live = resolve(shown, address)?.value
@@ -52,10 +59,22 @@ export function Knob({ label, at: address }: { label: string; at: Address }) {
   const [lo, hi] = hardRange(address)
   const f = (v: number) => (clamp(v, [lo, hi]) - lo) / (hi - lo)
   const drag = useRef<{ y: number; value: number } | null>(null)
+  // the wheel's own listener, as React's is passive and the panel under the knob would scroll on the same turn
+  const el = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const knob = el.current!
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      nudge(address, wheelSteps(e))
+    }
+    knob.addEventListener('wheel', onWheel, { passive: false })
+    return () => knob.removeEventListener('wheel', onWheel)
+  }, [address, nudge])
   const a = (live ?? knob.value) !== knob.value ? f(live!) : undefined
   const dot = a === undefined ? undefined : ((-135 + SWEEP * a) * Math.PI) / 180
   return (
     <div
+      ref={el}
       className={`knob${focused ? ' focused' : ''}${modulated ? ' modulated' : ''}${learningThis ? ' learning' : ''}`}
       title={`${address}\ndrag or wheel; shift for fine`}
       onPointerDown={(e) => {
@@ -69,9 +88,6 @@ export function Knob({ label, at: address }: { label: string; at: Address }) {
         onChange(clamp(drag.current.value + (drag.current.y - e.clientY) * step, [lo, hi]))
       }}
       onPointerUp={() => (drag.current = null)}
-      onWheel={(e) =>
-        onChange(clamp(knob.value - Math.sign(e.deltaY) * (hi - lo) * (e.shiftKey ? 0.002 : 0.01), [lo, hi]))
-      }
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes(MOD_DRAG)) e.preventDefault()
       }}

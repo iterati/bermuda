@@ -34,6 +34,7 @@ import { Chain } from './ui/Chain'
 import { CtlContext, Section, type Ctl } from './ui/controls'
 import { Deck } from './ui/Deck'
 import { Fader } from './ui/Fader'
+import { wheelSteps } from './ui/Knob'
 import { KnobDetail } from './ui/KnobDetail'
 import { Looks } from './ui/Looks'
 import { Midi } from './ui/Midi'
@@ -189,6 +190,14 @@ export function App() {
       setScene(() => next)
     },
     [scene, pair, side, setScene],
+  )
+  // a knob stepped by 1% of its range a step, from its value as it is when the step lands, so no step is lost
+  const nudge = useCallback(
+    (address: Address, steps: number) => {
+      const [lo, hi] = hardRange(address)
+      setScene((s) => setKnob(s, address, resolve(s, address)!.value + steps * (hi - lo) * 0.01))
+    },
+    [setScene],
   )
   // a keyframe on the edited side, or on the deck cued, which the controls then edit, at once
   const put = useCallback(
@@ -437,6 +446,7 @@ export function App() {
     setFocus,
     edit,
     setKnob: (address, value) => setScene((s) => setKnob(s, address, value)),
+    nudge,
     pick: setPicked,
     learning: learningNow,
     learn: learnMidi,
@@ -482,9 +492,7 @@ export function App() {
         setPicked(chips[(i + chips.length) % chips.length])
       } else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && focused) {
         e.preventDefault()
-        const [lo, hi] = hardRange(focused)
-        const step = (hi - lo) * (e.shiftKey ? 0.1 : 0.01) * (e.key === 'ArrowUp' ? 1 : -1)
-        setScene((s) => setKnob(s, focused, resolve(s, focused)!.value + step))
+        nudge(focused, (e.shiftKey ? 10 : 1) * (e.key === 'ArrowUp' ? 1 : -1))
       } else if (e.key === 's' && !e.metaKey && !e.ctrlKey) save()
       else if (e.key === 'p')
         setScene((s) => update(s, (d) => d.presets.push(capturePreset(d, `Preset ${d.presets.length + 1}`))))
@@ -503,6 +511,19 @@ export function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+  })
+
+  // the wheel over the picture turns the focused knob (over a knob, each knob takes its own)
+  const app = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = app.current!
+    const onWheel = (e: WheelEvent) => {
+      if (!focused || mode === 'play' || !(e.target instanceof Element && e.target.matches('.picture'))) return
+      e.preventDefault()
+      nudge(focused, wheelSteps(e))
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
   })
 
   const looksPanel = (
@@ -585,7 +606,7 @@ export function App() {
 
   return (
     <CtlContext.Provider value={ctl}>
-      <div className={`app ${mode}${hidden ? ' hidden' : ''}`}>
+      <div ref={app} className={`app ${mode}${hidden ? ' hidden' : ''}`}>
         <Picture
           pair={pair}
           side={side}
@@ -701,10 +722,17 @@ export function App() {
               {looksPanel}
               {bankPanel}
             </aside>
-            <section className="panel bottom">
-              <KnobDetail />
-              <Section chip={pickedChip} />
-            </section>
+            {/* the knob detail floats over the knobs' panel, so opening it moves no knob */}
+            <div className="stage-bottom">
+              {focused && (
+                <div className="panel knob-slot">
+                  <KnobDetail />
+                </div>
+              )}
+              <section className="panel bottom">
+                <Section chip={pickedChip} />
+              </section>
+            </div>
           </>
         ) : mode === 'decks' ? (
           <>
@@ -744,9 +772,14 @@ export function App() {
             <section className="mixer">
               <div className="panel">{faderPanel}</div>
               <div className="panel">
-                <KnobDetail />
                 <Section chip={pickedChip} />
               </div>
+              {/* the knob detail floats over the mix's foot, so opening it moves no knob */}
+              {focused && (
+                <div className="panel knob-slot">
+                  <KnobDetail />
+                </div>
+              )}
             </section>
           </>
         ) : (
@@ -755,11 +788,10 @@ export function App() {
             <div className="panel rack-chain">
               <Chain picked={pickedChip} />
             </div>
-            {focused && (
-              <div className="panel">
-                <KnobDetail />
-              </div>
-            )}
+            {/* the knob detail's slot is always there and of one height, so focusing a knob moves no knob */}
+            <div className="panel knob-slot">
+              {focused ? <KnobDetail /> : <span className="dim">no knob focused</span>}
+            </div>
             {chips.map((chip) => (
               <div
                 key={chip}
