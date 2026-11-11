@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { level, mod, scene, star } from './looks'
+import { level, LOOKS, mod, scene, star } from './looks'
 import { advance, applyPreset, capturePreset, newLive, setMacro, update, wave } from './motion'
+import { knobsOf } from './scene'
 
 const base = () =>
   scene({
@@ -66,5 +67,14 @@ describe('motion', () => {
     const p = capturePreset(s, 'p')
     const moved = update(s, (d) => (d.frame.zoom.value = 3))
     expect(applyPreset(moved, p)).toEqual(s)
+  })
+})
+
+describe('the built-in looks', () => {
+  it('share no knob objects between levels', () => {
+    for (const look of LOOKS) {
+      const knobs = knobsOf(look).map((k) => k.knob)
+      expect(new Set(knobs).size, look.name).toBe(knobs.length)
+    }
   })
 })

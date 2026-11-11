@@ -4,7 +4,8 @@ import { stopsFromCosine } from './colour'
 import type { Address, Knob, Level, Macro, Modulator, Preset, Scene, Shape, VariationKind } from './scene'
 
 type K = number | Knob
-const k = (x: K): Knob => (typeof x === 'number' ? { value: x } : x)
+// a fresh knob each time: linked levels built from one spec must not share knob objects
+const k = (x: K): Knob => (typeof x === 'number' ? { value: x } : structuredClone(x))
 const R3 = Math.sqrt(3)
 const SQUARE: [number, number] = [0, 1]
 const HEX: [number, number] = [0.5, R3 / 2]
@@ -220,11 +221,13 @@ export const LOOKS: Scene[] = [
     presets: [
       {
         name: 'Green stars on red circles',
-        values: Object.fromEntries(
-          [0, 1, 2, 3, 4, 5].flatMap((i) =>
-            (i % 2 ? [0.62, 0.22, 25] : [0.82, 0.21, 145]).map((v, j) => [`palette.stops[${i}].lch[${j}]`, v]),
+        // the first half of the palette green, the second red, and each level its own colour
+        values: Object.fromEntries([
+          ...[0, 1, 2, 3, 4, 5].flatMap((i) =>
+            (i < 3 ? [0.82, 0.21, 145] : [0.6, 0.22, 25]).map((v, j) => [`palette.stops[${i}].lch[${j}]`, v]),
           ),
-        ),
+          ['levels[st1].colour.speed', 1],
+        ]),
       },
       palettePreset('Embers', 'ember'),
     ],
@@ -293,8 +296,8 @@ export const LOOKS: Scene[] = [
         at: { value: 0.2, spread: 0.6 },
       }),
     ],
-    radialWeight: 1,
-    width: { value: 0.01, spread: -0.0075 },
+    radialWeight: 1.5,
+    width: { value: 0.005, spread: -0.0035 },
     falloff: 1,
     palette: 'warm',
     radius: 0.5,
