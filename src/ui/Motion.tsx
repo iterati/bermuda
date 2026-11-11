@@ -1,6 +1,6 @@
 // The modulators and macros. A modulator's chip drags onto any knob; a macro's slider moves all its knobs at once.
 import { prune } from '../edit'
-import { setMacro, wave } from '../motion'
+import { detunePeriods, setMacro, wave } from '../motion'
 import { clamp, hardRange, resolve, WAVES, type Modulator } from '../scene'
 import { Choice, Num, useCtl } from './controls'
 import { MOD_DRAG, short } from './Knob'
@@ -28,18 +28,28 @@ export function Modulators() {
     <div className="panel-block">
       <div className="block-title">
         <span>Modulators</span>
-        <button
-          className="mini"
-          onClick={() =>
-            edit((d) => {
-              let n = d.modulators.length + 1
-              while (d.modulators.some((m) => m.id === `mod${n}`)) n++
-              d.modulators.push({ id: `mod${n}`, wave: 'cos', period: 8, phase: 0, glide: 0, targets: [] })
-            })
-          }
-        >
-          + modulator
-        </button>
+        <span className="actions">
+          <button
+            className="mini"
+            disabled={scene.modulators.length === 0}
+            title="detune every period to the nearest whole number coprime with the shorter ones, so the piece rarely repeats"
+            onClick={() => edit(detunePeriods)}
+          >
+            detune
+          </button>
+          <button
+            className="mini"
+            onClick={() =>
+              edit((d) => {
+                let n = d.modulators.length + 1
+                while (d.modulators.some((m) => m.id === `mod${n}`)) n++
+                d.modulators.push({ id: `mod${n}`, wave: 'cos', period: 8, phase: 0, glide: 0, targets: [] })
+              })
+            }
+          >
+            + modulator
+          </button>
+        </span>
       </div>
       {scene.modulators.map((m) => (
         <div className="mod" key={m.id}>

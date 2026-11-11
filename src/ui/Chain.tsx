@@ -5,6 +5,9 @@ import type { Level } from '../scene'
 import { useCtl } from './controls'
 
 const latticeName = (l: Level) => {
+  const { kind, sectors } = l.lattice
+  if (sectors !== undefined) return `${kind} ${sectors}`
+  if (kind !== 'oblique') return kind
   const [s, h] = [l.lattice.e2[0].value, l.lattice.e2[1].value]
   if (s < 0.02 && Math.abs(h - 1) < 0.02) return 'square'
   if (Math.abs(s - 0.5) < 0.02 && Math.abs(h - Math.sqrt(3) / 2) < 0.02) return 'hex'

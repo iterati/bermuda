@@ -6,13 +6,13 @@ import { fileURLToPath } from 'node:url'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import { build, type Rollup } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { findLevel, removeLevel } from './edit'
+import { findLevel, removeLevel, setLattice } from './edit'
 import { snapLoop } from './loop'
-import { LOOKS } from './looks'
+import { level, LOOKS, scene, star } from './looks'
 import { morph } from './morph'
 import { advance, applyPreset, newLive, update } from './motion'
 import type { Toward } from './render'
-import type { Edge, Scene } from './scene'
+import { CELLS, LATTICES, type Edge, type Scene } from './scene'
 
 declare global {
   interface Window {
@@ -126,6 +126,50 @@ describe('the one shader', () => {
       expect(mean, `mean at ${t} s`).toBeGreaterThan(0.01)
       expect(spread, `spread at ${t} s`).toBeGreaterThan(0.01)
     }
+  })
+
+  // two levels of each lattice kind under each cell step, the first re-tiling the plane and the second its cells
+  const kinds = LATTICES.flatMap((kind) =>
+    CELLS.map((by) => {
+      const base = scene({
+        name: `${kind} by ${by}`,
+        levels: ['a', 'b'].map((id, i) =>
+          level(id, { scale: i ? 1.7 : 1, turn: 20, by, cellTurn: 25, shape: star(6, 2.5, 0.4), at: i / 2 }),
+        ),
+        rings: 2,
+      })
+      return { kind, by, scene: update(base, (d) => ['a', 'b'].forEach((id) => setLattice(d, id, kind))) }
+    }),
+  )
+  it.each(kinds)('renders a $kind lattice by $by finite and not blank', async ({ scene }) => {
+    for (const t of [0, 7.3]) {
+      const live = newLive()
+      const { finite, mean, spread } = await shoot(advance(scene, live, t, 60), live.drift, live.colour)
+      expect(finite, `at ${t} s`).toBe(true)
+      expect(mean, `mean at ${t} s`).toBeGreaterThan(0.01)
+      expect(spread, `spread at ${t} s`).toBeGreaterThan(0.01)
+    }
+  })
+
+  it('draws voronoi at jitter 0 as the oblique pad, so the two swap without a jump', async () => {
+    const oblique = kinds.find((k) => k.kind === 'oblique' && k.by === 'parity')!.scene
+    const voronoi = update(oblique, (d) => ['a', 'b'].forEach((id) => setLattice(d, id, 'voronoi')))
+    expect(furthest(await pixels(voronoi, 0, 0), await pixels(oblique, 0, 0))).toBeLessThan(1e-4)
+  })
+
+  it("zooms log-polar by one of its pad's vectors back onto the same picture, so the zoom loops", async () => {
+    const at = (scale: number) =>
+      scene({
+        name: 'zoom',
+        levels: [
+          level('z', { scale, lattice: 'logpolar', sectors: 9, e2: [0.5, Math.sqrt(3) / 2], shape: star(6, 2, 0.45) }),
+        ],
+        rings: 2,
+      })
+    // e^(√3 · 2π / 9): the shift (0, √3) along log r, the pad's vector (-1, 2)
+    const [a, b] = [await shoot(at(1), 0, 0), await shoot(at(Math.exp((Math.sqrt(3) * 2 * Math.PI) / 9)), 0, 0)]
+    expect(b.mean).toBeCloseTo(a.mean, 3)
+    expect(b.spread).toBeCloseTo(a.spread, 3)
   })
 })
 

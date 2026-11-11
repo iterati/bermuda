@@ -2,17 +2,33 @@
 // Stage shows the picked chip's; Edit shows every chip's at once.
 import { createContext, useContext, type ReactNode } from 'react'
 import { COSINES, css, paletteAt, stopsFromCosine } from '../colour'
-import { addSubChain, duplicateLevel, findLevel, moveLevel, newId, prune, removeLevel, unlink } from '../edit'
 import {
+  addSubChain,
+  alignedNesting,
+  duplicateLevel,
+  findLevel,
+  moveLevel,
+  newId,
+  prune,
+  removeLevel,
+  setLattice,
+  unlink,
+} from '../edit'
+import {
+  CELLS,
+  clamp,
   hardRange,
+  LATTICES,
   LINES,
   MAX_STOPS,
   MAX_VARIANTS,
   MIXES,
   resolve,
+  SECTORS,
   STAR_N,
   VARIATIONS,
   type Address,
+  type LatticeKind,
   type Level,
   type Scene,
 } from '../scene'
@@ -89,6 +105,34 @@ export function Choice<T extends string | number>({
           </option>
         ))}
       </select>
+    </label>
+  )
+}
+
+// A whole number between the range's ends, one step at a time.
+function Stepper({
+  label,
+  value,
+  range: [lo, hi],
+  onChange,
+}: {
+  label: string
+  value: number
+  range: [number, number]
+  onChange: (v: number) => void
+}) {
+  return (
+    <label className="choice">
+      <span>{label}</span>
+      <span className="stepper">
+        <button className="mini" disabled={value <= lo} onClick={() => onChange(value - 1)}>
+          −
+        </button>
+        <b>{value}</b>
+        <button className="mini" disabled={value >= hi} onClick={() => onChange(value + 1)}>
+          +
+        </button>
+      </span>
     </label>
   )
 }
@@ -271,6 +315,8 @@ function LevelSection({ id }: { id: string }) {
   const { level, list } = findLevel(scene, id)
   const at = prefixOf(scene.levels, id)!
   const index = list.indexOf(level)
+  const { kind } = level.lattice
+  const nesting = alignedNesting(scene, id)
   // a level others follow cannot follow one itself
   const leaders = list.some((l) => l.link === id) ? [] : list.slice(0, index).filter((l) => !l.link)
   const actions = (
@@ -389,13 +435,40 @@ function LevelSection({ id }: { id: string }) {
       </div>
       <div className="row">
         <span className="row-title">lattice</span>
-        <LatticePad at={at} />
-        <Knob label="shear" at={`${at}.lattice.e2[0]`} />
-        <Knob label="height" at={`${at}.lattice.e2[1]`} />
+        <Choice label="kind" value={kind} options={LATTICES} onChange={(to) => edit((d) => setLattice(d, id, to))} />
+        <LatticePad at={at} kind={kind} />
+        <Knob label={E2_LABELS[kind][0]} at={`${at}.lattice.e2[0]`} />
+        <Knob label={E2_LABELS[kind][1]} at={`${at}.lattice.e2[1]`} />
+        {kind === 'voronoi' && <Knob label="jitter" at={`${at}.lattice.jitter`} />}
+        {level.lattice.sectors !== undefined && (
+          <Stepper
+            label="sectors"
+            value={level.lattice.sectors}
+            range={SECTORS}
+            onChange={(n) => edit((d) => (findLevel(d, id).level.lattice.sectors = n))}
+          />
+        )}
+        <button
+          className="mini"
+          disabled={!nesting}
+          title="snap scale and turn to the nearest nesting that lines this level's cells up across the cells of the level above (under an oblique or unjittered voronoi level whose cells turn one way)"
+          onClick={() =>
+            edit((d) => {
+              const { affine } = findLevel(d, id).level
+              affine.scale.value = nesting!.scale
+              affine.turn.value = nesting!.turn
+            })
+          }
+        >
+          snap
+        </button>
+      </div>
+      <div className="row">
+        <span className="row-title">cell</span>
         <Choice
-          label="cell"
+          label="turn by"
           value={level.cell.by}
-          options={['none', 'parity'] as const}
+          options={CELLS}
           onChange={(by) => edit((d) => (findLevel(d, id).level.cell.by = by))}
         />
         <Knob label="cell turn" at={`${at}.cell.turn`} />
@@ -405,26 +478,12 @@ function LevelSection({ id }: { id: string }) {
         <div className="row variant" key={i}>
           <span className="row-title">{level.variants.length > 1 ? `variant ${i + 1}` : 'shape'}</span>
           {level.variants.length > 1 && <Knob label="share" at={`${at}.variants[${i}].share`} />}
-          <label className="choice">
-            <span>points</span>
-            <span className="stepper">
-              <button
-                className="mini"
-                disabled={v.shape.n <= STAR_N[0]}
-                onClick={() => edit((d) => findLevel(d, id).level.variants[i].shape.n--)}
-              >
-                −
-              </button>
-              <b>{v.shape.n}</b>
-              <button
-                className="mini"
-                disabled={v.shape.n >= STAR_N[1]}
-                onClick={() => edit((d) => findLevel(d, id).level.variants[i].shape.n++)}
-              >
-                +
-              </button>
-            </span>
-          </label>
+          <Stepper
+            label="points"
+            value={v.shape.n}
+            range={STAR_N}
+            onChange={(n) => edit((d) => (findLevel(d, id).level.variants[i].shape.n = n))}
+          />
           <Knob label="m" at={`${at}.variants[${i}].shape.m`} />
           <Knob label="r" at={`${at}.variants[${i}].shape.r`} />
           <Knob label="round" at={`${at}.variants[${i}].shape.round`} />
@@ -480,19 +539,65 @@ function LevelSection({ id }: { id: string }) {
   )
 }
 
-// The lattice pad: e2 from square (0, 1) along the rhombic arc to hex (½, √3/2), or anywhere on the pad.
-function LatticePad({ at }: { at: Address }) {
+// What each lattice kind reads e2 as (shader.ts).
+const E2_LABELS: Record<LatticeKind, [string, string]> = {
+  oblique: ['shear', 'height'],
+  brick: ['row shift', 'row height'],
+  triangle: ['shear', 'height'],
+  polar: ['stagger', 'ring gap'],
+  logpolar: ['spiral', 'height'],
+  fold: ['shift x', 'shift y'],
+  voronoi: ['shear', 'height'],
+}
+// the pad's named spots, each with where its label sits: the left edge is every rectangle, the arc every
+// rhombus, the right edge stretched hexes
+const SPOTS: { name: string; at: [number, number]; anchor: 'start' | 'middle' | 'end'; dx: number; dy: number }[] = [
+  { name: 'sq', at: [0, 1], anchor: 'start', dx: 5, dy: 3 },
+  { name: 'rect', at: [0, 1.5], anchor: 'start', dx: 5, dy: 3 },
+  {
+    name: 'rhomb',
+    at: [Math.cos((75 * Math.PI) / 180), Math.sin((75 * Math.PI) / 180)],
+    anchor: 'middle',
+    dx: 0,
+    dy: 12,
+  },
+  { name: 'hex', at: [0.5, Math.sqrt(3) / 2], anchor: 'end', dx: -5, dy: 3 },
+  { name: 'str hex', at: [0.5, Math.sqrt(3) * 0.75], anchor: 'end', dx: -5, dy: 3 },
+]
+
+// The lattice pad: e2 anywhere on the pad, drawn to the named spots and the rhombic arc from square
+// (0, 1) to hex (½, √3/2) when the pointer comes near them (shift for free); the kinds that do not read
+// e2 as the pad's vector get the bare pad.
+function LatticePad({ at, kind }: { at: Address; kind: LatticeKind }) {
   const { scene, live, setKnob } = useCtl()
   const [sx, sy] = [`${at}.lattice.e2[0]`, `${at}.lattice.e2[1]`]
-  const W = 56
-  const H = 76
+  const W = 96
+  const H = 108
+  const M = 7 // a margin, so a point on the pad's edge shows whole
   const [x0, x1] = hardRange(sx)
   const [y0, y1] = hardRange(sy)
-  const toPx = (x: number, y: number) => [((x - x0) / (x1 - x0)) * W, H - ((y - y0) / (y1 - y0)) * H]
+  const toPx = (x: number, y: number) => [
+    M + ((x - x0) / (x1 - x0)) * (W - 2 * M),
+    H - M - ((y - y0) / (y1 - y0)) * (H - 2 * M),
+  ]
+  const pad = kind === 'oblique' || kind === 'triangle' || kind === 'voronoi'
   const set = (e: React.PointerEvent<SVGSVGElement>) => {
     const r = e.currentTarget.getBoundingClientRect()
-    setKnob(sx, x0 + ((e.clientX - r.left) / W) * (x1 - x0))
-    setKnob(sy, y0 + ((H - (e.clientY - r.top)) / H) * (y1 - y0))
+    const [px, py] = [e.clientX - r.left, e.clientY - r.top]
+    let x = x0 + ((px - M) / (W - 2 * M)) * (x1 - x0)
+    let y = y0 + ((H - M - py) / (H - 2 * M)) * (y1 - y0)
+    const dist = (vx: number, vy: number) => {
+      const [qx, qy] = toPx(vx, vy)
+      return Math.hypot(qx - px, qy - py)
+    }
+    if (pad && !e.shiftKey) {
+      const a = clamp(Math.atan2(y, x), [Math.PI / 3, Math.PI / 2])
+      const spot = SPOTS.find(({ at }) => dist(...at) < 6)
+      if (spot) [x, y] = spot.at
+      else if (dist(Math.cos(a), Math.sin(a)) < 4) [x, y] = [Math.cos(a), Math.sin(a)]
+    }
+    setKnob(sx, x)
+    setKnob(sy, y)
   }
   const [bx, by] = toPx(resolve(scene, sx)!.value, resolve(scene, sy)!.value)
   // the live scene lags the scene by a frame after a structural edit
@@ -505,8 +610,6 @@ function LatticePad({ at }: { at: Address }) {
     const [px, py] = toPx(Math.cos(a), Math.sin(a))
     return `${i ? 'L' : 'M'}${px} ${py}`
   }).join(' ')
-  const [qx, qy] = toPx(0, 1)
-  const [hx, hy] = toPx(0.5, Math.sqrt(3) / 2)
   return (
     <svg
       className="pad"
@@ -518,16 +621,27 @@ function LatticePad({ at }: { at: Address }) {
       }}
       onPointerMove={(e) => e.buttons && set(e)}
     >
-      <title>the lattice pad: shear across, height up; square at the left, hex at the right of the arc</title>
-      <path className="arc" d={arcPath} />
-      <circle className="mark" cx={qx} cy={qy} r="2.5" />
-      <circle className="mark" cx={hx} cy={hy} r="2.5" />
-      <text x={qx + 4} y={qy - 4}>
-        sq
-      </text>
-      <text x={hx - 18} y={hy + 12}>
-        hex
-      </text>
+      <title>
+        {pad
+          ? 'the lattice pad: shear across, height up; rectangles up the left edge, rhombi along the arc from square to hex, stretched hexes up the right edge (shift: no snapping)'
+          : 'e2 as this lattice reads it, across and up'}
+      </title>
+      {pad && (
+        <>
+          <path className="arc" d={arcPath} />
+          {SPOTS.map(({ name, at: [vx, vy], anchor, dx, dy }) => {
+            const [qx, qy] = toPx(vx, vy)
+            return (
+              <g key={name}>
+                <circle className="mark" cx={qx} cy={qy} r="2.5" />
+                <text x={qx + dx} y={qy + dy} textAnchor={anchor}>
+                  {name}
+                </text>
+              </g>
+            )
+          })}
+        </>
+      )}
       <circle className="base" cx={bx} cy={by} r="4" />
       <circle className="live" cx={lx} cy={ly} r="2.5" />
     </svg>

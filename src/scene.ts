@@ -10,9 +10,10 @@ export type Level = {
   affine: { scale: Knob; turn: Knob; offset: [Knob, Knob] }
   variations: { kind: VariationKind; weight: Knob }[]
   lattice: {
-    kind: 'oblique' | 'brick' | 'triangle' | 'polar' | 'logpolar' | 'fold' | 'voronoi'
+    kind: LatticeKind
     e2: [Knob, Knob]
-    jitter?: Knob
+    jitter?: Knob // voronoi's, and only voronoi's
+    sectors?: number // polar's and logpolar's: the whole number of cells round the centre
   }
   cell: { by: 'none' | 'parity' | 'hash' | 'ring'; turn: Knob; phase: Knob }
   variants: { share: Knob; shape: Shape; below?: Level[] }[] // below: a per-cell sub-chain
@@ -90,6 +91,13 @@ export const VARIATIONS = [
   'bubble',
   'fisheye',
 ] as const
+export type LatticeKind = (typeof LATTICES)[number]
+// each lattice reads e2 its own way (shader.ts): the second lattice vector of the oblique pad, which
+// voronoi jitters and triangle halves; brick's row shift and height; polar's and logpolar's ring stagger
+// and spacing; fold's shift
+export const LATTICES = ['oblique', 'brick', 'triangle', 'polar', 'logpolar', 'fold', 'voronoi'] as const
+// the Cell step: parity turns odd cells the other way, hash turns each cell either way by its id (Truchet)
+export const CELLS = ['none', 'parity', 'hash'] as const
 export const LINES = ['glow', 'smooth', 'hard', 'band'] as const
 export const WAVES = ['cos', 'tri', 'beat', 'ramp', 'steps'] as const
 export const MIXES = ['straight', 'short', 'long'] as const
@@ -115,6 +123,7 @@ export const HARD: Record<string, [number, number]> = {
   'levels[].variations[].weight': [-1, 2],
   'levels[].lattice.e2[0]': [0, 0.5],
   'levels[].lattice.e2[1]': [0.5, 2],
+  'levels[].lattice.jitter': [0, 1],
   'levels[].cell.turn': [-180, 180],
   'levels[].cell.phase': [-1, 1],
   'levels[].variants[].share': [0, 1],
@@ -140,6 +149,7 @@ export const HARD: Record<string, [number, number]> = {
   'post.gamma': [0.5, 3],
 }
 export const STAR_N: [number, number] = [3, 16]
+export const SECTORS: [number, number] = [1, 48]
 // The knob kinds that come round, by the period they repeat over: a turn, once round the palette index, once
 // round a ring's phase. Each hard range is a whole number of periods, so a value carried past one wraps.
 export const PERIOD: Record<string, number> = {
@@ -342,16 +352,25 @@ function level(v: unknown, path: string, before: Level[], ids: Set<string>): Lev
     const x = obj(item, at, ['kind', 'weight'])
     return { kind: oneOf(x.kind, `${at}.kind`, VARIATIONS), weight: knob(x.weight, `${at}.weight`) }
   })
-  const lattice = obj(o.lattice, `${path}.lattice`, ['kind', 'e2'], ['jitter'])
-  // milestone 1 runs the oblique pad only; the other kinds and jitter come with milestone 3
+  const lattice = obj(o.lattice, `${path}.lattice`, ['kind', 'e2'], ['jitter', 'sectors'])
   out.lattice = {
-    kind: oneOf(lattice.kind, `${path}.lattice.kind`, ['oblique'] as const),
+    kind: oneOf(lattice.kind, `${path}.lattice.kind`, LATTICES),
     e2: pair(lattice.e2, `${path}.lattice.e2`, knob),
   }
-  if (lattice.jitter !== undefined) fail(`${path}.lattice.jitter`, 'is not in milestone 1')
+  const { kind } = out.lattice
+  if (kind === 'voronoi') {
+    if (lattice.jitter === undefined) fail(`${path}.lattice.jitter`, 'is missing for a voronoi lattice')
+    out.lattice.jitter = knob(lattice.jitter, `${path}.lattice.jitter`)
+  } else if (lattice.jitter !== undefined) fail(`${path}.lattice.jitter`, 'is voronoi only')
+  if (kind === 'polar' || kind === 'logpolar') {
+    if (lattice.sectors === undefined) fail(`${path}.lattice.sectors`, `is missing for a ${kind} lattice`)
+    const sectors = num(lattice.sectors, `${path}.lattice.sectors`, SECTORS)
+    if (!Number.isInteger(sectors)) fail(`${path}.lattice.sectors`, 'must be a whole number')
+    out.lattice.sectors = sectors
+  } else if (lattice.sectors !== undefined) fail(`${path}.lattice.sectors`, 'is polar and logpolar only')
   const cell = obj(o.cell, `${path}.cell`, ['by', 'turn', 'phase'])
   out.cell = {
-    by: oneOf(cell.by, `${path}.cell.by`, ['none', 'parity'] as const),
+    by: oneOf(cell.by, `${path}.cell.by`, CELLS),
     turn: knob(cell.turn, `${path}.cell.turn`),
     phase: knob(cell.phase, `${path}.cell.phase`),
   }

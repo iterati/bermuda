@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { moveLevel, removeLevel } from './edit'
 import { level, LOOKS, mod, scene, star } from './looks'
-import { advance, applyPreset, capturePreset, newLive, setMacro, update, wave } from './motion'
+import { advance, applyPreset, capturePreset, detunePeriods, newLive, setMacro, update, wave } from './motion'
 import { knobsOf } from './scene'
 
 const base = () =>
@@ -86,6 +86,31 @@ describe('motion', () => {
     const p = capturePreset(s, 'p')
     const moved = update(s, (d) => (d.frame.zoom.value = 3))
     expect(applyPreset(moved, p)).toEqual(s)
+  })
+})
+
+describe('detune to coprimes', () => {
+  it("nudges each period to the nearest whole number coprime with the shorter ones: Tapestry 1's 119 is 7 × 17", () => {
+    const t1 = LOOKS.find((l) => l.name.startsWith('Tapestry 1'))!
+    expect(t1.modulators.map((m) => m.period)).toEqual([119, 17, 69])
+    expect(update(t1, detunePeriods).modulators.map((m) => m.period)).toEqual([118, 17, 69])
+  })
+
+  it('leaves a period under a clock unit as it was', () => {
+    const s = update(base(), (d) => d.modulators.push(mod('fast', 'cos', 0.25, []), mod('slow', 'cos', 12.4, [])))
+    expect(update(s, detunePeriods).modulators.map((m) => m.period)).toEqual([0.25, 12])
+  })
+
+  it('leaves every pair coprime, whole and near where it was', () => {
+    const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a)
+    for (const look of LOOKS) {
+      const periods = update(look, detunePeriods).modulators.map((m) => m.period)
+      periods.forEach((p, i) => {
+        expect(Number.isInteger(p) && p >= 1, look.name).toBe(true)
+        expect(Math.abs(p - look.modulators[i].period), look.name).toBeLessThan(4)
+        for (const q of periods.slice(i + 1)) expect(gcd(p, q), `${look.name}: ${p}, ${q}`).toBe(1)
+      })
+    }
   })
 })
 

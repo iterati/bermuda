@@ -1,6 +1,17 @@
 // The renderer: compiles the one shader once, then each frame packs a live scene into its uniforms
 // and level rows and draws one full-screen triangle into whatever framebuffer is bound.
-import { allLevels, LINES, MAX_LEVELS, MIXES, VARIATIONS, variationWeight, type Level, type Scene } from './scene'
+import {
+  allLevels,
+  CELLS,
+  LATTICES,
+  LINES,
+  MAX_LEVELS,
+  MIXES,
+  VARIATIONS,
+  variationWeight,
+  type Level,
+  type Scene,
+} from './scene'
 import { generateShader, ROW_TEXELS } from './shader'
 import type { Live } from './motion'
 
@@ -52,7 +63,13 @@ export function packLevels(levels: Level[], far: Toward['levels']): Float32Array
     at(0, level.weight.value, affine.scale.value, affine.turn.value * RAD, next ? rows.get(next)! : -1)
     at(1, affine.offset[0].value, affine.offset[1].value, lattice.e2[0].value, lattice.e2[1].value)
     at(2, ...VARIATIONS.map((kind) => variationWeight(level, kind)))
-    at(4, cell.by === 'parity' ? 1 : 0, cell.turn.value * RAD, cell.phase.value * 2 * Math.PI, variants.length)
+    at(
+      4,
+      CELLS.indexOf(cell.by as (typeof CELLS)[number]),
+      cell.turn.value * RAD,
+      cell.phase.value * 2 * Math.PI,
+      variants.length,
+    )
     at(
       5,
       colour.at.value,
@@ -62,9 +79,10 @@ export function packLevels(levels: Level[], far: Toward['levels']): Float32Array
     )
     const other = far[row]
     at(6, seedOf(level.id), seedOf(other?.id ?? level.id), other?.at ?? 0, 0)
+    at(7, LATTICES.indexOf(lattice.kind), lattice.sectors ?? 0, lattice.jitter?.value ?? 0, 0)
     variants.forEach(({ share, shape, below }, v) => {
-      at(7 + 2 * v, share.value, shape.n, shape.m.value, shape.r.value)
-      at(8 + 2 * v, shape.round.value, shape.twist.value * RAD, below ? rows.get(below[0])! : -1, 0)
+      at(8 + 2 * v, share.value, shape.n, shape.m.value, shape.r.value)
+      at(9 + 2 * v, shape.round.value, shape.twist.value * RAD, below ? rows.get(below[0])! : -1, 0)
     })
   })
   return data

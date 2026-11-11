@@ -1,7 +1,7 @@
 // The built-in looks: the nine Tapestries re-made in spirit through the level chain, then remixes across levels.
 // Periods are in clock units, one a second at the default 60 bpm; angles are in degrees.
 import { stopsFromCosine } from './colour'
-import type { Address, Knob, Level, Macro, Modulator, Preset, Scene, Shape, VariationKind } from './scene'
+import type { Address, Knob, LatticeKind, Level, Macro, Modulator, Preset, Scene, Shape, VariationKind } from './scene'
 
 type K = number | Knob
 // a fresh knob each time: linked levels built from one spec must not share knob objects
@@ -25,8 +25,11 @@ type LevelSpec = {
   turn?: K
   offset?: [K, K]
   vary?: [VariationKind, K][]
+  lattice?: LatticeKind
   e2?: [K, K]
-  parity?: boolean
+  jitter?: K
+  sectors?: number
+  by?: Level['cell']['by']
   cellTurn?: K
   cellPhase?: K
   shape?: Shape
@@ -42,8 +45,8 @@ export function level(id: string, s: LevelSpec = {}): Level {
     weight: k(s.weight ?? 1),
     affine: { scale: k(s.scale ?? 1), turn: k(s.turn ?? 0), offset: [k(s.offset?.[0] ?? 0), k(s.offset?.[1] ?? 0)] },
     variations: (s.vary ?? [['linear', 1]]).map(([kind, weight]) => ({ kind, weight: k(weight) })),
-    lattice: { kind: 'oblique', e2: [k(s.e2?.[0] ?? SQUARE[0]), k(s.e2?.[1] ?? SQUARE[1])] },
-    cell: { by: s.parity ? 'parity' : 'none', turn: k(s.cellTurn ?? 0), phase: k(s.cellPhase ?? 0) },
+    lattice: { kind: s.lattice ?? 'oblique', e2: [k(s.e2?.[0] ?? SQUARE[0]), k(s.e2?.[1] ?? SQUARE[1])] },
+    cell: { by: s.by ?? 'none', turn: k(s.cellTurn ?? 0), phase: k(s.cellPhase ?? 0) },
     variants: (s.variants ?? [{ share: 1, shape: s.shape ?? star(6, 2, 0.4) }]).map((v) => ({
       share: k(v.share),
       shape: structuredClone(v.shape),
@@ -51,6 +54,8 @@ export function level(id: string, s: LevelSpec = {}): Level {
     })),
     colour: { at: k(s.at ?? 0), speed: k(s.speed ?? 0.5), cellSpread: k(s.cellSpread ?? 0) },
   }
+  if (s.jitter !== undefined) out.lattice.jitter = k(s.jitter)
+  if (s.sectors !== undefined) out.lattice.sectors = s.sectors
   if (s.link) out.link = s.link
   return out
 }
@@ -380,7 +385,7 @@ export const LOOKS: Scene[] = [
       scale: 1.9,
       turn: 30,
       e2: HEX,
-      parity: true,
+      by: 'parity',
       cellTurn: { value: 0, spread: 150 },
       shape: star(6, { value: 3.5, play: [1.01, 6] }, 0.58),
       at: { value: 0, spread: 1 },
@@ -467,7 +472,7 @@ export const LOOKS: Scene[] = [
   scene({
     name: 'Remix - Pinwheel crosses',
     levels: [
-      level('wheel', { scale: 0.7, e2: HEX, parity: true, cellTurn: 15, shape: star(6, 3, 0.45), at: 0.05 }),
+      level('wheel', { scale: 0.7, e2: HEX, by: 'parity', cellTurn: 15, shape: star(6, 3, 0.45), at: 0.05 }),
       level('cross', { scale: 2, turn: 45, shape: spokes(4, 0.45), at: 0.4 }),
       level('hex', { scale: 2, e2: HEX, shape: star(6, 2, 0.4), at: 0.75 }),
     ],
@@ -621,6 +626,333 @@ export const LOOKS: Scene[] = [
       ]),
       mod('character', 'tri', 17, [['levels[b1].variants[0].shape.m', 1.2, 0.8]]),
       mod('hue', 'ramp', 80, [['palette.hue', 180]]),
+    ],
+  }),
+  // ---- the lattices: brick, triangles, polar, log-polar, fold, Voronoi, Truchet, the rhombic arc ----
+  scene({
+    name: 'Lattice - Rhombic walk',
+    // e2 walks the arc from square to hex, (sin a, cos a) for a from 0 to 30°, fitted with cos φ and cos 2φ
+    // terms that land on both ends, with the nesting from √2 at 45° to √3 at 30° beside it
+    levels: linked('r', 4, {
+      scale: 1.573,
+      turn: 37.5,
+      e2: [0.25, 0.9508],
+      shape: star(6, { value: 2.5, play: [1.3, 4] }, 0.42, { twist: 30 }),
+      at: { value: 0, spread: 1 },
+      speed: 0.6,
+    }),
+    rings: 2,
+    drift: 0.5,
+    width: 0.003,
+    palette: 'ice',
+    modulators: [
+      mod('walk', 'cos', 24, [
+        ['levels[r1].lattice.e2[0]', -0.25],
+        ['levels[r1].lattice.e2[1]', 0.067],
+        ['levels[r1].affine.scale', -0.159],
+        ['levels[r1].affine.turn', 7.5],
+      ]),
+      mod('bend', 'cos', 12, [['levels[r1].lattice.e2[1]', -0.0176]]),
+      mod('character', 'tri', 17, [['levels[r1].variants[0].shape.m', 1.2, 0.8]]),
+      mod('hue', 'ramp', 96, [['palette.hue', 180]]),
+    ],
+    presets: [
+      {
+        name: 'Square',
+        values: {
+          'levels[r1].lattice.e2[0]': 0,
+          'levels[r1].lattice.e2[1]': 1,
+          'levels[r1].affine.scale': Math.SQRT2,
+          'levels[r1].affine.turn': 45,
+        },
+      },
+      {
+        name: 'Rhombic',
+        values: {
+          'levels[r1].lattice.e2[0]': Math.cos((75 * Math.PI) / 180),
+          'levels[r1].lattice.e2[1]': Math.sin((75 * Math.PI) / 180),
+        },
+      },
+      {
+        name: 'Hex',
+        values: {
+          'levels[r1].lattice.e2[0]': 0.5,
+          'levels[r1].lattice.e2[1]': R3 / 2,
+          'levels[r1].affine.scale': R3,
+          'levels[r1].affine.turn': 30,
+        },
+      },
+    ],
+  }),
+  scene({
+    name: 'Lattice - Brick bond',
+    zoom: 1.1,
+    levels: [
+      // bricks a cell long and half a cell high, two squares to each, the odd courses shifted from stack to
+      // running bond and back
+      level('wall', { scale: 1.3, lattice: 'brick', e2: [0.25, 0.5], shape: star(4, 2, 0.3, { twist: 45 }), at: 0 }),
+      level('pair', {
+        scale: 2,
+        offset: [0.5, 0],
+        shape: star(4, 2, 0.36, { twist: 45, round: 0.15 }),
+        at: 0.3,
+        cellSpread: 0.3,
+      }),
+      level('course', { scale: 2, lattice: 'brick', e2: [0.25, 0.7], shape: star(4, 2, 0.2, { twist: 45 }), at: 0.6 }),
+    ],
+    line: 'smooth',
+    width: { value: 0.03, spread: -0.012 },
+    falloff: 1.5,
+    palette: 'ember',
+    radius: 0.25,
+    modulators: [
+      mod('bond', 'cos', 16, [['levels[wall].lattice.e2[0]', 0.25]], { phase: 0.5 }),
+      mod('stretch', 'tri', 22, [['levels[course].lattice.e2[1]', 0.2]]),
+      mod('size', 'cos', 9, [['levels[pair].variants[0].shape.r', 0.08]]),
+      mod('hue', 'cos', 41, [['palette.hue', 40]]),
+    ],
+  }),
+  scene({
+    name: 'Lattice - Triangle gears',
+    zoom: 1.3,
+    levels: linked('tri', 3, {
+      scale: { value: 1.5, spread: 0.6 },
+      lattice: 'triangle',
+      e2: HEX,
+      by: 'parity',
+      cellTurn: { value: 0, spread: 60 },
+      shape: star(3, { value: 2, play: [1.3, 3] }, 0.22, { round: 0.15 }),
+      at: { value: 0, spread: 0.9 },
+      speed: 0.5,
+      cellSpread: 0.1,
+    }),
+    rings: 3,
+    drift: 0.4,
+    width: { value: 0.003, spread: 0.004 },
+    falloff: 1.3,
+    palette: 'warm',
+    modulators: [
+      mod('gears', 'beat', 30, [['levels[tri1].cell.turn', 60]], { harmonics: [3, 2] }),
+      mod('character', 'tri', 13, [['levels[tri1].variants[0].shape.m', 0.7]]),
+      mod('hue', 'ramp', 70, [['palette.hue', 180]]),
+    ],
+  }),
+  scene({
+    name: 'Lattice - Mandala',
+    zoom: 0.55,
+    levels: [
+      level('petals', {
+        lattice: 'polar',
+        sectors: 12,
+        e2: [0.25, 0.9],
+        shape: star(6, 3, 0.4, { round: 0.2 }),
+        at: 0,
+        speed: 0.6,
+      }),
+      level('lace', { scale: 2.6, turn: 30, e2: HEX, shape: star(6, 2, 0.42, { twist: 30 }), at: 0.4 }),
+      level('seed', { scale: R3, turn: 30, e2: HEX, shape: star(6, 4, 0.4), at: 0.7 }),
+    ],
+    rings: 2,
+    drift: 0.3,
+    radialWeight: 0.15,
+    width: { value: 0.004, spread: 0.004 },
+    palette: 'dusk',
+    radius: 0.3,
+    modulators: [
+      mod('spin', 'ramp', 240, [['frame.turn', 180]]),
+      mod('stagger', 'cos', 32, [['levels[petals].lattice.e2[0]', 0.25]]),
+      mod('rings', 'cos', 21, [['levels[petals].lattice.e2[1]', 0.15]]),
+      mod('character', 'tri', 15, [['levels[seed].variants[0].shape.m', 1.5]]),
+      mod('hue', 'cos', 60, [['palette.hue', 60]]),
+    ],
+  }),
+  scene({
+    name: 'Lattice - Endless zoom',
+    levels: [
+      level('spiral', {
+        scale: 2.1754,
+        lattice: 'logpolar',
+        sectors: 9,
+        e2: [0.5, R3 / 2],
+        shape: star(6, 2, 0.45, { twist: 30 }),
+        at: 0,
+        speed: 0.5,
+      }),
+      level('inner', { scale: R3, turn: 30, e2: HEX, shape: star(6, 3, 0.4), at: 0.5 }),
+    ],
+    rings: 2.5,
+    drift: 0.4,
+    width: { value: 0.006, spread: 0.002 },
+    falloff: 1.2,
+    palette: 'rainbow',
+    radius: 0,
+    modulators: [
+      // a scale is a shift along log r: from 1 to e^(√3 · 2π / 9), one lattice vector (-1, 2) of the hex
+      // pad, each ramp lands where it started, an endless zoom (quick at the start of each, as a modulator
+      // adds to the scale and does not multiply it)
+      mod('zoom', 'ramp', 20, [['levels[spiral].affine.scale', 1.1754]]),
+      mod('spin', 'ramp', 90, [['levels[spiral].affine.turn', 180]]),
+      mod('character', 'tri', 19, [['levels[inner].variants[0].shape.m', 1]]),
+      mod('hue', 'ramp', 120, [['palette.hue', 180]]),
+    ],
+  }),
+  scene({
+    name: 'Lattice - Kaleidoscope',
+    zoom: 1.5,
+    levels: linked('k', 4, {
+      scale: { value: 1.7, spread: 0.3 },
+      turn: { value: 12, spread: 24 },
+      lattice: 'fold',
+      e2: [0.3, 0.9],
+      shape: star(5, { value: 2.4, play: [1.5, 4] }, 0.3, { round: 0.2 }),
+      at: { value: 0, spread: 1 },
+      speed: 0.5,
+    }),
+    width: { value: 0.006, spread: 0.003 },
+    falloff: 1.2,
+    palette: 'dusk',
+    radius: 0.2,
+    modulators: [
+      mod('turn', 'cos', 37, [['levels[k1].affine.turn', 20]]),
+      mod('shift', 'cos', 23, [['levels[k1].lattice.e2[0]', 0.2]], { phase: 0.3 }),
+      mod('reach', 'tri', 29, [['levels[k1].lattice.e2[1]', 0.25]]),
+      mod('character', 'cos', 11, [['levels[k1].variants[0].shape.m', 1]]),
+      mod('hue', 'ramp', 90, [['palette.hue', 180]]),
+    ],
+  }),
+  scene({
+    name: 'Lattice - Truchet',
+    zoom: 0.8,
+    // each hex cell turns its triangle either way by a hash of its id: up or down at 30°, and the turn
+    // sways between 15° and 45° so the tiles never all line up
+    levels: [
+      level('tiles', {
+        scale: 1.4,
+        turn: 30,
+        e2: HEX,
+        by: 'hash',
+        cellTurn: 30,
+        shape: star(3, 2, 0.55, { round: 0.1 }),
+        at: 0,
+        speed: 0.6,
+      }),
+      level('weave', { scale: R3, turn: 30, e2: HEX, by: 'hash', cellTurn: 30, shape: star(3, 2, 0.5), at: 0.5 }),
+    ],
+    rings: 2,
+    drift: 0.3,
+    radialWeight: 0.2,
+    width: { value: 0.005, spread: 0.003 },
+    falloff: 1.3,
+    palette: 'ice',
+    radius: 0.3,
+    modulators: [
+      mod('sway', 'cos', 32, [['levels[tiles].cell.turn', 15]]),
+      mod('weave', 'tri', 27, [['levels[weave].cell.turn', 15]], { phase: 0.5 }),
+      mod('round', 'cos', 13, [['levels[tiles].variants[0].shape.round', 0.1]]),
+      mod('hue', 'ramp', 50, [['palette.hue', 180]]),
+    ],
+  }),
+  scene({
+    name: 'Lattice - Organic cells',
+    zoom: 0.7,
+    levels: [
+      level('cells', {
+        scale: 1.2,
+        turn: 30,
+        lattice: 'voronoi',
+        e2: HEX,
+        jitter: { value: 0.45, play: [0, 0.9] },
+        shape: star(6, 2, 0.3, { round: 0.8 }),
+        at: 0,
+        speed: 0.6,
+        cellSpread: 0.5,
+      }),
+      level('nuclei', {
+        scale: R3,
+        turn: 30,
+        lattice: 'voronoi',
+        e2: HEX,
+        jitter: 0.3,
+        shape: star(6, 2, 0.35, { twist: 30 }),
+        at: 0.5,
+      }),
+      level('grain', { scale: 2, e2: HEX, shape: star(6, 3, 0.4), at: 0.8 }),
+    ],
+    rings: 2,
+    drift: 0.3,
+    width: { value: 0.004, spread: 0.002 },
+    palette: 'forest',
+    radius: 0.25,
+    modulators: [
+      mod('grow', 'cos', 30, [['levels[cells].lattice.jitter', 0.45]]),
+      mod('wobble', 'cos', 19, [['levels[nuclei].lattice.jitter', 0.3]], { phase: 0.5 }),
+      mod('hue', 'cos', 44, [['palette.hue', 60]]),
+    ],
+    presets: [
+      { name: 'Grid', values: { 'levels[cells].lattice.jitter': 0, 'levels[nuclei].lattice.jitter': 0 } },
+      { name: 'Organic', values: { 'levels[cells].lattice.jitter': 0.9, 'levels[nuclei].lattice.jitter': 0.8 } },
+    ],
+  }),
+  // ---- remixes across lattice kinds ----
+  scene({
+    name: 'Remix - Rose window',
+    zoom: 0.6,
+    levels: [
+      level('rose', {
+        lattice: 'polar',
+        sectors: 8,
+        e2: [0, 1.1],
+        by: 'parity',
+        cellTurn: 20,
+        shape: star(8, 3, 0.45),
+        at: 0,
+        speed: 0.5,
+      }),
+      level('tracery', { scale: 2.2, lattice: 'fold', e2: [0.2, 0.7], shape: star(4, 2.5, 0.25), at: 0.35 }),
+      level('glass', { scale: 2.4, lattice: 'triangle', e2: HEX, by: 'parity', cellTurn: 60, shape: star(3, 2, 0.2) }),
+    ],
+    width: { value: 0.004, spread: 0.002 },
+    falloff: 1.1,
+    palette: 'ember',
+    radius: 0.35,
+    modulators: [
+      mod('turn', 'cos', 45, [['levels[rose].cell.turn', 20]]),
+      mod('reach', 'cos', 27, [['levels[tracery].lattice.e2[1]', 0.15]]),
+      mod('hue', 'ramp', 110, [['palette.hue', 180]]),
+    ],
+  }),
+  scene({
+    name: 'Remix - Spiral Truchet',
+    levels: [
+      level('arms', {
+        lattice: 'logpolar',
+        sectors: 12,
+        e2: [0.25, 1],
+        by: 'hash',
+        cellTurn: 45,
+        shape: star(3, 2, 0.55),
+        at: 0,
+        speed: 0.5,
+        cellSpread: 0.3,
+      }),
+      level('cells', {
+        scale: 2,
+        lattice: 'voronoi',
+        e2: HEX,
+        jitter: 0.6,
+        shape: star(6, 2, 0.35, { round: 0.6 }),
+        at: 0.5,
+      }),
+    ],
+    rings: 2,
+    drift: 0.6,
+    width: 0.005,
+    palette: 'dusk',
+    radius: 0,
+    modulators: [
+      mod('zoom', 'ramp', 30, [['levels[arms].affine.turn', 180]]),
+      mod('jitter', 'cos', 25, [['levels[cells].lattice.jitter', 0.3]]),
+      mod('hue', 'cos', 64, [['palette.hue', 90]]),
     ],
   }),
 ]

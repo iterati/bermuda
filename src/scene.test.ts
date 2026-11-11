@@ -83,9 +83,44 @@ describe('the parse refuses a broken scene, naming its field', () => {
     ['a reversed play range', broken((s) => (s.frame.zoom.play = [2, 1])), /^frame\.zoom\.play: must run low to high/],
     ['a wrong kind', broken((s) => ((s.line as { kind: string }).kind = 'neon')), /^line\.kind: must be one of/],
     [
-      'a lattice of a later milestone',
-      broken((s) => ((s.levels[0].lattice as { kind: string }).kind = 'voronoi')),
-      /^levels\[sq1\]\.lattice\.kind/,
+      'an unknown lattice',
+      broken((s) => ((s.levels[0].lattice as { kind: string }).kind = 'penrose')),
+      /^levels\[sq1\]\.lattice\.kind: must be one of/,
+    ],
+    [
+      'a voronoi lattice without its jitter',
+      broken((s) => (s.levels[0].lattice.kind = 'voronoi')),
+      /^levels\[sq1\]\.lattice\.jitter: is missing for a voronoi lattice/,
+    ],
+    [
+      'a jitter on another lattice',
+      broken((s) => (s.levels[0].lattice.jitter = { value: 0.5 })),
+      /^levels\[sq1\]\.lattice\.jitter: is voronoi only/,
+    ],
+    [
+      'a jitter off its hard range',
+      broken((s) => (s.levels[0].lattice = { ...s.levels[0].lattice, kind: 'voronoi', jitter: { value: 2 } })),
+      /^levels\[sq1\]\.lattice\.jitter\.value: 2 is outside/,
+    ],
+    [
+      'a polar lattice without its sectors',
+      broken((s) => (s.levels[0].lattice.kind = 'polar')),
+      /^levels\[sq1\]\.lattice\.sectors: is missing for a polar lattice/,
+    ],
+    [
+      'a fractional sector count',
+      broken((s) => (s.levels[0].lattice = { ...s.levels[0].lattice, kind: 'logpolar', sectors: 6.5 })),
+      /^levels\[sq1\]\.lattice\.sectors: must be a whole number/,
+    ],
+    [
+      'sectors on another lattice',
+      broken((s) => (s.levels[0].lattice.sectors = 6)),
+      /^levels\[sq1\]\.lattice\.sectors: is polar and logpolar only/,
+    ],
+    [
+      'a cell step of a later milestone',
+      broken((s) => (s.levels[0].cell.by = 'ring')),
+      /^levels\[sq1\]\.cell\.by: must be one of none, parity, hash/,
     ],
     ['a level id used twice', broken((s) => (s.levels[1].id = 'sq1')), /^levels\[1\]\.id: sq1 is used twice/],
     [

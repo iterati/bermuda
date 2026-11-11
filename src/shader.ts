@@ -1,17 +1,18 @@
 // The one fragment shader, generated once: every module is in it and uniforms pick which runs,
 // so changing a scene never recompiles. The levels live in a float texture, one row per level (render.ts packs it).
-import { MAX_DEPTH, MAX_STOPS, MAX_VARIANTS, VARIATIONS, type VariationKind } from './scene'
+import { LATTICES, MAX_DEPTH, MAX_STOPS, MAX_VARIANTS, VARIATIONS, type LatticeKind, type VariationKind } from './scene'
 
 // A level's row, in texels:
 //   0 weight, scale, turn, next row (-1 ends the chain)
 //   1 offset x, offset y, e2 x, e2 y
 //   2 and 3: the weights of VARIATIONS, in order
-//   4 cell by (0 none, 1 parity), cell turn, cell phase (radians), variant count
+//   4 cell by (0 none, 1 parity, 2 hash), cell turn, cell phase (radians), variant count
 //   5 colour at, colour speed, cell spread, total share
 //   6 the level's hash seed (from its id), its far end's in a morph, how far through its window it is, unused
-//   7 + 2v: variant v's share, n, m, r
-//   8 + 2v: variant v's round, twist, the row its sub-chain starts at (-1: none), unused
-export const ROW_TEXELS = 7 + 2 * MAX_VARIANTS
+//   7 lattice kind (its index in LATTICES), sectors, jitter, unused
+//   8 + 2v: variant v's share, n, m, r
+//   9 + 2v: variant v's round, twist, the row its sub-chain starts at (-1: none), unused
+export const ROW_TEXELS = 8 + 2 * MAX_VARIANTS
 
 // Each variation as GLSL over p, with r2 = |p|², r = |p| and th = atan(x, y) at hand (flam3's forms).
 const VARIATION_GLSL: Record<VariationKind, string> = {
@@ -24,6 +25,41 @@ const VARIATION_GLSL: Record<VariationKind, string> = {
   bubble: 'p * 4. / (r2 + 4.)',
   fisheye: 'p.yx * 2. / (r + 1.)',
 }
+
+// Each lattice kind as GLSL over p, e2, n (sectors) and t7.z (jitter), setting k where its cells are not
+// one unit wide. polar and logpolar run the oblique pad over (angle, radius) and (angle, log radius) in
+// sectors, x the angle, so (n, 0) is always a lattice vector and the cells close up round the centre;
+// their local x is the clockwise tangent and y points outward.
+const LATTICE_BODY: Record<LatticeKind, string> = {
+  oblique: 'return oblique(p, e2);',
+  // rows e2.y high, the odd ones shifted along by e2.x
+  brick: `float b = floor(p.y / e2.y + .5), sh = mod(b, 2.) * e2.x, a = floor(p.x - sh + .5);
+    return vec4(p - vec2(a + sh, b * e2.y), a, b);`,
+  // the pad's parallelograms halved into the triangles between its points: the hex pad's dual; the id
+  // keeps the half, t, as its parity
+  triangle: `vec2 q = vec2(p.x - e2.x * p.y / e2.y, p.y / e2.y), f = floor(q);
+    float t = step(1., q.x - f.x + q.y - f.y);
+    vec2 c = f + (1. + t) / 3.;
+    return vec4(p - (c.x * vec2(1, 0) + c.y * e2), 2. * f.x + t - f.y, f.y);`,
+  polar: `float r = length(p), th = r > 1e-9 ? atan(p.x, p.y) : 0.;
+    vec4 c = oblique(vec2(th * n / (2. * PI), r), e2);
+    return vec4(c.x * 2. * PI * r / n, c.y, mod(c.z, n), c.w);`,
+  logpolar: `float r = max(length(p), 1e-9), th = r > 1e-9 ? atan(p.x, p.y) : 0.;
+    vec4 c = oblique(vec2(th, log(r)) * n / (2. * PI), e2);
+    k = n / (2. * PI * r);
+    return vec4(c.xy, mod(c.z, n), c.w);`,
+  // KIFS: mirror both axes, fold into the wedge from 45° to 90°, and shift by e2 (which the hard ranges
+  // keep inside it); the id counts the mirrors, so parity is their count mod 2
+  fold: `vec2 q = abs(p), s = step(p, vec2(0));
+    float sw = step(q.y, q.x);
+    if (sw > .5) q = q.yx;
+    return vec4(q - e2, s.x + 2. * sw, s.y + sw);`,
+  voronoi: 'return voronoi(p, e2, t7.z);',
+}
+const LATTICE_GLSL = LATTICES.map((kind, i) => {
+  const test = i === 0 ? 'if (kind < .5) ' : i < LATTICES.length - 1 ? `else if (kind < ${i}.5) ` : 'else '
+  return `  ${test}{ // ${kind}\n    ${LATTICE_BODY[kind]}\n  }`
+}).join('\n')
 
 export function generateShader(): string {
   const vary = VARIATIONS.map((kind, i) => {
@@ -77,7 +113,7 @@ float sdStar(vec2 p, float r, float n, float m) {
 
 // the nearest point of the lattice a(1, 0) + b e2, centre-nested, from the 4 corners of p's parallelogram:
 // the local offset and the id (a, b)
-vec4 lattice(vec2 p, vec2 e2) {
+vec4 oblique(vec2 p, vec2 e2) {
   vec2 q = vec2(p.x - e2.x * p.y / e2.y, p.y / e2.y);
   vec2 b = floor(q);
   vec4 best = vec4(1e9);
@@ -89,11 +125,33 @@ vec4 lattice(vec2 p, vec2 e2) {
   return best;
 }
 
+// the pad's points each moved inside its own parallelogram by jitter (0 the pad itself, 1 organic cells),
+// the nearest of the 5 x 5 round p (a flat, sheared pad's nearest point can sit two rows off)
+vec4 voronoi(vec2 p, vec2 e2, float jitter) {
+  vec2 q = vec2(p.x - e2.x * p.y / e2.y, p.y / e2.y);
+  vec2 b = floor(q + .5);
+  vec4 best = vec4(1e9);
+  for (int k = 0; k < 25; k++) {
+    vec2 id = b + vec2(k % 5 - 2, k / 5 - 2);
+    vec2 at = id + jitter * (vec2(hash(id), hash(id + 19.19)) - .5);
+    vec2 d = p - (at.x * vec2(1, 0) + at.y * e2);
+    if (dot(d, d) < dot(best.xy, best.xy)) best = vec4(d, id);
+  }
+  return best;
+}
 vec2 vary(vec2 p, vec4 wa, vec4 wb) {
   float r2 = dot(p, p), r = sqrt(r2), th = atan(p.x, p.y);
   vec2 q = vec2(0);
 ${vary}
   return q;
+}
+
+// A level's lattice: the local offset .xy and the cell id .zw, and k, the cells per unit at p.
+// Ids are whole numbers, so parity is (id.x + id.y) mod 2.
+vec4 lattice(vec2 p, vec2 e2, vec4 t7, out float k) {
+  float kind = t7.x, n = t7.y;
+  k = 1.;
+${LATTICE_GLSL}
 }
 
 vec3 oklabToSrgb(vec3 c) {
@@ -161,28 +219,30 @@ vec3 render(vec2 fc) {
     float depth = grown / uDepth;
     vec4 t0 = row(j, 0), t1 = row(j, 1), t4 = row(j, 4), t5 = row(j, 5);
     vec4 t6 = row(j, 6);
-    float w = t0.x;
+    float w = t0.x, kc;
     // affine, variations, lattice; the level weight blends the re-tiling toward pass-through
-    vec4 cell = lattice(vary(t0.y * (rot(t0.z) * p) + t1.xy, row(j, 2), row(j, 3)), t1.zw);
+    vec4 cell = lattice(vary(t0.y * (rot(t0.z) * p) + t1.xy, row(j, 2), row(j, 3)), t1.zw, row(j, 7), kc);
     vec2 h = mix(p, cell.xy, w);
-    S *= mix(1., t0.y, w);
-    // the Cell step: parity turns odd cells the other way and flips their ring phase; a collapsed level does not turn
-    float sgn = t4.x > .5 && mod(cell.z + cell.w, 2.) > .5 ? -1. : 1.;
-    h = rot(sgn * t4.y * w) * h;
+    S *= mix(1., t0.y * kc, w);
     // a level whose far end has another id turns each cell over to the far end's seed at the cell's own time,
     // in the middle of the level's window, the cell's shape dipping into a circle as it does
     float over = .3 + .4 * hash(cell.zw + 7.7), seed = t6.z < over ? t6.x : t6.y;
     float dip = t6.x != t6.y ? 1. - smoothstep(0., .08, abs(t6.z - over)) : 0.;
+    // the Cell step: parity turns odd cells the other way, hash turns each cell either way (Truchet), and both
+    // flip the turned cells' ring phase; a collapsed level does not turn
+    float sgn = (t4.x > 1.5 ? hash(cell.zw + seed * 5.13 + 7.) : t4.x > .5 ? mod(cell.z + cell.w, 2.) : 0.) > .5
+      ? -1. : 1.;
+    h = rot(sgn * t4.y * w) * h;
     // the per-cell pick among the variants, by share
     float pick = hash(cell.zw + seed * 17.31) * t5.w, shares = 0.;
     int v = 0;
     for (int k = 0; k < MAX_VARIANTS; k++) {
       if (float(k) >= t4.w) break;
       v = k;
-      shares += row(j, 7 + 2 * k).x;
+      shares += row(j, 8 + 2 * k).x;
       if (pick < shares) break;
     }
-    vec4 sa = row(j, 7 + 2 * v), sb = row(j, 8 + 2 * v);
+    vec4 sa = row(j, 8 + 2 * v), sb = row(j, 9 + 2 * v);
     // draw: star, contour, line
     float d = mix(sdStar(rot(sb.y) * h, sa.w, sa.y, sa.z), length(h) - sa.w, mix(sb.x, 1., dip));
     // echo rings 1/rings apart, drifting by the ring phase; in a morph the ring count morphs, and each end draws
@@ -194,7 +254,8 @@ vec3 render(vec2 fc) {
     float a = contour(d, k, ra, uContour.z + sgn * t4.z, uLine.x, scale, lw, lf);
     if (uToward.y > 0.)
       a = mix(a, contour(d, k, rb, uToward.z + sgn * t4.z, uToward.x, scale, lw, lf), uToward.y);
-    a *= exp(-r0 * (uRadial.x + uRadial.y * depth)) * w;
+    // a level whose cells are under a few pixels fades out rather than shimmer (log-polar's centre)
+    a *= exp(-r0 * (uRadial.x + uRadial.y * depth)) * w * smoothstep(1., 3., uFrame.z * uRes.y * .5 / S);
     // colour: the ancestry index pulls toward the level's own colour as far as the level is grown, plus a per-cell spread
     ci = mix(ci, t5.x + t5.z * hash(cell.zw + seed * 3.7 + 11.), t5.y * w);
     vec3 col = palette(ci + uPalette.w);

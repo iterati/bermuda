@@ -1,6 +1,6 @@
 // Edits of a scene's structure, made on a draft (motion.ts update): adding, removing and moving levels,
 // then pruning what pointed at a level that is gone.
-import { allLevels, clamp, hardRange, knobsOf, resolve, type Level, type Scene } from './scene'
+import { allLevels, clamp, hardRange, knobsOf, resolve, type LatticeKind, type Level, type Scene } from './scene'
 
 export function findLevel(scene: Scene, id: string): { level: Level; list: Level[] } {
   const found = allLevels(scene.levels).find(({ level }) => level.id === id)
@@ -55,6 +55,65 @@ export function addSubChain(scene: Scene, id: string, variant: number) {
   child.variants = [structuredClone(level.variants[variant])]
   delete child.variants[0].below
   level.variants[variant].below = [child]
+}
+
+// Change a level's lattice kind: voronoi gets its jitter and polar and logpolar their sectors, from the pad
+// itself and six round; the other kinds drop them, with whatever pointed at the jitter.
+export function setLattice(scene: Scene, id: string, kind: LatticeKind) {
+  const { lattice } = findLevel(scene, id).level
+  lattice.kind = kind
+  if (kind !== 'voronoi') delete lattice.jitter
+  else lattice.jitter ??= { value: 0 }
+  if (kind !== 'polar' && kind !== 'logpolar') delete lattice.sectors
+  else lattice.sectors ??= 6
+  prune(scene)
+}
+
+// The nearest aligned nesting of a level in the level it re-tiles: a scale s and turn R that put s R (1, 0)
+// and s R e2 of the parent's pad on the level's own lattice, so its cells line up across the parent's
+// (√2 at 45° for squares, √3 at 30° for hexes, 2 at 0° for any pad). None when the level has no parent,
+// when the parent's cells do not repeat by its pad (only oblique and voronoi at jitter 0 do: triangle's
+// halves and polar, logpolar, brick and fold sit apart otherwise), when the parent turns its cells two
+// ways, or when the two pads have no nesting inside the scale's hard range.
+export function alignedNesting(scene: Scene, id: string): { scale: number; turn: number } | undefined {
+  const { level, list } = findLevel(scene, id)
+  const i = list.indexOf(level)
+  // the level before it in its list, or the level whose variant carries its sub-chain
+  const above =
+    i > 0
+      ? list[i - 1]
+      : allLevels(scene.levels).find(({ level: l }) => l.variants.some((v) => v.below === list))?.level
+  // a linked parent plays its leader's lattice
+  const parent = above?.link ? findLevel(scene, above.link).level : above
+  if (!parent) return undefined
+  const { lattice, cell } = parent
+  if (lattice.kind !== 'oblique' && !(lattice.kind === 'voronoi' && lattice.jitter!.value === 0)) return undefined
+  if (!['oblique', 'triangle', 'voronoi'].includes(level.lattice.kind)) return undefined
+  // a parent's cell turn turns what the level re-tiles: one way for all its cells, or two ways, which no
+  // single turn lines up
+  if (cell.by !== 'none' && cell.turn.value !== 0) return undefined
+  const cellTurn = cell.by === 'none' ? cell.turn.value : 0
+  const [px, py] = lattice.e2.map((k) => k.value)
+  const [cx, cy] = level.lattice.e2.map((k) => k.value)
+  const { scale, turn } = level.affine
+  const [lo, hi] = hardRange('levels[].affine.scale')
+  const near = (x: number) => Math.abs(x - Math.round(x)) < 1e-4
+  let best: { scale: number; turn: number; cost: number } | undefined
+  for (let a = -8; a <= 8; a++)
+    for (let b = -8; b <= 8; b++) {
+      // v = s R (1, 0), a lattice vector of the level's pad; then s R e2 is v times e2 as complex numbers
+      const [vx, vy] = [a + b * cx, b * cy]
+      const s = Math.hypot(vx, vy)
+      if (s < lo || s > hi) continue
+      const [wx, wy] = [vx * px - vy * py, vx * py + vy * px]
+      if (!near(wy / cy) || !near(wx - (wy / cy) * cx)) continue
+      const deg = (Math.atan2(vy, vx) * 180) / Math.PI - cellTurn
+      let t = deg + 360 * Math.round((turn.value - deg) / 360)
+      if (Math.abs(t) > 360) t -= 360 * Math.sign(t)
+      const cost = Math.log(s / scale.value) ** 2 + (((t - turn.value) * Math.PI) / 180) ** 2
+      if (!best || cost < best.cost) best = { scale: s, turn: t, cost }
+    }
+  return best && { scale: best.scale, turn: best.turn }
 }
 
 // Unlink every level whose link no longer points at an earlier unlinked level of the same list, and drop

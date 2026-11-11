@@ -126,6 +126,22 @@ export function setMacro(draft: Scene, id: string, v: number) {
   }
 }
 
+// Detune the modulators' periods of a clock unit or more to whole clock units, each the nearest to its own
+// that is coprime with every shorter one's, so the piece rarely repeats, as the Tapestries' periods were
+// picked (on a draft). Shorter periods keep theirs.
+export function detunePeriods(draft: Scene) {
+  const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a)
+  const taken: number[] = []
+  for (const m of [...draft.modulators].filter((m) => m.period >= 1).sort((a, b) => a.period - b.period)) {
+    const base = Math.round(m.period)
+    let p = base
+    // base, then one up, one down, two up, two down and so on
+    for (let i = 1; p < 1 || taken.some((t) => gcd(t, p) > 1); i++) p = base + (i % 2 ? (i + 1) / 2 : -i / 2)
+    taken.push(p)
+    m.period = p
+  }
+}
+
 // A preset is a keyframe of every knob's value, inside the look's clamps.
 export const capturePreset = (scene: Scene, name: string): Preset => ({
   name,
