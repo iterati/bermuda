@@ -4,7 +4,7 @@
 // frames of Play's transitions along an autopilot walk are finite and not blank. Every shape draws alone and
 // joined, screen lines hold their width through a warp, spill draws only what reaches over, and dots fade from one
 // count to the next and crawl. The Decks' three pictures, each drawn at its own size in the canvas's corner, are
-// finite and not blank.
+// finite and not blank. A background of each kind draws under the lines, and at amount 0 draws as none.
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
@@ -12,12 +12,22 @@ import { build, type Rollup } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { findLevel, removeLevel, setLattice } from './edit'
 import { snapLoop } from './loop'
-import { BANK, join, level, LOOKS, scene, shape, star } from './looks'
+import { background, BANK, join, level, LOOKS, scene, shape, star } from './looks'
 import { morph, smooth } from './morph'
 import { advance, applyPreset, newLive, update, type Live } from './motion'
 import { bend, bendOf, entryScene, step, tangent, valuesOf, type Keyframe } from './play'
 import type { Toward } from './render'
-import { CELLS, LATTICES, SHAPES, SPILLS, type Edge, type Scene, type ShapeKind, type VariationKind } from './scene'
+import {
+  BACKGROUNDS,
+  CELLS,
+  LATTICES,
+  SHAPES,
+  SPILLS,
+  type Edge,
+  type Scene,
+  type ShapeKind,
+  type VariationKind,
+} from './scene'
 
 declare global {
   interface Window {
@@ -217,6 +227,11 @@ describe('the morph', () => {
     ['Marching ants into Metaballs', look('Shapes - Marching ants'), look('Shapes - Metaballs')],
     ["iq's garden into Stairs and S", look("Shapes - iq's garden"), look('Shapes - Stairs')],
     ['Onion skins into Through the sphere', look('Shapes - Onion skins'), look('Shapes - Through the sphere')],
+    [
+      'Tapestry 1 over a soak into Tapestry 7 with none',
+      { ...look('Tapestry 1'), background: background('soak') },
+      look('Tapestry 7 '),
+    ],
   ]
   it.each(ends)('%s lands on A and B exactly at its ends', async (_, a, b) => {
     for (const [x, end] of [
@@ -251,6 +266,34 @@ describe('the morph', () => {
     const gone = at(update(look(name), (d) => removeLevel(d, id)))
     const x = await pixels(collapsed.scene, collapsed.live)
     expect(furthest(x, await pixels(gone.scene, gone.live))).toBeLessThan(1e-4)
+  })
+})
+
+describe('a background', () => {
+  const drawn = async (s: Scene) => {
+    const live = newLive()
+    return pixels(advance(s, live, 7.3, 60), live)
+  }
+
+  it.each(BACKGROUNDS)('draws Tapestry 1 over a %s finite, not blank and not as without it', async (kind) => {
+    const px = await drawn({ ...look('Tapestry 1'), background: background(kind) })
+    const { finite, mean, spread } = stats(px)
+    expect(finite).toBe(true)
+    expect(mean).toBeGreaterThan(0.01)
+    expect(spread).toBeGreaterThan(0.01)
+    expect(furthest(px, await drawn(look('Tapestry 1')))).toBeGreaterThan(0.05)
+  })
+
+  it.each(BACKGROUNDS)('at amount 0 draws a %s as if there were none', async (kind) => {
+    const px = await drawn({ ...look('Tapestry 1'), background: background(kind, 0) })
+    expect(furthest(px, await drawn(look('Tapestry 1')))).toBeLessThan(1e-4)
+  })
+
+  it('draws Tapestry 7b, composite first, over a flat background finite and not blank', async () => {
+    const { finite, mean, spread } = stats(await drawn({ ...look('Tapestry 7b'), background: background('flat') }))
+    expect(finite).toBe(true)
+    expect(mean).toBeGreaterThan(0.01)
+    expect(spread).toBeGreaterThan(0.01)
   })
 })
 

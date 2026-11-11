@@ -1,4 +1,4 @@
-// The controls of each chip of the chain: frame, a level, contour, line, palette, post.
+// The controls of each chip of the chain: background, frame, a level, contour, line, palette, post.
 // Stage shows the picked chip's; Edit shows every chip's at once.
 import { createContext, useContext, type ReactNode } from 'react'
 import { COSINES, css, paletteAt, stopsFromCosine } from '../colour'
@@ -15,6 +15,7 @@ import {
   unlink,
 } from '../edit'
 import {
+  BACKGROUNDS,
   CELLS,
   clamp,
   hardRange,
@@ -172,6 +173,8 @@ const Group = ({ title, children, actions }: { title: string; children: ReactNod
 
 export function Section({ chip }: { chip: string }) {
   switch (chip) {
+    case 'background':
+      return <BackgroundSection />
     case 'frame':
       return (
         <Group title="Frame">
@@ -198,6 +201,55 @@ export function Section({ chip }: { chip: string }) {
     default:
       return <LevelSection id={chip} />
   }
+}
+
+function BackgroundSection() {
+  const { scene, edit } = useCtl()
+  const kind = scene.background?.kind ?? 'none'
+  return (
+    <Group title="Background">
+      <Choice
+        label="kind"
+        value={kind}
+        options={['none', ...BACKGROUNDS] as const}
+        onChange={(v) =>
+          edit((d) => {
+            if (v === 'none') {
+              delete d.background
+              prune(d)
+              return
+            }
+            // a kind picked over another keeps its knobs
+            d.background ??= {
+              kind: v,
+              at: [{ value: 0 }, { value: 0.5 }],
+              amount: { value: 0.35 },
+              turn: { value: 90 },
+              scale: { value: 0.6 },
+              edge: { value: 0.5 },
+              seep: { value: 0 },
+            }
+            d.background.kind = v
+          })
+        }
+      />
+      {kind !== 'none' && (
+        <>
+          <Knob label="colour" at="background.at[0]" />
+          {kind !== 'flat' && <Knob label="colour 2" at="background.at[1]" />}
+          <Knob label="amount" at="background.amount" />
+          {kind === 'gradient' && <Knob label="turn" at="background.turn" />}
+          {kind === 'soak' && (
+            <>
+              <Knob label="pool size" at="background.scale" />
+              <Knob label="edge" at="background.edge" />
+              <Knob label="seep" at="background.seep" />
+            </>
+          )}
+        </>
+      )}
+    </Group>
+  )
 }
 
 function LineSection() {

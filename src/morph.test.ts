@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { paletteAt } from './colour'
-import { join, level, scene, shape, star } from './looks'
+import { background, join, level, LOOKS, scene, shape, star } from './looks'
 import { depthWindow, morph } from './morph'
 import type { Edge, Scene } from './scene'
 
@@ -210,6 +210,39 @@ describe('the morph', () => {
       expect(got[1]).toBeCloseTo(want[1], 6)
       expect(Math.cos(((got[2] - want[2]) * Math.PI) / 180)).toBeCloseTo(1, 6)
     }
+  })
+})
+
+describe('a background', () => {
+  const look = (name: string) => LOOKS.find((l) => l.name.startsWith(name))!
+  const soaked = { ...look('Tapestry 1 '), background: background('soak', 0.8) }
+
+  it('one side lacks fades out from the other side at amount 0, and is gone at the far end', () => {
+    const none = look('Tapestry 7 ')
+    let last = Infinity
+    for (let x = 0; x <= 1; x += 0.125) {
+      const bg = at(soaked, none, x).background!
+      expect(bg.kind).toBe('soak')
+      expect(bg.amount.value).toBeCloseTo(0.8 * (1 - x), 9)
+      expect(bg.amount.value).toBeLessThan(last)
+      last = bg.amount.value
+    }
+    expect(at(soaked, none, 1).background!.amount.value).toBe(0)
+    expect(at(none, look('Tapestry 8'), 0.5).background).toBeUndefined()
+  })
+
+  it('swaps its kind at the middle, where its amount dips to nothing', () => {
+    const flat = { ...look('Tapestry 1 '), background: background('flat', 0.4) }
+    expect(at(flat, soaked, 0.49).background!.kind).toBe('flat')
+    expect(at(flat, soaked, 0.5).background).toMatchObject({ kind: 'soak', amount: { value: 0 } })
+    expect(at(flat, soaked, 0.2).background!.amount.value).toBeGreaterThan(0)
+  })
+
+  it("is A's at 0 and B's at 1, every knob", () => {
+    const a = { ...look('Tapestry 1 '), background: background('gradient', 0.3, [0.1, 0.9]) }
+    const b = { ...look('Tapestry 7 '), background: { ...background('soak', 0.7, [0.4, 0.2]), seep: { value: 0.6 } } }
+    expect(at(a, b, 0).background).toEqual(a.background)
+    expect(at(a, b, 1).background).toEqual(b.background)
   })
 })
 

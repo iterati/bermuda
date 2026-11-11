@@ -1,4 +1,4 @@
-// The chain as chips: frame, the levels with their sub-chains under the variants that carry them,
+// The chain as chips: background, frame, the levels with their sub-chains under the variants that carry them,
 // then contour, line, palette and post. Click a chip to pick it.
 import { duplicateLevel, newId } from '../edit'
 import type { Level, Shape } from '../scene'
@@ -55,6 +55,7 @@ export function Chain({ picked }: { picked: string }) {
   )
   return (
     <div className="chain">
+      {chip('background', 'Background')}
       {chip('frame', 'Frame')}
       <Levels levels={scene.levels} picked={picked} depth={0} />
       <button

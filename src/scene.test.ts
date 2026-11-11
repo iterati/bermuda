@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { BANK, join, level, LOOKS, mod, scene, shape, star } from './looks'
+import { background, BANK, join, level, LOOKS, mod, scene, shape, star } from './looks'
 import { capturePreset } from './motion'
 import {
+  BACKGROUNDS,
   FORMLESS,
   KINDS,
   kindOf,
@@ -108,6 +109,8 @@ describe('the knob kinds', () => {
         'frame.zoom',
         'contour.radialWeight',
         'levels[].variants[].shape.round',
+        'background.at[0]',
+        'background.amount',
       ].sort(),
     )
   })
@@ -156,12 +159,85 @@ describe('the knob kinds', () => {
     expect(shows(s, 'levels[b].variants[0].shape.join.shape.m')).toBe(true)
   })
 
+  it('shows the knobs each background kind uses', () => {
+    const at = ['at[0]', 'at[1]', 'amount', 'turn', 'scale', 'edge', 'seep'].map((k) => `background.${k}`)
+    const showing = (kind: (typeof BACKGROUNDS)[number]) =>
+      at.filter((a) => shows({ ...LOOKS[0], background: background(kind) }, a))
+    expect(showing('flat')).toEqual(['background.at[0]', 'background.amount'])
+    expect(showing('gradient')).toEqual([
+      'background.at[0]',
+      'background.at[1]',
+      'background.amount',
+      'background.turn',
+    ])
+    expect(showing('soak')).toEqual(at.filter((a) => a !== 'background.turn'))
+  })
+
   it('shows the dots knobs only on a dotted line, though they stay when the kind moves on', () => {
     const dots = { count: 8, size: 0.3, crawl: 1 }
     for (const at of ['line.dots.count', 'line.dots.size', 'line.dots.crawl']) {
       expect(shows(scene({ name: 'dots', levels: [level('a')], line: 'dots', dots }), at)).toBe(true)
       expect(shows(scene({ name: 'glow', levels: [level('a')], line: 'glow', dots }), at)).toBe(false)
     }
+  })
+})
+
+describe('a background', () => {
+  const tapestry1 = LOOKS.find((l) => l.name.startsWith('Tapestry 1 '))!
+
+  it('is on no built-in look', () => {
+    expect(LOOKS.filter((l) => l.background)).toEqual([])
+  })
+
+  it.each(BACKGROUNDS)('round-trips Tapestry 1 over a %s', (kind) => {
+    const look = { ...structuredClone(tapestry1), background: background(kind) }
+    expect(parseScene(JSON.stringify(look))).toEqual(look)
+  })
+
+  it('round-trips a modulator target, a macro target, a preset value and a MIDI mapping on its amount', () => {
+    const look = { ...structuredClone(tapestry1), background: background('soak') }
+    look.modulators.push(mod('bg', 'ramp', 8, [['background.amount', 0.2]]))
+    look.macros.push({ id: 'm', name: 'm', value: 0, targets: [{ knob: 'background.amount', from: 0, to: 1 }] })
+    look.presets.push({ name: 'dim', values: { 'background.amount': 0.1 } })
+    look.midi = [{ channel: 1, control: 30, knob: 'background.amount' }]
+    expect(parseScene(JSON.stringify(look))).toEqual(look)
+  })
+
+  it('has its 7 knobs in knobsOf when it is there, and none when it is not', () => {
+    const bg = (s: Scene) => knobsOf(s).filter((k) => k.address.startsWith('background'))
+    expect(bg({ ...tapestry1, background: background('flat') }).map((k) => k.address)).toEqual([
+      'background.at[0]',
+      'background.at[1]',
+      'background.amount',
+      'background.turn',
+      'background.scale',
+      'background.edge',
+      'background.seep',
+    ])
+    expect(bg(tapestry1)).toEqual([])
+  })
+
+  const refused = (fn: (bg: Record<string, unknown>) => void) =>
+    broken((s) => {
+      s.background = background('soak')
+      fn(s.background)
+    })
+  it.each([
+    ['an unknown kind', refused((bg) => (bg.kind = 'image')), /^background\.kind: must be one of flat, gradient, soak/],
+    ['a missing field', refused((bg) => delete bg.seep), /^background\.seep: is missing/],
+    ['an unknown field', refused((bg) => (bg.drift = { value: 0 })), /^background\.drift: is not a field/],
+    [
+      'an amount off 0 to 1',
+      refused((bg) => (bg.amount = { value: 1.5 })),
+      /^background\.amount\.value: 1\.5 is outside 0 to 1/,
+    ],
+    [
+      'a level called background',
+      broken((s) => (s.levels[0].id = 'background')),
+      /^levels\[0\]\.id: background names a fixed part/,
+    ],
+  ])('refuses %s, naming its field', (_, parse, message) => {
+    expect(parse).toThrow(message)
   })
 })
 

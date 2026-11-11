@@ -135,6 +135,8 @@ uniform vec4 uPalette;            // hue, contrast, radius, running index
 uniform float uComposite;         // 0 add to 1 first hit
 uniform vec4 uToward;             // a morph's far end: its line kind, how far in (0 none), its ring phase, its index
 uniform vec2 uTowardRings;        // the far end's rings, their spread
+uniform vec4 uBg;                 // kind (0 none, 1 flat, 2 gradient, 3 soak), amount, turn (radians), pool size
+uniform vec4 uBgSoak;             // at[0], at[1], edge, seep
 uniform int uAA;
 uniform float uGamma;
 out vec4 outColor;
@@ -452,6 +454,51 @@ float contour(float d, float k, float rings, float phase, float kind, float scal
   return echo < 1. ? mix(lineOf(kind, abs(d) * scale, w, f, dash, crawl), a, echo) : a;
 }
 
+// value noise on hash's lattice, and 5 octaves of it
+float noise(vec2 p) {
+  vec2 i = floor(p), f = fract(p), u = f * f * (3. - 2. * f);
+  return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + 1.), u.x), u.y);
+}
+float fbm(vec2 p) {
+  float v = 0., a = .5;
+  for (int i = 0; i < 5; i++) { v += a * noise(p); p = rot(.5) * p * 2.03 + 17.; a *= .5; }
+  return v;
+}
+
+// a pigment at palette place at, blended into the far end's palette in a morph as the lines' colour is
+vec3 pigment(float at) {
+  vec3 c = palette(at + uPalette.w);
+  return uToward.y > 0. ? mix(c, palette(at + uToward.w), uToward.y) : c;
+}
+
+// The background under the lines, in screen space so the frame does not move it: a flat colour, a gradient along
+// turn, or a soak (Frankenthaler's soak-stain): 3 translucent pools of pigment on raw canvas, each edge warped and
+// darkened where the pigment gathered, their centres turned round by seep.
+vec3 background(vec2 fc) {
+  if (uBg.x < .5) return vec3(0);
+  vec2 uv = (fc * 2. - uRes) / uRes.y;
+  vec3 a = pigment(uBgSoak.x), c;
+  if (uBg.x < 1.5) c = a;
+  else if (uBg.x < 2.5) {
+    float reach = length(uRes) / uRes.y;
+    c = mix(a, pigment(uBgSoak.y), smoothstep(-reach, reach, dot(uv, vec2(cos(uBg.z), sin(uBg.z)))));
+  } else {
+    c = vec3(.86, .81, .71);
+    float s = uBg.w, turn = 2. * PI * uBgSoak.w;
+    for (int i = 0; i < 3; i++) {
+      float f = float(i);
+      vec2 at = s * (vec2(f - 1., .3 * sin(f * 2.4)) + .35 * vec2(cos(turn + f * 2.1), sin(turn + f * 2.1)));
+      float n = fbm(uv / s * 1.6 + f * 7.3 + .4 * vec2(cos(turn), sin(turn)));
+      float d = length(uv - at) / s - .55 + .35 * (n - .5), inside = 1. - smoothstep(-.008, .008, d);
+      vec3 ink = pigment(mix(uBgSoak.x, uBgSoak.y, f * .5));
+      // thinned paint soaked in about .7 of the way to its pigment, unevenly, and gathered dark at the edge
+      c *= mix(vec3(1), ink, (.5 + .4 * n) * inside);
+      c *= mix(vec3(1), .6 * ink, uBgSoak.z * inside * exp(-abs(d) * 30.));
+    }
+  }
+  return c * uBg.y;
+}
+
 // What one cell of a level draws: its distance, where it is round the cell's middle (turns) and how far out (rad), its
 // parity sign, the variant its hash picks and the seed it picked with.
 struct Cell { float d; float turn; float rad; float sgn; int v; float seed; };
@@ -517,7 +564,8 @@ mat2 stretch(vec2 q0, vec2 q, vec4 wa, vec4 wb) {
   return mat2((vary(q0 + vec2(e, 0), wa, wb) - q) / e, (vary(q0 + vec2(0, e), wa, wb) - q) / e);
 }
 
-vec3 render(vec2 fc) {
+// one sample of the lines over the background bg: added to it, or over it where the first hit leaves it uncovered
+vec3 render(vec2 fc, vec3 bg) {
   vec2 p = rot(uFrame.w) * ((fc * 2. - uRes) / uRes.y) / uFrame.z + uFrame.xy;
   float r0 = length(p);
   float ci = uPalette.z * r0;
@@ -593,13 +641,13 @@ vec3 render(vec2 fc) {
     float below = row(j, 9 + ${VARIANT_TEXELS} * own.v).z;
     j = below >= 0. ? int(below) : int(t0.w);
   }
-  return mix(add, first, uComposite);
+  return mix(add + bg, first + (1. - cover) * bg, uComposite);
 }
 
 void main() {
-  vec3 c = vec3(0);
+  vec3 c = vec3(0), bg = background(gl_FragCoord.xy);
   for (int y = 0; y < 3; y++) for (int x = 0; x < 3; x++)
-    if (x < uAA && y < uAA) c += render(gl_FragCoord.xy + (vec2(x, y) + .5) / float(uAA) - .5);
+    if (x < uAA && y < uAA) c += render(gl_FragCoord.xy + (vec2(x, y) + .5) / float(uAA) - .5, bg);
   c /= float(uAA * uAA);
   outColor = vec4(pow(c, vec3(1. / uGamma)), 1.);
 }

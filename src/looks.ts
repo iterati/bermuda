@@ -191,6 +191,21 @@ export const scene = (s: SceneSpec): Scene => ({
   presets: s.presets ?? [],
 })
 
+// a background of kind under the lines, its colours round the palette from at
+export const background = (
+  kind: NonNullable<Scene['background']>['kind'],
+  amount: K = 0.6,
+  at: [K, K] = [0.1, 0.6],
+): NonNullable<Scene['background']> => ({
+  kind,
+  at: [k(at[0]), k(at[1])],
+  amount: k(amount),
+  turn: k(30),
+  scale: k(0.6),
+  edge: k(0.5),
+  seep: k(0.2),
+})
+
 // a palette preset: a cosine preset's stops as preset values
 const palettePreset = (name: string, cosine: string): Preset => ({
   name,

@@ -3,6 +3,7 @@
 // smaller picture in its bottom-left corner.
 import {
   allLevels,
+  BACKGROUNDS,
   LATTICES,
   LINES,
   MAX_LEVELS,
@@ -145,6 +146,8 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     stopMix: u('uStopMix'),
     palette: u('uPalette'),
     composite: u('uComposite'),
+    bg: u('uBg'),
+    bgSoak: u('uBgSoak'),
     aa: u('uAA'),
     gamma: u('uGamma'),
     toward: u('uToward'),
@@ -228,6 +231,15 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     gl.uniform1f(loc.composite, mixed(scene.composite === 'first', far.composite === 'first'))
     gl.uniform4f(loc.toward, LINES.indexOf(far.line), far.at, far.drift, far.colour)
     gl.uniform2f(loc.towardRings, ...far.rings)
+    const bg = scene.background
+    gl.uniform4f(
+      loc.bg,
+      bg ? BACKGROUNDS.indexOf(bg.kind) + 1 : 0,
+      bg?.amount.value ?? 0,
+      (bg?.turn.value ?? 0) * RAD,
+      bg?.scale.value ?? 1,
+    )
+    gl.uniform4f(loc.bgSoak, bg?.at[0].value ?? 0, bg?.at[1].value ?? 0, bg?.edge.value ?? 0, bg?.seep.value ?? 0)
     gl.uniform1i(loc.aa, post.aa)
     gl.uniform1f(loc.gamma, post.gamma.value)
     gl.drawArrays(gl.TRIANGLES, 0, 3)

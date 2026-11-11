@@ -36,6 +36,16 @@ export type Level = {
 export type Scene = {
   // a look: play ranges and macros travel with it
   name: string
+  // under the lines, coloured from the palette; absent, black as before
+  background?: {
+    kind: (typeof BACKGROUNDS)[number]
+    at: [Knob, Knob] // palette places: the flat colour; the gradient's two ends; the soak's first and last pigment
+    amount: Knob // how much shows: 0 is black
+    turn: Knob // the gradient's direction
+    scale: Knob // the soak's pool size, in screen heights
+    edge: Knob // how dark the stain gathers at each pool's edge
+    seep: Knob // where the stain has seeped to, round once from 0 to 1
+  }
   frame: { origin: [Knob, Knob]; zoom: Knob; turn: Knob }
   levels: Level[]
   contour: { rings: Knob; drift: Knob; radialWeight: Knob }
@@ -154,13 +164,15 @@ export const SHAPES = [
 // the kinds with no proportion of their own, so no form
 export const FORMLESS: readonly ShapeKind[] = ['star', 'heart', 'coolS']
 export const LINES = ['glow', 'smooth', 'hard', 'band', 'dots'] as const
+// soak: Helen Frankenthaler's soak-stain pools of thinned paint on raw canvas
+export const BACKGROUNDS = ['flat', 'gradient', 'soak'] as const
 export const WAVES = ['cos', 'tri', 'beat', 'ramp', 'steps'] as const
 export const MIXES = ['straight', 'short', 'long'] as const
 // the views a MIDI button can pick
 export const VIEWS = ['stage', 'edit', 'decks'] as const
 export type View = (typeof VIEWS)[number]
 // the scene's fixed parts beside its levels, each a chip of the chain: no level may take one's name
-export const CHIPS = ['frame', 'contour', 'line', 'palette', 'post'] as const
+export const CHIPS = ['background', 'frame', 'contour', 'line', 'palette', 'post'] as const
 export const MAX_LEVELS = 32
 export const MAX_DEPTH = 16
 export const MAX_VARIANTS = 4
@@ -184,7 +196,50 @@ const ringsShow = (scene: Scene) =>
 // the knob is this shape's m and the shape is a star, the one kind that reads m
 const starM = (shape: Shape | undefined, at: KnobAt) => shape?.m === at.knob && (shape.kind ?? 'star') === 'star'
 const dotted = (scene: Scene) => scene.line.kind === 'dots'
+const soaked = (scene: Scene) => scene.background?.kind === 'soak'
 export const KINDS: Record<string, Kind> = {
+  'background.at[0]': {
+    range: [0, 1],
+    label: 'colour',
+    help: "the flat colour, the gradient's first end and the soak's first pigment: a place round the palette",
+    top: true,
+  },
+  'background.at[1]': {
+    range: [0, 1],
+    label: 'colour 2',
+    help: "the gradient's far end and the soak's last pigment, a place round the palette; the soak's middle pool sits between",
+    shows: (s) => s.background?.kind === 'gradient' || soaked(s),
+  },
+  'background.amount': {
+    range: [0, 1],
+    label: 'amount',
+    help: 'how much background shows under the lines: 0 is black, as before',
+    top: true,
+  },
+  'background.turn': {
+    range: [-360, 360],
+    label: 'turn',
+    help: "the gradient's direction, in degrees",
+    shows: (s) => s.background?.kind === 'gradient',
+  },
+  'background.scale': {
+    range: [0.1, 4],
+    label: 'pool size',
+    help: "how big the soak's pools are: each about half of it across, in screen heights",
+    shows: soaked,
+  },
+  'background.edge': {
+    range: [0, 1],
+    label: 'edge',
+    help: "how dark the stain gathers at each pool's edge, where the pigment pooled",
+    shows: soaked,
+  },
+  'background.seep': {
+    range: [0, 1],
+    label: 'seep',
+    help: 'where the stain has seeped to, round once from 0 to 1; put a ramp modulator on it to keep it moving',
+    shows: soaked,
+  },
   'frame.origin[0]': {
     range: [-4, 4],
     label: 'origin x',
@@ -478,6 +533,10 @@ export const SECTORS: [number, number] = [1, 48]
 // The knob kinds that come round, by the period they repeat over: a turn, once round the palette index, once
 // round a ring's phase. Each hard range is a whole number of periods, so a value carried past one wraps.
 export const PERIOD: Record<string, number> = {
+  'background.at[0]': 1,
+  'background.at[1]': 1,
+  'background.turn': 360,
+  'background.seep': 1,
   'frame.turn': 360,
   'levels[].affine.turn': 360,
   'levels[].cell.turn': 360,
@@ -531,8 +590,8 @@ export function knobsOf(scene: Scene): KnobAt[] {
     else if (node && typeof node === 'object')
       for (const [key, value] of Object.entries(node)) walk(value, address ? `${address}.${key}` : key, level)
   }
-  const { frame, levels, contour, line, palette, post } = scene
-  walk({ frame, levels, contour, line, palette, post }, '', undefined)
+  const { background, frame, levels, contour, line, palette, post } = scene
+  walk({ background, frame, levels, contour, line, palette, post }, '', undefined)
   return out
 }
 
@@ -801,7 +860,7 @@ export function parseScene(input: unknown): Scene {
     v,
     '',
     ['name', 'frame', 'levels', 'contour', 'line', 'palette', 'composite', 'post', 'modulators', 'macros', 'presets'],
-    ['midi', 'loop'],
+    ['background', 'midi', 'loop'],
   )
   const ids = new Set<string>()
   const frame = obj(o.frame, 'frame', ['origin', 'zoom', 'turn'])
@@ -861,6 +920,18 @@ export function parseScene(input: unknown): Scene {
   scene.palette.stops.forEach((s, i, all) => {
     if (i > 0 && s.at <= all[i - 1].at) fail(`palette.stops[${i}].at`, 'must be above the stop before it')
   })
+  if (o.background !== undefined) {
+    const bg = obj(o.background, 'background', ['kind', 'at', 'amount', 'turn', 'scale', 'edge', 'seep'])
+    scene.background = {
+      kind: oneOf(bg.kind, 'background.kind', BACKGROUNDS),
+      at: pair(bg.at, 'background.at', knob),
+      amount: knob(bg.amount, 'background.amount'),
+      turn: knob(bg.turn, 'background.turn'),
+      scale: knob(bg.scale, 'background.scale'),
+      edge: knob(bg.edge, 'background.edge'),
+      seep: knob(bg.seep, 'background.seep'),
+    }
+  }
   if (allLevels(scene.levels).length > MAX_LEVELS)
     fail('levels', `must hold at most ${MAX_LEVELS} levels, sub-chains included`)
   if (depthOf(scene.levels) > MAX_DEPTH) fail('levels', `must chain at most ${MAX_DEPTH} levels deep`)

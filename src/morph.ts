@@ -334,6 +334,21 @@ export function morph(
     const [da, db] = [a.line.dots ?? dots, b.line.dots ?? dots]
     scene.line.dots = { count: k(da.count, db.count), size: k(da.size, db.size), crawl: k(da.crawl, db.crawl) }
   }
+  // a background one side lacks morphs from the other side's at amount 0; a change of kind swaps where the amount
+  // dips to nothing
+  if (a.background || b.background) {
+    const ba = a.background ?? { ...b.background!, amount: { value: 0 } }
+    const bb = b.background ?? { ...a.background!, amount: { value: 0 } }
+    scene.background = {
+      kind: x < 0.5 ? ba.kind : bb.kind,
+      at: [k(ba.at[0], bb.at[0]), k(ba.at[1], bb.at[1])],
+      amount: scaled(k(ba.amount, bb.amount), ba.kind === bb.kind ? 1 : 1 - dip(x, 0.1)),
+      turn: k(ba.turn, bb.turn),
+      scale: k(ba.scale, bb.scale),
+      edge: k(ba.edge, bb.edge),
+      seep: k(ba.seep, bb.seep),
+    }
+  }
   const toward: Toward = {
     line: b.line.kind,
     rings: [b.contour.rings.value, b.contour.rings.spread ?? 0],

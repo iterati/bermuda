@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { prune, removeLevel } from './edit'
-import { LOOKS } from './looks'
+import { background, LOOKS } from './looks'
 import {
   attach,
   drive,
@@ -149,6 +149,18 @@ describe('MIDI learn', () => {
     send(0xba, 1, 0)
     expect(resolve(state.scene, address)!.value).toBe(lo)
     // the saved look keeps the mapping and every value the control left
+    expect(parseScene(JSON.stringify(state.scene))).toEqual(state.scene)
+  })
+
+  it("drives a background's amount over 0 to 1", () => {
+    const { state, send } = play({ ...squareToHex(), background: background('soak') })
+    state.learning = { knob: 'background.amount' }
+    send(0xb0, 7, 64)
+    expect(state.scene.midi).toEqual([{ channel: 1, control: 7, knob: 'background.amount' }])
+    send(0xb0, 7, 0)
+    expect(state.scene.background!.amount.value).toBe(0)
+    send(0xb0, 7, 127)
+    expect(state.scene.background!.amount.value).toBe(1)
     expect(parseScene(JSON.stringify(state.scene))).toEqual(state.scene)
   })
 

@@ -455,7 +455,7 @@ export function App() {
 
   // the chips in chain order, for the arrow keys
   const chips = useMemo(
-    () => ['frame', ...allLevels(scene.levels).map(({ level }) => level.id), ...CHIPS.slice(1)],
+    () => ['background', 'frame', ...allLevels(scene.levels).map(({ level }) => level.id), ...CHIPS.slice(2)],
     [scene.levels],
   )
   const pickedChip = chips.includes(picked) ? picked : 'frame'
