@@ -167,9 +167,8 @@ export const MAX_VARIANTS = 4
 export const MAX_STOPS = 8
 
 // Every knob kind, keyed by its address with the level ids and list indices taken out (see kindOf): its hard range,
-// a short label, a line of help (the knob's hover title), whether a player reaches for it (top: it fills the
-// Perform strip after the macros) and when it shows (shows false: it does nothing under the scene's settings).
-// Every value a scene holds and every play range sits inside its kind's range.
+// its name and its line of help (the knob's hover title), and the flags below. Every value a scene holds and every
+// play range sits inside its kind's range.
 export type Kind = {
   range: [number, number]
   label: string // the knob's short name, for the title and the Perform strip
@@ -327,7 +326,7 @@ export const KINDS: Record<string, Kind> = {
   'levels[].variants[].shape.join.shape.r': {
     range: [0.02, 2],
     label: 'join r',
-    help: "the joined shape's size: about 0.5 meets the next cell",
+    help: "the joined shape's size, as r is the first shape's",
   },
   'levels[].variants[].shape.join.shape.round': {
     range: [0, 1],
@@ -383,7 +382,7 @@ export const KINDS: Record<string, Kind> = {
   'levels[].colour.cellSpread': {
     range: [0, 1],
     label: 'cell spread',
-    help: "scatters each cell's colour round the palette from colour at, by up to this much",
+    help: "scatters each cell's colour round the palette from colour at, by up to this much, as far as colour speed lets it",
   },
   'contour.rings': {
     range: [0, 24],
@@ -399,7 +398,7 @@ export const KINDS: Record<string, Kind> = {
   'contour.radialWeight': {
     range: [-3, 3],
     label: 'radial wt',
-    help: 'fades the lines with distance from the centre: positive darkens the edges, negative brightens them',
+    help: "fades the lines with distance from the plane's centre: positive darkens the edges, negative brightens them",
     top: true,
   },
   'line.width': {
@@ -461,7 +460,7 @@ export const KINDS: Record<string, Kind> = {
   'palette.radius': {
     range: [-2, 2],
     label: 'radius',
-    help: 'colours by distance from the centre: each unit out moves this far round the palette, before the levels take their own colours',
+    help: "colours by distance from the plane's centre: each unit out moves this far round the palette, before the levels take their own colours",
   },
   'palette.time': {
     range: [-2, 2],
