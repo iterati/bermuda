@@ -130,8 +130,7 @@ export const VARIATIONS = [
   'bubble',
   'fisheye',
   // the rest of flam3's that need no parameters of their own and no random draws (julia keeps one of its two roots;
-  // loonie, secant2 and scry read
-  // their weight as flam3's do)
+  // loonie, secant2 and scry read their weight as flam3's do)
   'horseshoe',
   'handkerchief',
   'heart',
@@ -361,12 +360,12 @@ export const KINDS: Record<string, Kind> = {
   'levels[].cell.turn': {
     range: [-180, 180],
     label: 'cell turn',
-    help: 'turns every cell, and the levels below it, in degrees; with cell parity odd cells turn the other way, with hash each cell either way, with ring each cell by the turn times how far out it is from the middle',
+    help: 'turns every cell and the levels below, in degrees: parity turns odd cells back, hash each cell either way, ring by how far out it is',
   },
   'levels[].cell.phase': {
     range: [-1, 1],
     label: 'ring phase',
-    help: "shifts this level's echo rings by a part of their spacing (0.5 is one whole ring); flipped cells shift the other way, and with ring each cell by the phase times how far out it is; needs rings",
+    help: "shifts this level's echo rings by part of their spacing (0.5 a whole ring); flipped cells shift back, ring by how far out; needs rings",
     shows: ringsShow,
   },
   'levels[].cell.spill': {
