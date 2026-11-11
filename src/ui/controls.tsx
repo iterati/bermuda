@@ -47,9 +47,10 @@ export function K({ label, at }: { label: string; at: Address }) {
       onChange={(v) => setKnob(at, v)}
       onModulate={(id) =>
         edit((d) => {
-          const m = d.modulators.find((x) => x.id === id)!
+          // a drop carries the id of a modulator of this scene, or of one a look switch took away
+          const m = d.modulators.find((x) => x.id === id)
           const [lo, hi] = hardRange(at)
-          if (!m.targets.some((t) => t.knob === at)) m.targets.push({ knob: at, depth: (hi - lo) / 10 })
+          if (m && !m.targets.some((t) => t.knob === at)) m.targets.push({ knob: at, depth: (hi - lo) / 10 })
         })
       }
     />

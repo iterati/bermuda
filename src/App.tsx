@@ -38,7 +38,14 @@ export function App() {
   const [live] = useState(newLive)
   const [preset, setPreset] = useState(-1)
 
-  const looks = useMemo(() => [...LOOKS.filter((l) => !saved.some((s) => s.name === l.name)), ...saved], [saved])
+  // a look saved under a built-in's name takes its place in the bank
+  const looks = useMemo(
+    () => [
+      ...LOOKS.map((l) => saved.find((s) => s.name === l.name) ?? l),
+      ...saved.filter((s) => !LOOKS.some((l) => l.name === s.name)),
+    ],
+    [saved],
+  )
   const edit = useCallback((fn: (d: Scene) => void) => setScene((s) => update(s, fn)), [])
   const load = useCallback((look: Scene, presetIndex?: number) => {
     const next = presetIndex === undefined ? structuredClone(look) : applyPreset(look, look.presets[presetIndex])
