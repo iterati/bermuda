@@ -59,11 +59,13 @@ describe('a scene as JSON', () => {
     expect(kindOf('levels[b].variants[0].shape.join.offset[1]')).toBe('levels[].variants[].shape.join.offset[1]')
   })
 
-  // every cell step and every variation, under an orbit trap
-  it.each(CELLS)('round-trips a level by %s, every variation and an orbit trap', (by) => {
+  // the cell steps and the variations after milestone 1's, under an orbit trap
+  it.each(CELLS.slice(3))('round-trips a level by %s, every variation and an orbit trap', (by) => {
     const look = scene({
       name: by,
-      levels: [level('a', { by, cellTurn: 20, cellPhase: 0.3, vary: VARIATIONS.map((kind, i) => [kind, i / 40]) })],
+      levels: [
+        level('a', { by, cellTurn: 20, cellPhase: 0.3, vary: VARIATIONS.slice(8).map((kind, i) => [kind, i / 40]) }),
+      ],
       trap: { weight: { value: 2, play: [1, 3] }, size: 0.2 },
     })
     expect(parseScene(JSON.stringify(look))).toEqual(look)

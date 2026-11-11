@@ -129,7 +129,8 @@ export const VARIATIONS = [
   'polar',
   'bubble',
   'fisheye',
-  // the rest of flam3's that need no parameters of their own and no random draws (loonie, secant2 and scry read
+  // the rest of flam3's that need no parameters of their own and no random draws (julia keeps one of its two roots;
+  // loonie, secant2 and scry read
   // their weight as flam3's do)
   'horseshoe',
   'handkerchief',
@@ -178,7 +179,7 @@ export type LatticeKind = (typeof LATTICES)[number]
 export const LATTICES = ['oblique', 'brick', 'triangle', 'polar', 'logpolar', 'fold', 'voronoi'] as const
 // the Cell step: parity turns odd cells the other way, hash turns each cell either way by its id (Truchet), ring
 // turns and phases each cell as far as it is out from the middle, mirror reflects the cells of odd id across
-// each axis (iq's mirrored repetition)
+// each axis (iq's mirrored repetition: exact on rectangular pads; elsewhere neighbours along e2 meet off true)
 export const CELLS = ['none', 'parity', 'hash', 'ring', 'mirror'] as const
 // the lattices whose cells are translates of each other, so a shape can spill into the cells round it
 export const SPILLS: readonly LatticeKind[] = ['oblique', 'brick', 'triangle', 'voronoi']

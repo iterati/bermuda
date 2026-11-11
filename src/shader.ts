@@ -33,8 +33,9 @@ export const VARY_TEXEL = 8 + VARIANT_TEXELS * MAX_VARIANTS
 export const ROW_TEXELS = VARY_TEXEL + Math.ceil((VARIATIONS.length - 8) / 4)
 
 // Each variation as GLSL over p, with r2 = |p|², r = |p|, th = atan(x, y) (flam3's angle, from the y axis),
-// sc = (x, y) / r (flam3's sina and cosa) and w its weight at hand: flam3's forms, with each pole and overflow
-// held finite (inv, ch, sh).
+// sc = (x, y) / r (flam3's sina and cosa), ph = atan(y, x), pc = p held to ±4 and w its weight at hand: flam3's
+// forms, with each pole and overflow held finite (inv, ch, sh; sec, csc, sech and csch take pc on both sides of
+// their fraction, so they decay as they should).
 const VARIATION_GLSL: Record<VariationKind, string> = {
   linear: 'p',
   radial: 'p * (exp(min(r, 8.)) - 1.)',
@@ -53,7 +54,7 @@ const VARIATION_GLSL: Record<VariationKind, string> = {
   diamond: 'vec2(sc.x * cos(r), sc.y * sin(r))',
   ex: 'ex(r, th)',
   // one of flam3's two roots, so it seams along its cut where the cells are not point-symmetric
-  julia: 'sqrt(r) * vec2(cos(.5 * atan(p.y, p.x)), sin(.5 * atan(p.y, p.x)))',
+  julia: 'sqrt(r) * vec2(cos(.5 * ph), sin(.5 * ph))',
   bent: 'vec2(p.x < 0. ? 2. * p.x : p.x, p.y < 0. ? .5 * p.y : p.y)',
   exponential: 'exp(min(p.x - 1., 8.)) * vec2(cos(PI * p.y), sin(PI * p.y))',
   power: 'pow(max(r, 1e-6), sc.x) * sc.yx',
@@ -71,18 +72,18 @@ const VARIATION_GLSL: Record<VariationKind, string> = {
   polar2: 'vec2(th, .5 * log(max(r2, 1e-12))) / PI',
   scry: 'p * inv(max(r, 1e-4) * (w * r2 + 1.))',
   exp: 'exp(min(p.x, 8.)) * vec2(cos(p.y), sin(p.y))',
-  log: 'vec2(.5 * log(max(r2, 1e-12)), atan(p.y, p.x))',
+  log: 'vec2(.5 * log(max(r2, 1e-12)), ph)',
   sin: 'vec2(sin(p.x) * ch(p.y), cos(p.x) * sh(p.y))',
   cos: 'vec2(cos(p.x) * ch(p.y), -sin(p.x) * sh(p.y))',
   tan: 'vec2(sin(2. * p.x), sh(2. * p.y)) * inv(cos(2. * p.x) + ch(2. * p.y))',
-  sec: '2. * vec2(cos(p.x) * ch(p.y), sin(p.x) * sh(p.y)) * inv(cos(2. * p.x) + ch(2. * p.y))',
-  csc: '2. * vec2(sin(p.x) * ch(p.y), -cos(p.x) * sh(p.y)) * inv(ch(2. * p.y) - cos(2. * p.x))',
+  sec: '2. * vec2(cos(p.x) * cosh(pc.y), sin(p.x) * sinh(pc.y)) * inv(cos(2. * p.x) + cosh(2. * pc.y))',
+  csc: '2. * vec2(sin(p.x) * cosh(pc.y), -cos(p.x) * sinh(pc.y)) * inv(cosh(2. * pc.y) - cos(2. * p.x))',
   cot: 'vec2(sin(2. * p.x), -sh(2. * p.y)) * inv(ch(2. * p.y) - cos(2. * p.x))',
   sinh: 'vec2(sh(p.x) * cos(p.y), ch(p.x) * sin(p.y))',
   cosh: 'vec2(ch(p.x) * cos(p.y), sh(p.x) * sin(p.y))',
   tanh: 'vec2(sh(2. * p.x), sin(2. * p.y)) * inv(cos(2. * p.y) + ch(2. * p.x))',
-  sech: '2. * vec2(cos(p.y) * ch(p.x), -sin(p.y) * sh(p.x)) * inv(cos(2. * p.y) + ch(2. * p.x))',
-  csch: '2. * vec2(sh(p.x) * cos(p.y), -ch(p.x) * sin(p.y)) * inv(ch(2. * p.x) - cos(2. * p.y))',
+  sech: '2. * vec2(cos(p.y) * cosh(pc.x), -sin(p.y) * sinh(pc.x)) * inv(cos(2. * p.y) + cosh(2. * pc.x))',
+  csch: '2. * vec2(sinh(pc.x) * cos(p.y), -cosh(pc.x) * sin(p.y)) * inv(cosh(2. * pc.x) - cos(2. * p.y))',
   coth: 'vec2(sh(2. * p.x), sin(2. * p.y)) * inv(ch(2. * p.x) - cos(2. * p.y))',
 }
 // the texel and component a variation's weight sits in (the layout above)
@@ -463,7 +464,8 @@ vec2 foci(vec2 p) {
 vec2 vary(vec2 p, int j) {
   if (row(j, 7).w > .5) return row(j, 2).x * p;
   float r2 = dot(p, p), r = sqrt(r2), th = atan(p.x, p.y);
-  vec2 sc = p / max(r, 1e-9), q = vec2(0);
+  float ph = r > 1e-9 ? atan(p.y, p.x) : 0.;
+  vec2 sc = p / max(r, 1e-9), pc = clamp(p, -4., 4.), q = vec2(0);
   vec4 g;
 ${vary}
   return clamp(q, vec2(-1e5), vec2(1e5));
@@ -594,10 +596,10 @@ vec3 background(vec2 fc) {
 struct Cell { float d; float turn; float rad; float sgn; float f; int v; float seed; };
 
 // how far out a cell is from the middle of the level, for the ring step: its middle's distance, in cells, on the
-// lattices whose cells are translates; polar's and logpolar's ring; fold's mirror count
+// lattices whose cells are translates; polar's and logpolar's ring; fold's mirror count (its id's own way, above)
 float ringOf(vec2 q, vec4 cell, float kind) {
   if (kind == ${lattice('polar')} || kind == ${lattice('logpolar')}) return cell.w;
-  if (kind == ${lattice('fold')}) return cell.z + cell.w;
+  if (kind == ${lattice('fold')}) return mod(cell.z, 2.) + cell.w;
   return length(q - cell.xy);
 }
 
@@ -708,12 +710,12 @@ vec3 render(vec2 fc, vec3 bg) {
     Cell near = own;
     vec2 nid = cell.zw;
     if (t6.w > 0.) {
-      float st = t7.x == ${lattice('triangle')} ? .5 : 1.;
+      float st = t7.x == ${LATTICES.indexOf('triangle')}. ? .5 : 1.;
       for (int k = 0; k < 9; k++) {
         if (k == 4) continue;
         vec2 o = vec2(k % 3 - 1, k / 3 - 1);
         vec4 nc;
-        if (t7.x == ${lattice('voronoi')}) {
+        if (t7.x == ${LATTICES.indexOf('voronoi')}.) {
           vec2 d = jittered(cell.zw + o, t7.z) - jittered(cell.zw, t7.z);
           nc = vec4(cell.xy - d.x * vec2(1, 0) - d.y * t1.zw, cell.zw + o);
         } else {

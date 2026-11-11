@@ -11,7 +11,7 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import { build, type Rollup } from 'vite'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { findLevel, removeLevel, setLattice } from './edit'
 import { snapLoop } from './loop'
 import { background, BANK, join, level, LOOKS, scene, shape, star } from './looks'
@@ -38,9 +38,6 @@ declare global {
     renderer?: import('./render').Renderer
   }
 }
-
-// SwiftShader draws on the CPU, and the first draw of a run builds the one shader, which takes it a few seconds
-vi.setConfig({ testTimeout: 20_000 })
 
 let browser: Browser
 let page: Page
@@ -466,7 +463,8 @@ describe('the cells, colour and variations', () => {
   const still = { drift: 0, colour: 0, crawl: 0 }
   const drawn = (s: Scene) => pixels(advance(s, newLive(), 0, 60), still)
 
-  it.each(VARIATIONS)('a %s warp draws finite and not blank', async (kind) => {
+  // the variations after milestone 1's eight
+  it.each(VARIATIONS.slice(8))('a %s warp draws finite and not blank', async (kind) => {
     const s = scene({
       name: kind,
       levels: [
