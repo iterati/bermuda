@@ -42,7 +42,7 @@ export type Scene = {
     at: [Knob, Knob] // palette places: the flat colour; the gradient's two ends; the soak's first and last pigment
     amount: Knob // how much shows: 0 is black
     turn: Knob // the gradient's direction
-    scale: Knob // the soak's pool size, in screen heights
+    scale: Knob // the soak's pool size: each pool about half of it across, in screen heights
     edge: Knob // how dark the stain gathers at each pool's edge
     seep: Knob // where the stain has seeped to, round once from 0 to 1
   }
