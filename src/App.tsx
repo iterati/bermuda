@@ -785,8 +785,8 @@ export function App() {
             </button>
             {mode === 'direct' ? (
               <span className="dim keys">
-                Tab hides · Space play · Home to the start · wheel zooms · shift-drag the waveform loops · double-click
-                the keys adds one · T or Esc back to Stage
+                Tab hides · Space play · Home rewinds · wheel zooms · shift-drag the waveform loops · double-click adds
+                a key · T or Esc to Stage
               </span>
             ) : (
               <span className="dim keys">
