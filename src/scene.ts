@@ -79,6 +79,8 @@ export const VARIATIONS = [
 export const LINES = ['glow', 'smooth', 'hard', 'band'] as const
 export const WAVES = ['cos', 'tri', 'beat', 'ramp', 'steps'] as const
 export const MIXES = ['straight', 'short', 'long'] as const
+// the scene's fixed parts beside its levels, each a chip of the chain: no level may take one's name
+export const CHIPS = ['frame', 'contour', 'line', 'palette', 'post'] as const
 export const MAX_LEVELS = 32
 export const MAX_DEPTH = 16
 export const MAX_VARIANTS = 4
@@ -277,6 +279,7 @@ function levelList(v: unknown, path: string, ids: Set<string>): Level[] {
     if (!/^[A-Za-z][\w-]*$/.test(id))
       fail(`${path}[${i}].id`, 'must start with a letter and hold only letters, digits, _ and -')
     if (ids.has(id)) fail(`${path}[${i}].id`, `${id} is used twice`)
+    if ((CHIPS as readonly string[]).includes(id)) fail(`${path}[${i}].id`, `${id} names a fixed part of the scene`)
     ids.add(id)
     out.push(level(item, `${path}[${id}]`, out, ids))
   })
@@ -433,6 +436,7 @@ export function parseScene(input: unknown): Scene {
     if (x.steps !== undefined)
       m.steps = list(x.steps, `${at}.steps`, 1, 64).map((s, j) => num(s, `${at}.steps[${j}]`, [0, 1]))
     if (m.wave === 'steps' && !m.steps) fail(`${at}.steps`, 'is missing for a steps wave')
+    if (m.wave === 'beat' && !m.harmonics) fail(`${at}.harmonics`, 'is missing for a beat wave')
     return m
   })
   const macroIds = new Set<string>()

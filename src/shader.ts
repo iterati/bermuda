@@ -168,7 +168,7 @@ vec3 render(vec2 fc) {
     // echo rings 1/rings apart, drifting by the ring phase
     float rings = uContour.x + uContour.y * depth, k = PI * max(rings, 1.);
     d = mix(abs(d), abs(sin(d * k + uContour.z + sgn * t4.z)) / k, clamp(rings, 0., 1.));
-    if (uLine.w > .5) d /= S;
+    if (uLine.w > .5) d *= uFrame.z / S;
     float a = lineOf(d, max(uLine.y + uLine.z * depth, 1e-5), uFalloff.x + uFalloff.y * depth)
       * exp(-r0 * (uRadial.x + uRadial.y * depth)) * w;
     // colour: the ancestry index pulls toward the level's own colour, plus a per-cell spread

@@ -1,7 +1,7 @@
 // The modulators and macros. A modulator's chip drags onto any knob; a macro's slider moves all its knobs at once.
 import { setMacro, wave } from '../motion'
-import { resolve, WAVES, type Modulator } from '../scene'
-import { Choice, useCtl } from './controls'
+import { clamp, hardRange, resolve, WAVES, type Modulator } from '../scene'
+import { Choice, Num, useCtl } from './controls'
 import { MOD_DRAG } from './Knob'
 
 const short = (address: string) => address.replace(/^levels/, '').replace(/variants\[(\d+)\]\.shape/, 'v$1')
@@ -74,9 +74,9 @@ export function Modulators() {
                 })
               }
             />
-            <Field label="period" value={m.period} min={0.01} onChange={(v) => change(m.id, (x) => (x.period = v))} />
-            <Field label="phase" value={m.phase} onChange={(v) => change(m.id, (x) => (x.phase = v))} />
-            <Field
+            <Num label="period" value={m.period} min={0.01} onChange={(v) => change(m.id, (x) => (x.period = v))} />
+            <Num label="phase" value={m.phase} onChange={(v) => change(m.id, (x) => (x.phase = v))} />
+            <Num
               label="glide"
               value={m.glide}
               min={0}
@@ -85,17 +85,17 @@ export function Modulators() {
           </div>
           {m.wave === 'beat' && (
             <div className="mod-row">
-              <Field
+              <Num
                 label="harmonic a"
-                value={m.harmonics?.[0] ?? 4}
+                value={m.harmonics![0]}
                 min={0}
-                onChange={(v) => change(m.id, (x) => (x.harmonics = [Math.min(v, 64), x.harmonics?.[1] ?? 3]))}
+                onChange={(v) => change(m.id, (x) => (x.harmonics = [Math.min(v, 64), x.harmonics![1]]))}
               />
-              <Field
+              <Num
                 label="harmonic b"
-                value={m.harmonics?.[1] ?? 3}
+                value={m.harmonics![1]}
                 min={0}
-                onChange={(v) => change(m.id, (x) => (x.harmonics = [x.harmonics?.[0] ?? 4, Math.min(v, 64)]))}
+                onChange={(v) => change(m.id, (x) => (x.harmonics = [x.harmonics![0], Math.min(v, 64)]))}
               />
             </div>
           )}
@@ -104,7 +104,7 @@ export function Modulators() {
               <label className="num wide">
                 <span>steps 0 to 1</span>
                 <input
-                  defaultValue={(m.steps ?? []).join(' ')}
+                  defaultValue={m.steps!.join(' ')}
                   onKeyDown={(e) => e.stopPropagation()}
                   onBlur={(e) => {
                     const steps = e.target.value
@@ -124,7 +124,7 @@ export function Modulators() {
                 <button className="link" onClick={() => setFocus(t.knob)} title={t.knob}>
                   {short(t.knob)}
                 </button>
-                <Field label="depth" value={t.depth} onChange={(v) => change(m.id, (x) => (x.targets[i].depth = v))} />
+                <Num label="depth" value={t.depth} onChange={(v) => change(m.id, (x) => (x.targets[i].depth = v))} />
                 <button className="mini" onClick={() => change(m.id, (x) => x.targets.splice(i, 1))}>
                   ×
                 </button>
@@ -187,15 +187,19 @@ export function Macros() {
                 <button className="link" onClick={() => setFocus(t.knob)} title={t.knob}>
                   {short(t.knob)}
                 </button>
-                <Field
+                <Num
                   label="from"
                   value={t.from}
-                  onChange={(v) => edit((d) => (d.macros.find((x) => x.id === m.id)!.targets[i].from = v))}
+                  onChange={(v) =>
+                    edit((d) => (d.macros.find((x) => x.id === m.id)!.targets[i].from = clamp(v, hardRange(t.knob))))
+                  }
                 />
-                <Field
+                <Num
                   label="to"
                   value={t.to}
-                  onChange={(v) => edit((d) => (d.macros.find((x) => x.id === m.id)!.targets[i].to = v))}
+                  onChange={(v) =>
+                    edit((d) => (d.macros.find((x) => x.id === m.id)!.targets[i].to = clamp(v, hardRange(t.knob))))
+                  }
                 />
                 <button
                   className="mini"
@@ -222,34 +226,5 @@ export function Macros() {
         </div>
       ))}
     </div>
-  )
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  min,
-}: {
-  label: string
-  value: number
-  onChange: (v: number) => void
-  min?: number
-}) {
-  return (
-    <label className="num">
-      <span>{label}</span>
-      <input
-        type="number"
-        step="any"
-        min={min}
-        value={Number(value.toFixed(5))}
-        onKeyDown={(e) => e.stopPropagation()}
-        onChange={(e) => {
-          const v = e.target.valueAsNumber
-          if (Number.isFinite(v) && (min === undefined || v >= min)) onChange(v)
-        }}
-      />
-    </label>
   )
 }

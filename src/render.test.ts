@@ -30,7 +30,6 @@ beforeAll(async () => {
   })) as Rollup.RollupOutput[]
   const code = out[0].output[0].code
   const chrome = execFileSync('sh', ['-c', 'command -v chromium'], { encoding: 'utf8' }).trim()
-  if (!chrome) throw new Error('chromium is not on the PATH')
   browser = await puppeteer.launch({
     executablePath: chrome,
     args: ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],

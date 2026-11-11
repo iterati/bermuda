@@ -1,34 +1,7 @@
 // The focused knob in full: its value, play range, spread and glide, the modulators and macros that drive it.
 import { clamp, hardRange, resolve, type Knob } from '../scene'
-import { useCtl } from './controls'
+import { Num, useCtl } from './controls'
 import { format } from './Knob'
-
-function Num({
-  label,
-  value,
-  onChange,
-  step,
-}: {
-  label: string
-  value: number
-  onChange: (v: number) => void
-  step?: number
-}) {
-  return (
-    <label className="num">
-      <span>{label}</span>
-      <input
-        type="number"
-        step={step ?? 'any'}
-        value={Number(value.toFixed(5))}
-        onKeyDown={(e) => e.stopPropagation()}
-        onChange={(e) =>
-          e.target.value !== '' && Number.isFinite(e.target.valueAsNumber) && onChange(e.target.valueAsNumber)
-        }
-      />
-    </label>
-  )
-}
 
 export function KnobDetail() {
   const { scene, live, focus, edit, setKnob } = useCtl()

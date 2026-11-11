@@ -1,21 +1,10 @@
 // An on-screen knob: drag up and down (shift for fine), or the wheel. Its arc shows the value inside the
 // kind's hard range, the brighter band its play range, the dot its live value; drop a modulator chip on it to modulate it.
 import { useRef } from 'react'
-import { clamp, hardRange, type Address, type Knob as KnobT } from '../scene'
+import { clamp, hardRange, resolve, type Address } from '../scene'
+import { useCtl } from './controls'
 
 export const MOD_DRAG = 'application/x-bermuda-modulator'
-
-type Props = {
-  label: string
-  address: Address
-  knob: KnobT
-  live?: number
-  modulated: boolean
-  focused: boolean
-  onChange: (value: number) => void
-  onFocus: () => void
-  onModulate: (modulator: string) => void
-}
 
 const SWEEP = 270
 const R = 17
@@ -44,7 +33,16 @@ export const format = (address: Address, v: number) => {
   return deg ? `${text}°` : text
 }
 
-export function Knob({ label, address, knob, live, modulated, focused, onChange, onFocus, onModulate }: Props) {
+// A knob of the scene by its address.
+export function Knob({ label, at: address }: { label: string; at: Address }) {
+  const { scene, live: shown, focus, setFocus, edit, setKnob } = useCtl()
+  const knob = resolve(scene, address)!
+  // the live scene lags the scene by a frame after a structural edit
+  const live = resolve(shown, address)?.value
+  const modulated = scene.modulators.some((m) => m.targets.some((t) => t.knob === address))
+  const focused = focus === address
+  const onFocus = () => setFocus(address)
+  const onChange = (v: number) => setKnob(address, v)
   const [lo, hi] = hardRange(address)
   const f = (v: number) => (clamp(v, [lo, hi]) - lo) / (hi - lo)
   const drag = useRef<{ y: number; value: number } | null>(null)
@@ -73,7 +71,12 @@ export function Knob({ label, address, knob, live, modulated, focused, onChange,
       }}
       onDrop={(e) => {
         e.preventDefault()
-        onModulate(e.dataTransfer.getData(MOD_DRAG))
+        const id = e.dataTransfer.getData(MOD_DRAG)
+        edit((d) => {
+          // a drop carries the id of a modulator of this scene, or of one a look switch took away
+          const m = d.modulators.find((x) => x.id === id)
+          if (m && !m.targets.some((t) => t.knob === address)) m.targets.push({ knob: address, depth: (hi - lo) / 10 })
+        })
       }}
     >
       <svg width="44" height="44" viewBox="0 0 44 44">

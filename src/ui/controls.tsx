@@ -1,7 +1,7 @@
 // The controls of each chip of the chain: frame, a level, contour, line, palette, post.
 // Stage shows the picked chip's; Edit shows every chip's at once.
 import { createContext, useContext, type ReactNode } from 'react'
-import { COSINES, css, gradient, stopsFromCosine } from '../colour'
+import { COSINES, css, paletteAt, stopsFromCosine } from '../colour'
 import { addSubChain, duplicateLevel, findLevel, moveLevel, newId, prune, removeLevel, unlink } from '../edit'
 import {
   hardRange,
@@ -30,30 +30,33 @@ export type Ctl = {
 export const CtlContext = createContext<Ctl | null>(null)
 export const useCtl = () => useContext(CtlContext)!
 
-// A knob of the scene by its address.
-export function K({ label, at }: { label: string; at: Address }) {
-  const { scene, live, focus, setFocus, edit, setKnob } = useCtl()
-  const knob = resolve(scene, at)!
-  // the live scene lags the scene by a frame after a structural edit
+// A number field: a change that is not a finite number at or above min is ignored.
+export function Num({
+  label,
+  value,
+  onChange,
+  min,
+}: {
+  label: string
+  value: number
+  onChange: (v: number) => void
+  min?: number
+}) {
   return (
-    <Knob
-      label={label}
-      address={at}
-      knob={knob}
-      live={resolve(live, at)?.value}
-      modulated={scene.modulators.some((m) => m.targets.some((t) => t.knob === at))}
-      focused={focus === at}
-      onFocus={() => setFocus(at)}
-      onChange={(v) => setKnob(at, v)}
-      onModulate={(id) =>
-        edit((d) => {
-          // a drop carries the id of a modulator of this scene, or of one a look switch took away
-          const m = d.modulators.find((x) => x.id === id)
-          const [lo, hi] = hardRange(at)
-          if (m && !m.targets.some((t) => t.knob === at)) m.targets.push({ knob: at, depth: (hi - lo) / 10 })
-        })
-      }
-    />
+    <label className="num">
+      <span>{label}</span>
+      <input
+        type="number"
+        step="any"
+        min={min}
+        value={Number(value.toFixed(5))}
+        onKeyDown={(e) => e.stopPropagation()}
+        onChange={(e) => {
+          const v = e.target.valueAsNumber
+          if (Number.isFinite(v) && (min === undefined || v >= min)) onChange(v)
+        }}
+      />
+    </label>
   )
 }
 
@@ -96,25 +99,23 @@ const Group = ({ title, children, actions }: { title: string; children: ReactNod
   </div>
 )
 
-export const CHIPS = ['frame', 'contour', 'line', 'palette', 'post'] as const
-
 export function Section({ chip }: { chip: string }) {
   switch (chip) {
     case 'frame':
       return (
         <Group title="Frame">
-          <K label="origin x" at="frame.origin[0]" />
-          <K label="origin y" at="frame.origin[1]" />
-          <K label="zoom" at="frame.zoom" />
-          <K label="turn" at="frame.turn" />
+          <Knob label="origin x" at="frame.origin[0]" />
+          <Knob label="origin y" at="frame.origin[1]" />
+          <Knob label="zoom" at="frame.zoom" />
+          <Knob label="turn" at="frame.turn" />
         </Group>
       )
     case 'contour':
       return (
         <Group title="Contour">
-          <K label="rings" at="contour.rings" />
-          <K label="drift" at="contour.drift" />
-          <K label="radial wt" at="contour.radialWeight" />
+          <Knob label="rings" at="contour.rings" />
+          <Knob label="drift" at="contour.drift" />
+          <Knob label="radial wt" at="contour.radialWeight" />
         </Group>
       )
     case 'line':
@@ -139,8 +140,8 @@ function LineSection() {
         options={['cell', 'screen'] as const}
         onChange={(v) => edit((d) => (d.line.units = v))}
       />
-      <K label="width" at="line.width" />
-      <K label="falloff" at="line.falloff" />
+      <Knob label="width" at="line.width" />
+      <Knob label="falloff" at="line.falloff" />
     </Group>
   )
 }
@@ -161,7 +162,7 @@ function PostSection() {
         options={[1, 2, 3] as const}
         onChange={(v) => edit((d) => (d.post.aa = v))}
       />
-      <K label="gamma" at="post.gamma" />
+      <Knob label="gamma" at="post.gamma" />
     </Group>
   )
 }
@@ -189,11 +190,16 @@ function PaletteSection() {
         </select>
       }
     >
-      <div className="palette-bar" style={{ background: gradient(live.palette) }} />
-      <K label="hue" at="palette.hue" />
-      <K label="contrast" at="palette.contrast" />
-      <K label="radius" at="palette.radius" />
-      <K label="time" at="palette.time" />
+      <div
+        className="palette-bar"
+        style={{
+          background: `linear-gradient(90deg, ${Array.from({ length: 33 }, (_, i) => css(paletteAt(live.palette, i / 32))).join(', ')})`,
+        }}
+      />
+      <Knob label="hue" at="palette.hue" />
+      <Knob label="contrast" at="palette.contrast" />
+      <Knob label="radius" at="palette.radius" />
+      <Knob label="time" at="palette.time" />
       <div className="stops">
         {stops.map((s, i) => (
           <div className="stop" key={i}>
@@ -202,9 +208,9 @@ function PaletteSection() {
               style={{ background: css([s.lch[0].value, s.lch[1].value, s.lch[2].value]) }}
               title={`stop at ${s.at.toFixed(2)}`}
             />
-            <K label="L" at={`palette.stops[${i}].lch[0]`} />
-            <K label="C" at={`palette.stops[${i}].lch[1]`} />
-            <K label="h" at={`palette.stops[${i}].lch[2]`} />
+            <Knob label="L" at={`palette.stops[${i}].lch[0]`} />
+            <Knob label="C" at={`palette.stops[${i}].lch[1]`} />
+            <Knob label="h" at={`palette.stops[${i}].lch[2]`} />
             <Choice
               label="to next"
               value={s.mix}
@@ -261,7 +267,8 @@ function LevelSection({ id }: { id: string }) {
   const { level, list } = findLevel(scene, id)
   const at = prefixOf(scene.levels, id)!
   const index = list.indexOf(level)
-  const leaders = list.slice(0, index).filter((l) => !l.link)
+  // a level others follow cannot follow one itself
+  const leaders = list.some((l) => l.link === id) ? [] : list.slice(0, index).filter((l) => !l.link)
   const actions = (
     <span className="actions">
       <select
@@ -329,11 +336,11 @@ function LevelSection({ id }: { id: string }) {
   return (
     <Group title={`Level ${id}`} actions={actions}>
       <div className="row">
-        <K label="weight" at={`${at}.weight`} />
-        <K label="scale" at={`${at}.affine.scale`} />
-        <K label="turn" at={`${at}.affine.turn`} />
-        <K label="offset x" at={`${at}.affine.offset[0]`} />
-        <K label="offset y" at={`${at}.affine.offset[1]`} />
+        <Knob label="weight" at={`${at}.weight`} />
+        <Knob label="scale" at={`${at}.affine.scale`} />
+        <Knob label="turn" at={`${at}.affine.turn`} />
+        <Knob label="offset x" at={`${at}.affine.offset[0]`} />
+        <Knob label="offset y" at={`${at}.affine.offset[1]`} />
       </div>
       <div className="row">
         <span className="row-title">variations</span>
@@ -345,7 +352,7 @@ function LevelSection({ id }: { id: string }) {
               options={VARIATIONS}
               onChange={(kind) => edit((d) => (findLevel(d, id).level.variations[i].kind = kind))}
             />
-            <K label={v.kind} at={`${at}.variations[${i}].weight`} />
+            <Knob label={v.kind} at={`${at}.variations[${i}].weight`} />
             {level.variations.length > 1 && (
               <button
                 className="mini"
@@ -379,21 +386,21 @@ function LevelSection({ id }: { id: string }) {
       <div className="row">
         <span className="row-title">lattice</span>
         <LatticePad at={at} />
-        <K label="shear" at={`${at}.lattice.e2[0]`} />
-        <K label="height" at={`${at}.lattice.e2[1]`} />
+        <Knob label="shear" at={`${at}.lattice.e2[0]`} />
+        <Knob label="height" at={`${at}.lattice.e2[1]`} />
         <Choice
           label="cell"
           value={level.cell.by}
           options={['none', 'parity'] as const}
           onChange={(by) => edit((d) => (findLevel(d, id).level.cell.by = by))}
         />
-        <K label="cell turn" at={`${at}.cell.turn`} />
-        <K label="ring phase" at={`${at}.cell.phase`} />
+        <Knob label="cell turn" at={`${at}.cell.turn`} />
+        <Knob label="ring phase" at={`${at}.cell.phase`} />
       </div>
       {level.variants.map((v, i) => (
         <div className="row variant" key={i}>
           <span className="row-title">{level.variants.length > 1 ? `variant ${i + 1}` : 'shape'}</span>
-          {level.variants.length > 1 && <K label="share" at={`${at}.variants[${i}].share`} />}
+          {level.variants.length > 1 && <Knob label="share" at={`${at}.variants[${i}].share`} />}
           <label className="choice">
             <span>points</span>
             <span className="stepper">
@@ -414,10 +421,10 @@ function LevelSection({ id }: { id: string }) {
               </button>
             </span>
           </label>
-          <K label="m" at={`${at}.variants[${i}].shape.m`} />
-          <K label="r" at={`${at}.variants[${i}].shape.r`} />
-          <K label="round" at={`${at}.variants[${i}].shape.round`} />
-          <K label="twist" at={`${at}.variants[${i}].shape.twist`} />
+          <Knob label="m" at={`${at}.variants[${i}].shape.m`} />
+          <Knob label="r" at={`${at}.variants[${i}].shape.r`} />
+          <Knob label="round" at={`${at}.variants[${i}].shape.round`} />
+          <Knob label="twist" at={`${at}.variants[${i}].shape.twist`} />
           {!v.below && (
             <button
               className="mini"
@@ -461,9 +468,9 @@ function LevelSection({ id }: { id: string }) {
       </div>
       <div className="row">
         <span className="row-title">colour</span>
-        <K label="at" at={`${at}.colour.at`} />
-        <K label="speed" at={`${at}.colour.speed`} />
-        <K label="cell spread" at={`${at}.colour.cellSpread`} />
+        <Knob label="at" at={`${at}.colour.at`} />
+        <Knob label="speed" at={`${at}.colour.speed`} />
+        <Knob label="cell spread" at={`${at}.colour.cellSpread`} />
       </div>
     </Group>
   )

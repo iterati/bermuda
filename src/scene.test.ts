@@ -75,6 +75,16 @@ describe('the parse refuses a broken scene, naming its field', () => {
       broken((s) => (s.modulators[0].wave = 'steps')),
       /^modulators\[0\]\.steps: is missing/,
     ],
+    [
+      'a beat wave without harmonics',
+      broken((s) => (s.modulators[0].wave = 'beat')),
+      /^modulators\[0\]\.harmonics: is missing/,
+    ],
+    [
+      'a level named as a fixed part',
+      broken((s) => (s.levels[0].id = 'line')),
+      /^levels\[0\]\.id: line names a fixed part/,
+    ],
     ['stops out of order', broken((s) => (s.palette.stops[1].at = 0)), /^palette\.stops\[1\]\.at: must be above/],
     ['a NaN', broken((s) => (s.post.gamma.value = NaN)), /^post\.gamma\.value: must be a finite number/],
   ])('%s', (_, parse, message) => {

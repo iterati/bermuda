@@ -1,6 +1,8 @@
 // Motion: the clock, modulators with running phases, glide, links with their spread, macros and presets.
 // advance() turns a scene into the scene to draw this frame, every knob at its live value.
+import { asLinked } from './edit'
 import {
+  allLevels,
   clamp,
   hardRange,
   knobsOf,
@@ -30,13 +32,13 @@ export function wave(m: Modulator, p: number): number {
     case 'tri':
       return Math.abs(f - 0.5) * 2
     case 'beat': {
-      const [a, b] = m.harmonics ?? [4, 3]
+      const [a, b] = m.harmonics!
       return Math.abs(Math.cos(2 * Math.PI * f * a) * Math.cos(2 * Math.PI * f * b) * 0.5 - 0.5)
     }
     case 'ramp':
       return f
     case 'steps': {
-      const steps = m.steps ?? [0]
+      const steps = m.steps!
       return steps[Math.min(steps.length - 1, Math.floor(f * steps.length))]
     }
   }
@@ -49,6 +51,12 @@ const follow = (from: number | undefined, to: number, glide: number, dt: number)
 // group's spread, plus its modulators, kept to its play range (widened to the base when a hand put it outside).
 export function advance(scene: Scene, live: Live, dt: number, bpm: number): Scene {
   const out = structuredClone(scene)
+  for (const { level, list } of allLevels(out.levels))
+    if (level.link)
+      list[list.indexOf(level)] = asLinked(
+        level,
+        list.find((l) => l.id === level.link)!,
+      )
   const beats = (dt * bpm) / 60
   const mods = new Map<Address, { m: Modulator; t: Modulator['targets'][number]; key: string }[]>()
   for (const m of scene.modulators) {
@@ -66,7 +74,7 @@ export function advance(scene: Scene, live: Live, dt: number, bpm: number): Scen
       member = group.indexOf(level.level)
       size = group.length
       const shared = level.prefix.replace(/\[[^\]]+\]$/, `[${leader}]`) + address.slice(level.prefix.length)
-      if (level.level.link && resolve(scene, shared)) src = shared
+      if (level.level.link) src = shared
     }
     const own = resolve(scene, src)!
     let base = bases.get(src)

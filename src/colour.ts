@@ -123,6 +123,3 @@ export function paletteAt(palette: Scene['palette'], t: number): Vec3 {
   if (a.mix === 'long') dh -= Math.sign(dh + 1e-6) * 360
   return [lightness, a.lch[1].value + (b.lch[1].value - a.lch[1].value) * f, ha + dh * f]
 }
-
-export const gradient = (palette: Scene['palette']) =>
-  `linear-gradient(90deg, ${Array.from({ length: 33 }, (_, i) => css(paletteAt(palette, i / 32))).join(', ')})`

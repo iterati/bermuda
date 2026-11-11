@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { moveLevel, removeLevel } from './edit'
 import { level, LOOKS, mod, scene, star } from './looks'
 import { advance, applyPreset, capturePreset, newLive, setMacro, update, wave } from './motion'
 import { knobsOf } from './scene'
@@ -26,6 +27,24 @@ describe('motion', () => {
     const shown = advance(base(), newLive(), 0, 60)
     expect(shown.levels[0].affine.scale.value).toBe(2)
     expect(shown.levels[1].affine.scale.value).toBe(2.5)
+  })
+
+  it('a linked level plays its leader structure, and keeps what it showed when its leader goes', () => {
+    const s = update(base(), (d) => (d.levels[0].variants[0].shape.n = 9))
+    expect(advance(s, newLive(), 0, 60).levels[1].variants[0].shape.n).toBe(9)
+    const gone = update(s, (d) => removeLevel(d, 'a'))
+    expect(gone.levels[0].link).toBeUndefined()
+    expect(gone.levels[0].variants[0].shape.n).toBe(9)
+    expect(gone.levels[0].affine.scale.value).toBe(2.5)
+  })
+
+  it('a linked level moved above its leader unlinks with the values it showed', () => {
+    const moved = update(base(), (d) => moveLevel(d, 'b', -1))
+    expect(moved.levels.map((l) => [l.id, l.link])).toEqual([
+      ['b', undefined],
+      ['a', undefined],
+    ])
+    expect(moved.levels[0].affine.scale.value).toBe(2.5)
   })
 
   it('a modulator keeps to the play range, and its phase runs on when its period changes', () => {

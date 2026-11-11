@@ -3,10 +3,22 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { LOOKS } from './looks'
 import { applyPreset, capturePreset, newLive, setKnob, update } from './motion'
-import { allLevels, hardRange, knobsOf, parseScene, resolve, type Address, type Scene } from './scene'
+import {
+  allLevels,
+  CHIPS,
+  depthOf,
+  hardRange,
+  knobsOf,
+  MAX_DEPTH,
+  MAX_LEVELS,
+  parseScene,
+  resolve,
+  type Address,
+  type Scene,
+} from './scene'
 import { Bank } from './ui/Bank'
 import { Chain } from './ui/Chain'
-import { CHIPS, CtlContext, Section, type Ctl } from './ui/controls'
+import { CtlContext, Section, type Ctl } from './ui/controls'
 import { KnobDetail } from './ui/KnobDetail'
 import { Macros, Modulators } from './ui/Motion'
 import { Picture } from './ui/Picture'
@@ -19,7 +31,10 @@ function loadSaved(): { looks: Scene[]; error?: string } {
   try {
     return { looks: (JSON.parse(text) as unknown[]).map(parseScene) }
   } catch (err) {
-    return { looks: [], error: `saved looks: ${(err as Error).message}` }
+    // set aside whole, so the next save does not write over the looks that did parse
+    localStorage.setItem(`${STORE}.broken`, text)
+    localStorage.removeItem(STORE)
+    return { looks: [], error: `saved looks moved to ${STORE}.broken: ${(err as Error).message}` }
   }
 }
 
@@ -46,15 +61,34 @@ export function App() {
     ],
     [saved],
   )
-  const edit = useCallback((fn: (d: Scene) => void) => setScene((s) => update(s, fn)), [])
-  const load = useCallback((look: Scene, presetIndex?: number) => {
-    const next = presetIndex === undefined ? structuredClone(look) : applyPreset(look, look.presets[presetIndex])
-    setScene(next)
-    setPreset(presetIndex ?? -1)
-    setPicked(next.levels[0].id)
-    setFocus(null)
-  }, [])
+  // an edit past the shader's limits is refused
+  const edit = useCallback(
+    (fn: (d: Scene) => void) => {
+      const next = update(scene, fn)
+      if (allLevels(next.levels).length > MAX_LEVELS || depthOf(next.levels) > MAX_DEPTH)
+        return setError(`a scene holds at most ${MAX_LEVELS} levels, ${MAX_DEPTH} deep`)
+      setScene(next)
+    },
+    [scene],
+  )
+  const load = useCallback(
+    (look: Scene, presetIndex?: number) => {
+      const next = presetIndex === undefined ? structuredClone(look) : applyPreset(look, look.presets[presetIndex])
+      // a new look starts its modulators and glides afresh
+      Object.assign(live, newLive())
+      setScene(next)
+      setPreset(presetIndex ?? -1)
+      setPicked(next.levels[0].id)
+      setFocus(null)
+    },
+    [live],
+  )
   const save = useCallback(() => {
+    try {
+      parseScene(structuredClone(scene))
+    } catch (err) {
+      return setError(`not saved: ${(err as Error).message}`)
+    }
     const next = [...saved.filter((s) => s.name !== scene.name), structuredClone(scene)]
     localStorage.setItem(STORE, JSON.stringify(next))
     setSaved(next)
@@ -93,11 +127,10 @@ export function App() {
         const look = looks[(Number(e.key) + 9) % 10]
         if (look) load(look)
       } else if (e.key === '[' || e.key === ']') {
-        const base = looks.find((l) => l.name === scene.name) ?? scene
-        if (!base.presets.length) return
-        const n = base.presets.length
+        const n = scene.presets.length
+        if (!n) return
         const next = (((preset + (e.key === ']' ? 1 : -1)) % n) + n) % n
-        setScene(applyPreset(scene, base.presets[next]))
+        setScene(applyPreset(scene, scene.presets[next]))
         setPreset(next)
       } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         const i = chips.indexOf(pickedChip) + (e.key === 'ArrowRight' ? 1 : -1)
