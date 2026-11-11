@@ -216,7 +216,7 @@ export const LOOKS: Scene[] = [
         [0, 1, 2, 3].map((v) => [`levels[st1].variants[${v}].shape.r`, 0.2] as [Address, number]),
       ),
       mod('gain', 'cos', 5, [['contour.radialWeight', 1]], { phase: 0.5 }),
-      mod('hue', 'cos', 25, [['palette.hue', 30]]),
+      mod('hue', 'cos', 25, [['palette.hue', 20]], { phase: 0.25 }),
     ],
     presets: [
       {
