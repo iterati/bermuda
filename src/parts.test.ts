@@ -148,6 +148,7 @@ describe('generateShader', () => {
       ['variation.ex', 'vec2 ex('],
       ['variation.foci', 'vec2 foci('],
       ['shape.ziggurat', 'float sdZiggurat('],
+      ['shape.box', 'float sdBox('],
       ['shape.heart', 'float sdHeart('],
       ['lattice.voronoi', 'vec4 voronoi('],
       ['join', 'float smin('],

@@ -151,15 +151,6 @@ const LATTICE_BODY: Record<LatticeKind, string> = {
     return vec4(q - e2, s.x + 2. * sw, s.y + sw);`,
   voronoi: 'return voronoi(p, e2, t7.z);',
 }
-// the kinds kept chained by their index, the last untested
-const latticeGlsl = (kinds: LatticeKind[]) =>
-  kinds
-    .map((kind, i) => {
-      const at = LATTICES.indexOf(kind) || ''
-      const test = i === kinds.length - 1 ? (i === 0 ? '' : 'else ') : `${i === 0 ? '' : 'else '}if (kind < ${at}.5) `
-      return `  ${test}{ // ${kind}\n    ${LATTICE_BODY[kind]}\n  }`
-    })
-    .join('\n')
 // Each shape as GLSL over p, centred, pointing up and about r across from its middle, with f its form (0 to 1),
 // n its whole count and m the star's inner ratio: iq's 2D distance functions, their proportions set from f.
 const SHAPE_GLSL: Record<ShapeKind, string> = {
@@ -188,9 +179,10 @@ const SHAPE_GLSL: Record<ShapeKind, string> = {
   ziggurat: 'sdZiggurat(p, r, n, f)', // n steps, f: steepness
 }
 
-// Each shape's function, where SHAPE_GLSL's line calls one of its own (sdStar, dot2 and sdBox, which the others
-// build on, are in every program)
+// Each shape's function, where SHAPE_GLSL's line calls one of its own (sdStar and dot2, which several build on, are
+// in every program; sdZiggurat builds on sdBox)
 const SHAPE_FUNCTIONS: Partial<Record<ShapeKind, string>> = {
+  box: `float sdBox(vec2 p, vec2 b) { vec2 d = abs(p) - b; return length(max(d, 0.)) + min(max(d.x, d.y), 0.); }`,
   rhombus: `float sdRhombus(vec2 p, vec2 b) {
   b.y = -b.y; p = abs(p);
   float h = clamp((dot(b, p) + b.y * b.y) / dot(b, b), 0., 1.);
@@ -429,10 +421,11 @@ export function generateShader(parts: Iterable<Part> = PARTS): string {
   const has = (part: string) => on.has(part as Part)
   const kept = <K extends string>(family: string, list: readonly K[]) =>
     list.filter((kind, i) => i === 0 || has(`${family}.${kind}`))
-  const shapes = kept('shape', SHAPES)
+  const shapeKinds = kept('shape', SHAPES)
+  const shapes = shapeKinds
     .map((kind) => `    case ${SHAPES.indexOf(kind)}: return ${SHAPE_GLSL[kind]}; // ${kind}`)
     .join('\n')
-  const shapeFunctions = kept('shape', SHAPES)
+  const shapeFunctions = SHAPES.filter((kind) => shapeKinds.includes(kind) || (kind === 'box' && has('shape.ziggurat')))
     .flatMap((kind) => SHAPE_FUNCTIONS[kind] ?? [])
     .join('\n')
   // each texel's four weights, skipped whole where all are 0, and left out where none of its kinds is kept
@@ -451,6 +444,15 @@ export function generateShader(parts: Iterable<Part> = PARTS): string {
     })
     .join('\n')
   const varyFunctions = [...variations].flatMap((kind) => VARIATION_FUNCTIONS[kind] ?? [])
+  // the lattice kinds kept, chained by their index, the last untested
+  const lattices = kept('lattice', LATTICES)
+  const latticeChain = lattices
+    .map((kind, i) => {
+      const at = LATTICES.indexOf(kind) || ''
+      const test = i === lattices.length - 1 ? (i ? 'else ' : '') : `${i ? 'else ' : ''}if (kind < ${at}.5) `
+      return `  ${test}{ // ${kind}\n    ${LATTICE_BODY[kind]}\n  }`
+    })
+    .join('\n')
   const cell = (by: (typeof CELLS)[number]) => `${CELLS.indexOf(by)}.`
   const lattice = (kind: LatticeKind) => `${LATTICES.indexOf(kind)}.`
   return `#version 300 es
@@ -515,7 +517,6 @@ float sdStar(vec2 p, float r, float n, float m) {
 }
 
 float dot2(vec2 v) { return dot(v, v); }
-float sdBox(vec2 p, vec2 b) { vec2 d = abs(p) - b; return length(max(d, 0.)) + min(max(d.x, d.y), 0.); }
 ${shapeFunctions}
 
 // a shape of kind (SHAPES' index) at p, size r, form f, count n and the star's m
@@ -604,7 +605,7 @@ ${vary}
 vec4 lattice(vec2 p, vec2 e2, vec4 t7, out float k) {
   float kind = t7.x, n = t7.y;
   k = 1.;
-${latticeGlsl(kept('lattice', LATTICES))}
+${latticeChain}
 }
 
 vec3 oklabToSrgb(vec3 c) {
@@ -937,18 +938,13 @@ vec3 render(vec2 fc, vec3 bg, int start) {
     bool mirror = t4.x == ${cell('mirror')};
     vec2 local = mirror ? mirrored(cell.xy, cell.zw) : cell.xy;
     mat2 Jq = t0.y * rot(t0.z) * J;
-${
-  has('stretch')
-    ? `#ifdef METAL
+#ifdef METAL
     // metal reads its slope on the screen, so it measures the stretch as lines in screen units do
     bool metal = f0.x > 0. && row(j, ${FILL_TEXEL} + 1).y > 0.;
 #else
     bool metal = false;
 #endif
-    if (uLine.w > 0. || metal) Jq = stretch(q0, q, j) * Jq;
-`
-    : ''
-}    J = J * (1. - w) + kc * Jq * w;
+${has('stretch') ? '    if (uLine.w > 0. || metal) Jq = stretch(q0, q, j) * Jq;\n' : ''}    J = J * (1. - w) + kc * Jq * w;
     // how many screen units a cell unit spans here
     float px = inversesqrt(max(abs(determinant(J)), 1e-12)), scale = mix(1., px, uLine.w);
     // draw: the cell's shape and line
@@ -1089,15 +1085,11 @@ void main() {
   vec3 c = vec3(0), bg = background(gl_FragCoord.xy);
   for (int y = 0; y < 3; y++) for (int x = 0; x < 3; x++)
     if (x < uAA && y < uAA)
-${
-  has('morph')
-    ? `      // a lone level's swap crossfades: its other switches' picture mixed in by how far in it is
-      for (int k = 0; k < 2; k++) {
+      // a lone level's swap crossfades: its other switches' picture mixed in by how far in it is
+      for (int k = 0; k < ${has('morph') ? 2 : 1}; k++) {
         float w = k == 0 ? 1. - uCross.y : uCross.y;
         if (w > 0.) c += w * render(gl_FragCoord.xy + (vec2(x, y) + .5) / float(uAA) - .5, bg, k * int(uCross.x));
-      }`
-    : '      c += render(gl_FragCoord.xy + (vec2(x, y) + .5) / float(uAA) - .5, bg, 0);'
-}
+      }
   c /= float(uAA * uAA);
   outColor = vec4(pow(c, vec3(1. / uGamma)), 1.);
 }
