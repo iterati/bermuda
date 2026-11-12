@@ -33,7 +33,7 @@ describe('a scene as JSON', () => {
   })
 
   it('round-trips with a captured preset and a loop', () => {
-    const look = structuredClone(LOOKS[6])
+    const look = structuredClone(LOOKS.find((l) => l.name.startsWith('Tapestry 7 '))!)
     look.presets.push(capturePreset(look, 'all of it'))
     look.loop = { seconds: 60 }
     expect(parseScene(JSON.stringify(look))).toEqual(look)
@@ -200,8 +200,10 @@ describe('the knob kinds', () => {
 describe('a background', () => {
   const tapestry1 = LOOKS.find((l) => l.name.startsWith('Tapestry 1 '))!
 
-  it('is on no built-in look', () => {
-    expect(LOOKS.filter((l) => l.background)).toEqual([])
+  it('round-trips on every built-in look that has one', () => {
+    const backed = LOOKS.filter((l) => l.background)
+    expect(backed.map((l) => l.name)).toContain('Soak stain')
+    for (const look of backed) expect(parseScene(JSON.stringify(look))).toEqual(look)
   })
 
   it.each(BACKGROUNDS)('round-trips Tapestry 1 over a %s', (kind) => {
@@ -259,7 +261,7 @@ describe('a background', () => {
 describe('a fader pair as JSON', () => {
   const pair = (): Fader => ({
     a: structuredClone(LOOKS[0]),
-    b: { ...structuredClone(LOOKS[6]), loop: { seconds: 30 } },
+    b: { ...structuredClone(LOOKS.find((l) => l.name.startsWith('Tapestry 7 '))!), loop: { seconds: 30 } },
     at: 0.3,
     edge: { seconds: 2, stagger: 0.4, deepFirst: true },
   })

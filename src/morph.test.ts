@@ -249,7 +249,7 @@ describe('a background', () => {
       last = bg.amount.value
     }
     expect(at(soaked, none, 1).background!.amount.value).toBe(0)
-    expect(at(none, look('Tapestry 8'), 0.5).background).toBeUndefined()
+    expect(at(none, look('Tapestry 4'), 0.5).background).toBeUndefined()
   })
 
   it('swaps its kind at the middle, where its amount dips to nothing', () => {

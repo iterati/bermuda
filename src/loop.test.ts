@@ -68,13 +68,13 @@ describe('a loop', () => {
   })
 
   it('snaps periods to its length over whole ks, coprime between periods, one k for each period', () => {
-    const t6 = LOOKS.find((l) => l.name.startsWith('Tapestry 6'))!
-    const s = snapLoop({ ...t6, loop: { seconds: 60 } }, 60)
-    const ks = new Map(s.modulators.map((m, i) => [t6.modulators[i].period, 60 / m.period]))
+    const atoms = LOOKS.find((l) => l.name === 'Atoms')!
+    const s = snapLoop({ ...atoms, loop: { seconds: 60 } }, 60)
+    const ks = new Map(s.modulators.map((m, i) => [atoms.modulators[i].period, 60 / m.period]))
     for (const k of ks.values()) expect(k).toBeCloseTo(Math.round(k), 9)
     const whole = [...ks.values()].map(Math.round)
     whole.forEach((k, i) => whole.slice(i + 1).forEach((k2) => expect(gcd(k, k2)).toBe(1)))
-    // panX and panY share a period, so they keep their circle
+    // orbitX and orbitY share a period, so they keep their circle
     expect(s.modulators[0].period).toBe(s.modulators[1].period)
   })
 

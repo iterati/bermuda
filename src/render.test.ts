@@ -208,6 +208,12 @@ describe('the morph', () => {
       const b = LOOKS[(i + 1) % LOOKS.length]
       return [`${a.name} into ${b.name}`, a, b]
     }),
+    // every link of the built-in bank, which the autopilot walks
+    ...BANK.links.map(([a, b]): [string, Scene, Scene] => [
+      `${a} into ${b}, linked`,
+      entryScene(LOOKS, a)!,
+      entryScene(LOOKS, b)!,
+    ]),
   ]
 
   it.each(pairs)('%s is finite and not blank at its middle', async (_, a, b) => {
@@ -223,10 +229,10 @@ describe('the morph', () => {
   const reordered = update(look('Remix - Square into hex'), (d) => d.levels.push(d.levels.shift()!))
   const ends: [string, Scene, Scene][] = [
     ...pairs.slice(0, 4),
-    ['Branching cells into Tapestry 8', look('Remix - Branching cells'), look('Tapestry 8')],
-    ['Tapestry 8 into Branching cells', look('Tapestry 8'), look('Remix - Branching cells')],
+    ['Branching cells into Tapestry 7', look('Remix - Branching cells'), look('Tapestry 7 ')],
+    ['Tapestry 7 into Branching cells', look('Tapestry 7 '), look('Remix - Branching cells')],
     ['Square into hex into its reorder', look('Remix - Square into hex'), reordered],
-    ['Tapestry 2 into Tapestry 7b', look('Tapestry 2'), look('Tapestry 7b')],
+    ['Hypnotic rings into Soak stain', look('Hypnotic rings'), look('Soak stain')],
     ['Marching ants into Metaballs', look('Shapes - Marching ants'), look('Shapes - Metaballs')],
     ["iq's garden into Stairs and S", look("Shapes - iq's garden"), look('Shapes - Stairs')],
     ['Onion skins into Through the sphere', look('Shapes - Onion skins'), look('Shapes - Through the sphere')],
@@ -298,8 +304,8 @@ describe('a background', () => {
     expect(furthest(px, await drawn(look('Tapestry 1')))).toBeLessThan(1e-4)
   })
 
-  it('draws Tapestry 7b, composite first, over a flat background finite and not blank', async () => {
-    const { finite, mean, spread } = stats(await drawn({ ...look('Tapestry 7b'), background: background('flat') }))
+  it('draws Soak stain, composite first, over a flat background finite and not blank', async () => {
+    const { finite, mean, spread } = stats(await drawn({ ...look('Soak stain'), background: background('flat') }))
     expect(finite).toBe(true)
     expect(mean).toBeGreaterThan(0.01)
     expect(spread).toBeGreaterThan(0.01)
@@ -393,7 +399,7 @@ describe('the shapes and lines', () => {
 })
 
 describe('a loop', () => {
-  it.each(['Tapestry 1', 'Tapestry 6'])('%s draws its frame a loop on as its first', async (name) => {
+  it.each(['Tapestry 1', 'Spirograph'])('%s draws its frame a loop on as its first', async (name) => {
     const s = snapLoop({ ...look(name), loop: { seconds: 10 } }, 97)
     const live = newLive()
     const first = advance(s, live, 0.1, 97)

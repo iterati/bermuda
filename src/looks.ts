@@ -1,8 +1,7 @@
-// The built-in looks: the nine Tapestries re-made in spirit through the level chain, then remixes across levels.
+// The built-in looks: four Tapestries made through the level chain, the bank's twenty remixing them, then older remixes.
 // Periods are in clock units, one a second at the default 60 bpm; angles are in degrees.
 import { stopsFromCosine } from './colour'
 import { FORMLESS } from './scene'
-import { entryName } from './play'
 import type {
   Address,
   Bank,
@@ -150,7 +149,7 @@ type SceneSpec = {
   falloff?: K
   units?: Scene['line']['units']
   dots?: { count: K; size: K; crawl: K }
-  palette?: string
+  palette?: string | Scene['palette']['stops'] // a cosine preset's name, or the stops themselves
   hue?: K
   contrast?: K
   radius?: K
@@ -162,10 +161,13 @@ type SceneSpec = {
   modulators?: Modulator[]
   macros?: Macro[]
   presets?: Preset[]
+  background?: Scene['background']
+  loop?: number // seconds
 }
 
 export const scene = (s: SceneSpec): Scene => ({
   name: s.name,
+  ...(s.background ? { background: s.background } : {}),
   frame: { origin: [k(s.origin?.[0] ?? 0), k(s.origin?.[1] ?? 0)], zoom: k(s.zoom ?? 1), turn: k(s.turn ?? 0) },
   levels: s.levels,
   contour: { rings: k(s.rings ?? 0), drift: k(s.drift ?? 0), radialWeight: k(s.radialWeight ?? 0) },
@@ -179,7 +181,7 @@ export const scene = (s: SceneSpec): Scene => ({
       : {}),
   },
   palette: {
-    stops: stopsFromCosine(s.palette ?? 'rainbow', 6),
+    stops: typeof s.palette === 'object' ? s.palette : stopsFromCosine(s.palette ?? 'rainbow', 6),
     hue: k(s.hue ?? 0),
     contrast: k(s.contrast ?? 1),
     radius: k(s.radius ?? 0.4),
@@ -191,6 +193,7 @@ export const scene = (s: SceneSpec): Scene => ({
   modulators: s.modulators ?? [],
   macros: s.macros ?? [],
   presets: s.presets ?? [],
+  ...(s.loop ? { loop: { seconds: s.loop } } : {}),
 })
 
 // a background of kind under the lines, its colours round the palette from at
@@ -207,6 +210,10 @@ export const background = (
   edge: k(0.5),
   seep: k(0.2),
 })
+
+// a palette of OKLCh stops (lightness, chroma, hue) evenly round the index, each segment mixed the one way
+const stops = (lch: [number, number, number][], mix: Scene['palette']['stops'][number]['mix'] = 'short') =>
+  lch.map(([L, C, h], i) => ({ at: i / lch.length, lch: [k(L), k(C), k(h)] as [Knob, Knob, Knob], mix }))
 
 // a palette preset: a cosine preset's stops as preset values
 const palettePreset = (name: string, cosine: string): Preset => ({
@@ -237,44 +244,6 @@ export const LOOKS: Scene[] = [
       mod('breathe', 'cos', 119, [['levels[sq1].affine.scale', 0.5]]),
       mod('size', 'tri', 17, [['levels[sq1].variants[0].shape.r', 0.4]]),
       mod('gain', 'cos', 69, [['contour.radialWeight', 2]]),
-    ],
-  }),
-  scene({
-    name: 'Tapestry 2 - Hexagram bands',
-    zoom: 1.78,
-    levels: [
-      ...linked('star', 2, {
-        scale: 1.75,
-        shape: star(6, { value: 3, play: [2, 4.5] }, 0.5),
-        at: 0,
-        speed: 0.4,
-        cellSpread: 0.15,
-      }),
-      ...linked('hex', 2, {
-        scale: 1.75,
-        shape: star(6, 2, 0.5, { twist: 30 }),
-        at: 0.25,
-        speed: 0.4,
-        cellSpread: 0.15,
-      }),
-    ],
-    rings: { value: 3.8, spread: -2.5 },
-    drift: 0.25,
-    line: 'band',
-    width: { value: 0.012, spread: 0.03, play: [0.006, 0.02] },
-    falloff: 0.3,
-    time: 1 / 3,
-    gamma: 1,
-    modulators: [
-      mod('breathe', 'cos', 119, [
-        ['levels[star1].affine.scale', 0.5],
-        ['levels[hex1].affine.scale', 0.5],
-      ]),
-      mod('size', 'tri', 17, [
-        ['levels[star1].variants[0].shape.r', 0.35],
-        ['levels[hex1].variants[0].shape.r', 0.35],
-      ]),
-      mod('gain', 'cos', 69, [['contour.radialWeight', 1.5]]),
     ],
   }),
   scene({
@@ -366,76 +335,6 @@ export const LOOKS: Scene[] = [
     ],
   }),
   scene({
-    name: 'Tapestry 5 - Spatial distortions',
-    zoom: 1.78,
-    levels: [
-      level('core', { scale: 0.15, shape: spokes(8, 0.5), at: 0 }),
-      ...linked('w', 4, {
-        scale: { value: 1, spread: 3 },
-        turn: { value: 45, spread: 180 },
-        vary: [
-          ['linear', 1],
-          ['radial', { value: 0.15, play: [0, 0.4] }],
-        ],
-        variants: [
-          { share: 0.5, shape: spokes(4, 0.5) },
-          { share: 0.5, shape: spokes(8, 0.5) },
-        ],
-        at: { value: 0.2, spread: 0.6 },
-      }),
-    ],
-    radialWeight: 1.5,
-    width: { value: 0.005, spread: -0.0035 },
-    falloff: 1,
-    palette: 'warm',
-    radius: 0.5,
-    modulators: [
-      mod('sequence', 'steps', 10, [['levels[core].variants[0].shape.round', 0.5]], {
-        steps: [0, 1, 0, 0],
-        glide: 0.6,
-      }),
-      mod('rotate', 'steps', 10, [['levels[w1].affine.turn', 22.5]], { steps: [0, 0, 0.5, 1], glide: 0.8 }),
-      mod('warp', 'cos', 30, [['levels[w1].variations[1].weight', 0.15]]),
-      mod(
-        'size',
-        'beat',
-        30,
-        [
-          ['levels[w1].variants[0].shape.r', 0.2],
-          ['levels[w1].variants[1].shape.r', 0.2],
-        ],
-        { harmonics: [4, 3] },
-      ),
-      mod('gain', 'cos', 5, [['contour.radialWeight', 1]], { phase: 0.5 }),
-      mod('hue', 'cos', 6.28, [['palette.hue', 60]]),
-    ],
-  }),
-  scene({
-    name: 'Tapestry 6 - Coloured layers',
-    zoom: 1.78,
-    levels: linked('c', 8, {
-      scale: { value: 1.3, spread: -0.2 },
-      turn: { value: 45, spread: 315 },
-      shape: spokes(4, 0.5),
-      at: { value: 0, spread: 1 },
-      speed: { value: 0.6, play: [0.3, 0.9] },
-      cellSpread: 0.2,
-    }),
-    line: 'smooth',
-    width: { value: 0.003, spread: 0.026 },
-    falloff: 1,
-    radius: 0.3,
-    contrast: { value: 1, play: [0.7, 1.3] },
-    modulators: [
-      mod('panX', 'cos', 45, [['frame.origin[0]', 0.3]]),
-      mod('panY', 'cos', 45, [['frame.origin[1]', 0.3]], { phase: 0.14 }),
-      mod('scale', 'beat', 36, [['levels[c1].affine.scale', 0.1]], { harmonics: [4, 3] }),
-      mod('cross', 'tri', 7, [['levels[c1].variants[0].shape.r', 0.25]]),
-      mod('hue', 'cos', 60, [['palette.hue', 180]]),
-      mod('spread', 'cos', 29, [['levels[c1].colour.at', 0.3, 1]]),
-    ],
-  }),
-  scene({
     name: 'Tapestry 7 - Hexes',
     levels: linked('h', 5, {
       scale: { value: 1.56, play: [1.35, 1.75] },
@@ -460,61 +359,839 @@ export const LOOKS: Scene[] = [
       mod('hue', 'cos', 60, [['palette.hue', 180]]),
       mod('radial', 'cos', 7, [['palette.radius', 0.1]]),
     ],
-    presets: [palettePreset('Ice', 'ice'), palettePreset('Dusk', 'dusk')],
+    presets: [
+      palettePreset('Ice', 'ice'),
+      palettePreset('Dusk', 'dusk'),
+      {
+        // Tapestry 7b, merged in: the nest further in and lower, its colours from the palette's other half
+        name: 'Offset',
+        values: {
+          'frame.zoom': 2,
+          'frame.origin[1]': -1,
+          'levels[h1].affine.scale': 1.47,
+          'levels[h1].variations[1].weight': 0.04,
+          'levels[h1].variants[0].shape.m': 3,
+          'levels[h1].variants[0].shape.r': 0.39,
+          'levels[h1].colour.at': 0.5,
+          'levels[h1].colour.speed': 0.45,
+          'levels[h1].colour.cellSpread': 0.3,
+          'line.width': 0.0025,
+          'palette.radius': 0.6,
+          'palette.time': 1 / 65,
+        },
+      },
+    ],
   }),
+  // ---- the bank's twenty: each takes an idea and remixes it with others ----
   scene({
-    name: 'Tapestry 8 - Pinwheels',
-    zoom: 1.6,
-    levels: linked('p', 5, {
-      scale: 1.9,
-      turn: 30,
-      e2: HEX,
-      by: 'parity',
-      cellTurn: { value: 0, spread: 150 },
-      shape: star(6, { value: 3.5, play: [1.01, 6] }, 0.58),
-      at: { value: 0, spread: 1 },
-      speed: 0.4,
-    }),
-    line: 'hard',
-    width: { value: 0.0028, spread: 0.012 },
-    radius: 0.3,
+    name: 'Hypnotic rings',
+    // one cell as wide as the screen: a star's echo rings run out round the centre, a polar grid of pies over them
+    levels: [
+      level('target', {
+        scale: 0.3,
+        shape: star(5, { value: 1.6, play: [1.2, 2.2] }, 0.08, { round: 0.3 }),
+        at: 0,
+        speed: 0.5,
+      }),
+      level('wheel', {
+        lattice: 'polar',
+        sectors: 12,
+        e2: [0.5, 0.6],
+        shape: shape('pie', 0.3, 0.15),
+        at: 0.5,
+        speed: 0.5,
+      }),
+    ],
+    rings: { value: 24, play: [12, 24] },
+    drift: -2,
+    line: 'band',
+    width: 0.006,
+    falloff: 0.6,
+    palette: stops([
+      [0.05, 0, 0],
+      [0.95, 0.02, 90],
+      [0.55, 0.22, 25],
+      [0.95, 0.02, 90],
+    ]),
+    radius: 0.5,
+    gamma: 1,
     modulators: [
-      mod('nest', 'cos', 36, [['levels[p1].affine.scale', 0.17]], { phase: 0.5 }),
-      mod('pinwheel', 'beat', 60, [['levels[p1].cell.turn', 50]], { harmonics: [3, 2] }),
-      mod('character', 'tri', 15, [['levels[p1].variants[0].shape.m', 2.5, 3.14]], { phase: 0.25 }),
-      mod('size', 'cos', 21, [['levels[p1].variants[0].shape.r', 0.29]], { phase: 0.4 }),
-      mod('hue', 'cos', 60, [['palette.hue', 180]]),
+      mod('twist', 'ramp', 30, [['levels[target].variants[0].shape.twist', 180]]),
+      mod('wheel', 'ramp', 50, [['levels[wheel].affine.turn', -180]]),
+      mod('breathe', 'cos', 20, [['frame.zoom', 0.2]]),
     ],
   }),
   scene({
-    name: 'Tapestry 7b - Slower and offset',
-    zoom: 2,
-    origin: [0, -1],
-    levels: linked('s', 5, {
-      scale: { value: 1.47, spread: 0.3 },
-      turn: 30,
+    name: 'Pinwheel rings',
+    // Tapestry 8's pinwheels round a polar grid: rings of triangles, each turning against the ones beside it
+    levels: [
+      level('wheel', {
+        scale: 2.5,
+        lattice: 'polar',
+        sectors: 12,
+        e2: [0, 1],
+        by: 'parity',
+        cellTurn: { value: 0, play: [-40, 40] },
+        shape: shape('triangle', 0.45, { value: 0.5, play: [0.3, 0.8] }),
+        at: 0.1,
+        speed: 0.6,
+        cellSpread: 0.15,
+      }),
+      level('seeds', { scale: 2, e2: HEX, by: 'parity', cellTurn: 30, weight: 0.5, shape: star(3, 2, 0.25), at: 0.4 }),
+    ],
+    line: 'smooth',
+    width: { value: 0.02, spread: -0.008 },
+    falloff: 1,
+    palette: 'warm',
+    radius: { value: 0.35, play: [0.15, 0.6] },
+    modulators: [
+      mod('pinwheel', 'beat', 30, [['levels[wheel].cell.turn', 35]], { harmonics: [3, 2] }),
+      mod('spin', 'ramp', 90, [['frame.turn', 180]]),
+      mod('hue', 'cos', 40, [['palette.hue', 30]]),
+    ],
+  }),
+  scene({
+    name: 'Spirograph',
+    // eight ellipses round each cell, each level turned 22.5° on the one above (Tapestry 6's layers), so they
+    // fan out into a rosette that opens and closes
+    levels: linked('loop', 8, {
+      scale: 1,
+      turn: { value: 22.5, play: [10, 45] },
+      shape: shape('ellipse', 0.46, { value: 0.3, play: [0.15, 0.6] }),
+      at: { value: 0, spread: 1 },
+      speed: 0.8,
+    }),
+    zoom: 0.55,
+    width: { value: 0.004, spread: 0.006 },
+    falloff: 1.2,
+    palette: 'rainbow',
+    radius: 0.3,
+    time: 0.04,
+    modulators: [
+      mod('fan', 'cos', 32, [['levels[loop1].affine.turn', 12]]),
+      mod('fat', 'cos', 13, [['levels[loop1].variants[0].shape.form', 0.15]]),
+      mod('spin', 'ramp', 60, [['frame.turn', 180]]),
+    ],
+    macros: [
+      {
+        id: 'open',
+        name: 'Closed to open',
+        value: 12.5 / 35,
+        targets: [{ knob: 'levels[loop1].affine.turn', from: 10, to: 45 }],
+      },
+    ],
+  }),
+  scene({
+    name: 'Atoms',
+    // three orbits turned 60° apart round each nucleus, an electron round each, smooth-unioned into its orbit
+    levels: [
+      level('nucleus', {
+        scale: { value: 1.4, play: [1.1, 1.8] },
+        turn: 30,
+        e2: HEX,
+        shape: star(6, 2, 0.05, { round: 1 }),
+        at: 0.1,
+        speed: 0.6,
+        cellSpread: 0.2,
+      }),
+      ...linked('orbit', 3, {
+        turn: 60,
+        shape: shape(
+          'ellipse',
+          0.42,
+          { value: 0.3, play: [0.2, 0.45] },
+          {
+            join: join(star(6, 2, 0.045, { round: 1 }), [0, 0], 0.01),
+          },
+        ),
+        at: { value: 0.3, spread: 0.6 },
+        speed: 0.7,
+      }),
+    ],
+    line: 'glow',
+    width: { value: 0.003, spread: 0.002 },
+    falloff: 1.3,
+    palette: stops([
+      [0.7, 0.16, 210],
+      [0.75, 0.2, 330],
+      [0.9, 0.1, 100],
+      [0.65, 0.18, 280],
+    ]),
+    radius: { value: 0.3, play: [0, 0.6] },
+    gamma: 1.8,
+    background: background('flat', 0.08, [0.75, 0.75]),
+    modulators: [
+      mod('orbitX', 'cos', 3, [['levels[orbit1].variants[0].shape.join.offset[0]', 0.126, 1]]),
+      mod('orbitY', 'cos', 3, [['levels[orbit1].variants[0].shape.join.offset[1]', 0.42, 1]], { phase: 0.25 }),
+      mod('excite', 'cos', 23, [['levels[orbit1].affine.turn', 10]]),
+      mod('hue', 'cos', 40, [['palette.hue', 40]]),
+    ],
+  }),
+  scene({
+    name: 'Clockwork',
+    // gears in a square grid: parity turns each one against its neighbours, half a tooth apart, and the tick's
+    // eight steps run round 60°, where the 12 teeth and the 6 spokes are themselves again
+    background: background('flat', 0.12, [0, 0]),
+    levels: [
+      level('gear', {
+        scale: { value: 2.6, play: [2, 3.2] },
+        by: 'parity',
+        cellTurn: 7.5,
+        shape: star(12, { value: 1.4, play: [1.3, 1.6] }, 0.4, { corner: 0.03 }),
+        at: 0.25,
+        speed: 0.6,
+        cellSpread: 0.15,
+      }),
+      level('spokes', { shape: star(6, 6, { value: 0.3, play: [0.25, 0.34] }), at: 0.5, speed: 0.5 }),
+      level('hub', { shape: star(6, 2, 0.08, { onion: 0.02 }), at: 0.75, speed: 0.6 }),
+    ],
+    line: 'hard',
+    width: { value: 0.012, spread: -0.004 },
+    palette: stops([
+      [0.35, 0.07, 55],
+      [0.72, 0.13, 78],
+      [0.88, 0.1, 92],
+      [0.58, 0.13, 45],
+    ]),
+    radius: 0.15,
+    modulators: [
+      mod('tick', 'steps', 8, [['levels[gear].cell.turn', 30]], {
+        steps: [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875],
+      }),
+      mod('drift', 'cos', 60, [['frame.origin[0]', 0.4]]),
+      mod('tilt', 'cos', 45, [['frame.turn', 8]]),
+    ],
+  }),
+  scene({
+    name: 'Snowflakes',
+    // a hex grid of flakes, each six arms round its middle (polar), branched by two folds (KIFS)
+    levels: [
+      level('flake', {
+        scale: 1.1,
+        turn: 30,
+        e2: HEX,
+        by: 'hash',
+        cellTurn: 15,
+        shape: star(6, 2, 0.12),
+        at: 0.55,
+        speed: 0.4,
+      }),
+      level('arm', {
+        lattice: 'polar',
+        sectors: 6,
+        e2: [0, 2],
+        shape: shape('segment', 0.4, 0.15),
+        at: 0.6,
+        speed: 0.4,
+      }),
+      ...linked('branch', 2, {
+        scale: { value: 3, spread: 2 },
+        lattice: 'fold',
+        e2: [{ value: 0.2, play: [0.1, 0.35] }, 0.5],
+        shape: star(6, { value: 3, play: [2, 5] }, 0.2),
+        at: { value: 0.7, spread: 0.2 },
+        speed: 0.6,
+      }),
+    ],
+    width: { value: 0.006, spread: 0.01 },
+    falloff: 1.3,
+    palette: stops([
+      [0.95, 0.03, 230],
+      [0.75, 0.1, 235],
+      [0.85, 0.08, 200],
+      [0.6, 0.12, 260],
+    ]),
+    radius: 0.15,
+    gamma: 1.6,
+    modulators: [
+      mod('grow', 'cos', 19, [['levels[branch1].lattice.e2[0]', 0.1]]),
+      mod('fall', 'tri', 64, [['frame.origin[1]', 2]]),
+      mod('turn', 'cos', 41, [['levels[flake].cell.turn', 30]]),
+    ],
+  }),
+  scene({
+    name: 'Nested triangles',
+    // triangles inside triangles, three deep: each level halves the one above and turns its down cells (parity)
+    zoom: 0.9,
+    levels: linked('t', 3, {
+      scale: { value: 2, play: [1.8, 2.2] },
+      lattice: 'triangle',
       e2: HEX,
-      vary: [
-        ['linear', 1],
-        ['radial', 0.04],
-      ],
-      shape: star(6, { value: 3, play: [1.01, 5] }, 0.39),
-      at: { value: 0.5, spread: 1 },
-      speed: 0.45,
-      cellSpread: 0.3,
+      by: 'parity',
+      cellTurn: 60,
+      shape: star(3, 2, { value: 0.3, play: [0.2, 0.36] }),
+      at: { value: 0, spread: 1 },
+      speed: 0.5,
     }),
     line: 'hard',
-    width: { value: 0.0025, spread: 0.0125 },
-    composite: 'first',
-    radius: 0.6,
-    time: 1 / 65,
+    width: { value: 0.01, spread: 0.01 },
+    palette: 'dusk',
+    radius: 0.2,
+    time: 0.05,
     modulators: [
-      mod('nest', 'tri', 36, [['levels[s1].affine.scale', 0.13]], { phase: 0.5 }),
-      mod('warp', 'tri', 21, [['levels[s1].variations[1].weight', 0.04]]),
-      mod('size', 'tri', 33, [['levels[s1].variants[0].shape.r', 0.25]], { phase: 0.4 }),
-      mod('character', 'tri', 21, [['levels[s1].variants[0].shape.m', 2, 0.5]], { phase: 0.25 }),
-      mod('step', 'tri', 29, [['levels[s1].colour.at', 0.5]]),
-      mod('gradient', 'beat', 17, [['palette.radius', 0.3]], { harmonics: [2, 3] }),
+      mod('breathe', 'cos', 30, [['levels[t1].affine.scale', 0.15]]),
+      mod('size', 'cos', 13, [['levels[t1].variants[0].shape.r', 0.06, 1]]),
+      mod('spin', 'ramp', 180, [['frame.turn', 180]]),
+    ],
+  }),
+  scene({
+    name: 'Patchwork quilt',
+    // a square of fabric a cell, each patch picking its own weave by share: brick, triangles, hexes or
+    // rings round its middle (polar), stitched with dashes
+    levels: [
+      level('patch', {
+        scale: { value: 1.4, play: [1.1, 1.8] },
+        by: 'hash',
+        cellTurn: 90,
+        variants: [
+          {
+            share: 0.25,
+            shape: shape('box', 0.47, 1),
+            below: [
+              level('brick', { scale: 4, lattice: 'brick', e2: [0.5, 0.5], shape: shape('box', 0.22, 0.4), at: 0.1 }),
+            ],
+          },
+          {
+            share: 0.25,
+            shape: shape('box', 0.47, 1),
+            below: [
+              level('tris', {
+                scale: 3,
+                lattice: 'triangle',
+                e2: HEX,
+                by: 'parity',
+                cellTurn: 60,
+                shape: star(3, 2, 0.22),
+                at: 0.35,
+              }),
+            ],
+          },
+          {
+            share: 0.25,
+            shape: shape('box', 0.47, 1),
+            below: [level('hexes', { scale: 3.5, turn: 30, e2: HEX, shape: star(6, 3, 0.4), at: 0.6 })],
+          },
+          {
+            share: 0.25,
+            shape: shape('box', 0.47, 1),
+            below: [
+              level('target', {
+                scale: 4,
+                lattice: 'polar',
+                sectors: 8,
+                e2: [0.5, 0.5],
+                shape: shape('cross', 0.15, 0.3),
+                at: 0.85,
+              }),
+            ],
+          },
+        ],
+        at: 0.5,
+        speed: 0.6,
+        cellSpread: 0.2,
+      }),
+    ],
+    line: 'dots',
+    dots: { count: { value: 24, play: [16, 40] }, size: { value: 0.5, play: [0.3, 0.7] }, crawl: 0.25 },
+    width: { value: 0.035, spread: -0.01 },
+    falloff: 0.5,
+    palette: stops([
+      [0.45, 0.1, 255],
+      [0.78, 0.13, 85],
+      [0.55, 0.13, 35],
+      [0.92, 0.03, 90],
+    ]),
+    radius: 0.15,
+    modulators: [
+      mod('pan', 'cos', 30, [['frame.origin[0]', 0.6]]),
+      mod('weave', 'cos', 20, [['levels[patch].variants[0].share', 0.2]]),
+      mod('hue', 'cos', 60, [['palette.hue', 30]]),
+    ],
+  }),
+  scene({
+    name: 'Diagonal maze',
+    // 10 PRINT: an upright segment corner to corner in each square, turned 45° either way by a hash of the cell
+    // (Truchet), its echo rings the maze's corridors
+    levels: [
+      level('maze', {
+        scale: { value: 3, play: [2.5, 4] },
+        by: 'hash',
+        cellTurn: 45,
+        shape: shape('segment', 0.7071, 0.1),
+        at: 0.3,
+        speed: 0.5,
+        cellSpread: 0.15,
+      }),
+      level('inner', {
+        scale: 2,
+        by: 'hash',
+        cellTurn: 45,
+        weight: 0.35,
+        shape: shape('segment', 0.7071, 0.1),
+        at: 0.65,
+        speed: 0.6,
+      }),
+    ],
+    rings: { value: 2, play: [1, 3] },
+    drift: 0.8,
+    line: 'smooth',
+    width: { value: 0.03, spread: 0.01, play: [0.02, 0.05] },
+    falloff: 1.2,
+    palette: stops([
+      [0.25, 0.08, 150],
+      [0.6, 0.18, 145],
+      [0.92, 0.14, 130],
+      [0.7, 0.12, 175],
+    ]),
+    radius: 0.2,
+    modulators: [mod('zoom', 'cos', 48, [['frame.zoom', 0.15]]), mod('hue', 'cos', 60, [['palette.hue', 25]])],
+  }),
+  scene({
+    name: 'Op art bricks',
+    // Bridget Riley in black and white: concentric squares in brick courses, the courses sliding against each
+    // other and the whole wall bulging through a bubble
+    levels: [
+      level('wall', {
+        scale: 3,
+        lattice: 'brick',
+        e2: [0.25, 0.5],
+        vary: [
+          ['linear', 1],
+          ['bubble', { value: 0, play: [-0.3, 0.3] }],
+        ],
+        shape: shape('box', 0.5, 0.5, { corner: 0.02 }),
+        at: 0,
+        speed: 1,
+        cellSpread: 0.5,
+      }),
+    ],
+    rings: { value: 6, play: [4, 8] },
+    drift: 0.6,
+    line: 'band',
+    width: { value: 0.03, play: [0.02, 0.05] },
+    falloff: 0.4,
+    palette: stops([
+      [0.05, 0, 0],
+      [0.98, 0, 0],
+      [0.2, 0, 0],
+      [0.9, 0.04, 30],
+    ]),
+    contrast: 1.4,
+    radius: 0.4,
+    gamma: 1,
+    modulators: [
+      mod('slide', 'cos', 16, [['levels[wall].lattice.e2[0]', 0.25]]),
+      mod('bulge', 'cos', 21, [['levels[wall].variations[1].weight', 0.3]]),
+      mod('shade', 'cos', 37, [['palette.radius', 0.3]]),
+    ],
+  }),
+  scene({
+    name: 'Fish scales',
+    // half rings in brick courses half a cell high, each over the next where they reach (spill), shimmering
+    // through a sinusoid
+    levels: [
+      level('scales', {
+        scale: 2.6,
+        lattice: 'brick',
+        e2: [0.5, 0.5],
+        spill: 1,
+        vary: [
+          ['linear', 1],
+          ['sinusoidal', { value: 0.08, play: [0, 0.2] }],
+        ],
+        shape: shape('arc', 0.56, 0.5, { onion: { value: 0.03, play: [0.01, 0.05] } }),
+        at: 0.45,
+        speed: 0.6,
+        cellSpread: 0.3,
+      }),
+    ],
+    line: 'smooth',
+    width: 0.012,
+    falloff: 1,
+    palette: stops([
+      [0.45, 0.1, 190],
+      [0.7, 0.12, 165],
+      [0.85, 0.12, 95],
+      [0.55, 0.12, 230],
+    ]),
+    radius: 0.3,
+    modulators: [
+      mod('swim', 'cos', 12, [['levels[scales].affine.offset[0]', 0.5]]),
+      mod('shimmer', 'cos', 9, [['levels[scales].variations[1].weight', 0.08]]),
+      mod('hue', 'cos', 50, [['palette.hue', 35]]),
+    ],
+  }),
+  scene({
+    name: 'Flower of life',
+    // circles on a hex grid as wide as its spacing, each drawing where its neighbours reach over it
+    background: background('gradient', 0.15, [0, 0.12]),
+    levels: [
+      level('flower', {
+        scale: { value: 1.6, play: [1.3, 2] },
+        turn: 30,
+        e2: HEX,
+        spill: 1,
+        shape: star(6, 2, { value: 0.75, play: [0.5, 1] }, { round: 1 }),
+        at: 0.35,
+        speed: 0.5,
+      }),
+      level('seed', {
+        scale: 3,
+        turn: 30,
+        e2: HEX,
+        spill: 1,
+        weight: 0.25,
+        shape: star(6, 2, 0.5, { round: 1 }),
+        at: 0.65,
+        speed: 0.6,
+      }),
+    ],
+    line: 'smooth',
+    units: 'screen',
+    width: 0.004,
+    falloff: 1,
+    palette: stops([
+      [0.28, 0.1, 275],
+      [0.62, 0.12, 65],
+      [0.88, 0.13, 88],
+      [0.5, 0.16, 310],
+    ]),
+    radius: 0.25,
+    modulators: [
+      mod('bloom', 'cos', 24, [['levels[flower].variants[0].shape.r', 0.25]]),
+      mod('seed', 'cos', 17, [['levels[seed].variants[0].shape.r', 0.15]], { phase: 0.5 }),
+      mod('spin', 'ramp', 120, [['frame.turn', 180]]),
+    ],
+    macros: [
+      {
+        id: 'bloom',
+        name: 'Seed to flower',
+        value: 0.5,
+        targets: [{ knob: 'levels[flower].variants[0].shape.r', from: 0.5, to: 1 }],
+      },
+    ],
+  }),
+  scene({
+    name: 'Raindrops on a pond',
+    // a drop at each scattered point (Voronoi), its ripples running out until they meet the next drop's
+    background: { ...background('gradient', 0.25, [0.02, 0.25]), turn: k(90) },
+    levels: [
+      level('drops', {
+        scale: 1.3,
+        lattice: 'voronoi',
+        e2: HEX,
+        jitter: { value: 0.85, play: [0.6, 1] },
+        shape: star(6, 2, 0.04, { round: 1 }),
+        at: 0.4,
+        speed: 0.6,
+        cellSpread: 0.3,
+      }),
+    ],
+    rings: { value: 7, play: [4, 10] },
+    drift: -2.5,
+    radialWeight: 0.3,
+    line: 'smooth',
+    units: 'screen',
+    width: 0.008,
+    falloff: 1.2,
+    palette: stops([
+      [0.3, 0.08, 245],
+      [0.75, 0.1, 220],
+      [0.95, 0.04, 200],
+      [0.65, 0.1, 185],
+    ]),
+    radius: 0.2,
+    modulators: [
+      mod('scatter', 'cos', 41, [['levels[drops].lattice.jitter', 0.15]]),
+      mod('pan', 'cos', 60, [['frame.origin[1]', 0.5]]),
+      mod('hue', 'cos', 45, [['palette.hue', 20]]),
+    ],
+  }),
+  scene({
+    name: 'Soak stain',
+    // Frankenthaler's soak-stain pools seeping round under sparse crescents, which cover the canvas where drawn
+    background: { ...background('soak', 0.95, [0.1, 0.7]), scale: k(0.8), edge: k({ value: 0.6, play: [0.3, 0.8] }) },
+    levels: [
+      level('marks', {
+        scale: 0.9,
+        lattice: 'voronoi',
+        e2: HEX,
+        jitter: 0.85,
+        by: 'hash',
+        cellTurn: 60,
+        shape: shape('moon', 0.36, { value: 0.5, play: [0.3, 0.8] }),
+        at: 0.3,
+        speed: 0.8,
+        cellSpread: 0.6,
+      }),
+    ],
+    line: 'hard',
+    width: { value: 0.012, play: [0.006, 0.02] },
+    composite: 'first',
+    palette: stops([
+      [0.75, 0.12, 75],
+      [0.62, 0.14, 15],
+      [0.55, 0.1, 190],
+      [0.45, 0.14, 265],
+    ]),
+    radius: 0.1,
+    gamma: 1,
+    modulators: [
+      mod('seep', 'ramp', 80, [['background.seep', 0.5]]),
+      mod('bite', 'cos', 23, [['levels[marks].variants[0].shape.form', 0.2]]),
+      mod('turn', 'cos', 61, [['levels[marks].cell.turn', 40]]),
+    ],
+  }),
+  scene({
+    name: 'Confetti',
+    // four of iq's shapes picked by hash, each cell turned either way, spinning as they drift down and back up
+    levels: [
+      level('confetti', {
+        scale: 3.2,
+        lattice: 'voronoi',
+        e2: HEX,
+        jitter: { value: 0.8, play: [0.5, 1] },
+        by: 'hash',
+        cellTurn: { value: 40, play: [20, 70] },
+        variants: [
+          { share: 0.25, shape: shape('moon', 0.3, 0.4) },
+          { share: 0.25, shape: shape('heart', 0.28, 0) },
+          { share: 0.25, shape: shape('cross', 0.3, 0.3, { corner: 0.03 }) },
+          { share: 0.25, shape: shape('vesica', 0.32, 0.4) },
+        ],
+        at: 0,
+        speed: 1,
+        cellSpread: 1,
+      }),
+      level('glitter', {
+        scale: 2,
+        by: 'hash',
+        cellTurn: 45,
+        weight: 0.5,
+        shape: star(4, 1.4, 0.15),
+        at: 0.5,
+        speed: 1,
+        cellSpread: 1,
+      }),
+    ],
+    line: 'smooth',
+    width: { value: 0.02, spread: -0.006 },
+    falloff: 1,
+    palette: 'rainbow',
+    radius: 0,
+    modulators: [
+      mod('fall', 'tri', 64, [['frame.origin[1]', 3]]),
+      mod('spin', 'ramp', 6, [
+        ['levels[confetti].variants[0].shape.twist', 180],
+        ['levels[confetti].variants[1].shape.twist', -180],
+        ['levels[confetti].variants[2].shape.twist', 180],
+        ['levels[confetti].variants[3].shape.twist', -180],
+      ]),
+      mod('sway', 'cos', 8, [['levels[confetti].affine.offset[0]', 0.2]]),
+    ],
+  }),
+  scene({
+    name: 'Heart tunnel',
+    // hearts round a log-polar grid in staggered rows, its scale ramped two rows out a period (as Hyperspace),
+    // so the tunnel falls in for ever; a loop keeps it seamless
+    background: { ...background('gradient', 0.2, [0.05, 0.6]), turn: k(-90) },
+    levels: [
+      level('hearts', {
+        scale: 1.505,
+        lattice: 'logpolar',
+        sectors: 18,
+        e2: [0.5, 1],
+        shape: shape('heart', { value: 0.32, play: [0.25, 0.4] }, 0, { twist: 180 }),
+        at: 0.05,
+        speed: 0.7,
+      }),
+      level('sparkle', { shape: star(4, 1.4, 0.07), at: 0.9, speed: 0.5 }),
+    ],
+    radialWeight: { value: -0.4, play: [-0.8, 0] },
+    line: 'smooth',
+    width: { value: 0.03, play: [0.02, 0.045] },
+    falloff: 1.2,
+    palette: stops([
+      [0.55, 0.22, 10],
+      [0.72, 0.17, 350],
+      [0.88, 0.08, 20],
+      [0.45, 0.2, 330],
+    ]),
+    radius: 0.3,
+    loop: 40,
+    modulators: [
+      mod('fall', 'ramp', 10, [['levels[hearts].affine.scale', 0.505]]),
+      mod('beat', 'beat', 5, [['levels[hearts].variants[0].shape.r', 0.04]], { harmonics: [2, 1] }),
+      mod('hue', 'cos', 20, [['palette.hue', 25]]),
+    ],
+  }),
+  scene({
+    name: 'Hyperspace',
+    // radial streaks round a log-polar grid in staggered rows; its scale runs two rows out a period, from 1 to
+    // e^(2π · 2 / 18), the pad's vector (-1, 2), so the stars rush past for ever
+    levels: [
+      level('stars', {
+        scale: 1.505,
+        lattice: 'logpolar',
+        sectors: 18,
+        e2: [0.5, 1],
+        shape: shape('segment', 0.3, 0.15),
+        at: 0.5,
+        speed: 0.6,
+      }),
+    ],
+    radialWeight: { value: -0.8, play: [-1.2, -0.3] },
+    width: { value: 0.01, play: [0.006, 0.016] },
+    falloff: 2,
+    palette: stops([
+      [0.85, 0.05, 240],
+      [0.95, 0.02, 90],
+      [0.7, 0.12, 250],
+      [0.8, 0.1, 300],
+    ]),
+    radius: 0.2,
+    loop: 20,
+    modulators: [
+      mod('rush', 'ramp', 3, [['levels[stars].affine.scale', 0.505]]),
+      mod('roll', 'ramp', 40, [['frame.turn', 180]]),
+      mod('hue', 'cos', 20, [['palette.hue', 40]]),
+    ],
+  }),
+  scene({
+    name: 'Spiral galaxy',
+    // a swirl bends a polar grid of stars into three arms, winding tighter out from the core, the whole galaxy
+    // turning
+    levels: [
+      level('arms', {
+        scale: 1.8,
+        vary: [
+          ['linear', 0.1],
+          ['swirl', { value: 0.9, play: [0.7, 1.1] }],
+        ],
+        lattice: 'polar',
+        sectors: 3,
+        e2: [0.5, { value: 0.6, play: [0.5, 0.8] }],
+        shape: star(4, { value: 1.6, play: [1.2, 2.2] }, 0.15, { round: 0.3 }),
+        at: 0.55,
+        speed: 0.7,
+        cellSpread: 0.3,
+      }),
+      level('dust', {
+        scale: 2,
+        turn: 30,
+        e2: HEX,
+        weight: 0.6,
+        shape: star(4, 1.4, 0.12),
+        at: 0.85,
+        speed: 0.5,
+        cellSpread: 0.5,
+      }),
+    ],
+    radialWeight: 2,
+    width: 0.012,
+    falloff: 2,
+    palette: 'dusk',
+    radius: 0.3,
+    modulators: [
+      mod('wind', 'ramp', 40, [['levels[arms].affine.turn', -180]]),
+      mod('coil', 'cos', 27, [['levels[arms].variations[1].weight', 0.1]]),
+      mod('twinkle', 'cos', 9, [['levels[dust].variants[0].shape.r', 0.05]]),
+      mod('hue', 'cos', 50, [['palette.hue', 30]]),
+    ],
+  }),
+  scene({
+    name: 'Plasma',
+    // a sinusoid's wobbling field drawn as its contour lines: dense echo rings round one circle, flowing, the
+    // colours running round a long palette
+    levels: [
+      level('field', {
+        scale: 0.35,
+        vary: [
+          ['linear', 0.5],
+          ['sinusoidal', { value: 1, play: [0.6, 1.5] }],
+        ],
+        shape: star(6, 2, 0.3, { round: 1 }),
+        at: 0,
+        speed: 0.3,
+      }),
+      level('swirl', {
+        scale: 1.3,
+        vary: [
+          ['linear', 0.6],
+          ['swirl', { value: 0.4, play: [0.2, 0.7] }],
+        ],
+        weight: 0.6,
+        shape: star(6, 2, 0.35, { round: 1 }),
+        at: 0.5,
+        speed: 0.4,
+      }),
+    ],
+    rings: 10,
+    drift: 2,
+    width: { value: 0.006, spread: -0.002 },
+    falloff: 0.7,
+    palette: stops(
+      [
+        [0.6, 0.2, 300],
+        [0.75, 0.15, 60],
+        [0.65, 0.17, 180],
+      ],
+      'long',
+    ),
+    radius: 0.6,
+    time: 0.12,
+    gamma: 1.4,
+    modulators: [
+      mod('flowX', 'cos', 37, [['levels[field].affine.offset[0]', 1]]),
+      mod('flowY', 'cos', 29, [['levels[field].affine.offset[1]', 1]], { phase: 0.25 }),
+      mod('warp', 'cos', 17, [['levels[field].variations[1].weight', 0.3]]),
+    ],
+  }),
+  scene({
+    name: 'Soap bubbles',
+    // thin onion-skinned circles on a hex grid, blown round by a bubble warp that wobbles, with smaller foam
+    // between them, the film's colours running round a pale palette
+    levels: [
+      level('film', {
+        scale: 0.8,
+        turn: 30,
+        e2: HEX,
+        vary: [
+          ['linear', 0.3],
+          ['bubble', { value: 0.9, play: [0.5, 1.2] }],
+        ],
+        shape: star(6, 2, 0.42, { round: 1, onion: { value: 0.05, play: [0.02, 0.1] } }),
+        at: 0,
+        speed: 0.4,
+        cellSpread: 0.6,
+      }),
+      level('foam', {
+        scale: 2.2,
+        turn: 30,
+        e2: HEX,
+        shape: star(6, 2, 0.4, { round: 0.85 }),
+        at: 0.5,
+        speed: 0.5,
+        cellSpread: 0.4,
+      }),
+    ],
+    width: 0.004,
+    falloff: 1.4,
+    palette: stops(
+      [
+        [0.78, 0.14, 200],
+        [0.82, 0.15, 320],
+        [0.86, 0.13, 90],
+      ],
+      'long',
+    ),
+    radius: 0.8,
+    time: 0.15,
+    gamma: 1.6,
+    modulators: [
+      mod('spin', 'ramp', 60, [['levels[film].affine.turn', 180]]),
+      mod('wobble', 'cos', 13, [['levels[film].variations[1].weight', 0.25]]),
+      mod('peel', 'cos', 7, [['levels[film].variants[0].shape.onion', 0.03]]),
     ],
   }),
   // ---- remixes across levels ----
@@ -1606,103 +2283,58 @@ export const LOOKS: Scene[] = [
   }),
 ]
 
-// The built-in bank: every look and preset above, the Tapestries in a ring and the lattices, the shapes and the
-// cells, colour and flam3 looks in others, each preset beside its look, and each remix, lattice, shape and the rest
-// linked to the looks it draws on.
-const named = (start: string) => LOOKS.find((l) => l.name.startsWith(start))!.name
-const T = (n: string) => named(`Tapestry ${n} `)
-const remix = (n: string) => named(`Remix - ${n}`)
-const lattice = (n: string) => named(`Lattice - ${n}`)
-const shapes = (n: string) => named(`Shapes - ${n}`)
-const cells = named('Cells - Ripples')
-const mirrorTiles = named('Cells - Mirror tiles')
-const traps = named('Colour - Orbit traps')
-const flam3 = (n: string) => named(`flam3 - ${n}`)
-const ring = ['1', '2', '3', '4', '5', '6', '7', '8', '7b'].map(T)
-const lattices = [
-  'Rhombic walk',
-  'Brick bond',
-  'Triangle gears',
-  'Mandala',
-  'Endless zoom',
-  'Kaleidoscope',
-  'Truchet',
-  'Organic cells',
-].map(lattice)
-const shapeRing = [
-  "iq's garden",
-  'Marching ants',
-  'Metaballs',
-  'Onion skins',
-  'Woven waves',
-  'Through the sphere',
-  'Stairs and S',
-].map(shapes)
-const newRing = [
-  cells,
-  mirrorTiles,
-  traps,
-  flam3('Hearts and discs'),
-  flam3('Complex plane'),
-  flam3('Julia set'),
-  remix('Kaleidoscope pond'),
+// The built-in bank: the four Tapestries and the twenty round the ring, each next to the ones it morphs into
+// best, and linked to the two or three of those.
+const RING = [
+  'Tapestry 1 - Rainbow hex rings',
+  'Hypnotic rings',
+  'Pinwheel rings',
+  'Spirograph',
+  'Atoms',
+  'Clockwork',
+  'Tapestry 4 - You spin me right round',
+  'Tapestry 3 - sdStar is fun',
+  'Snowflakes',
+  'Tapestry 7 - Hexes',
+  'Nested triangles',
+  'Patchwork quilt',
+  'Diagonal maze',
+  'Op art bricks',
+  'Fish scales',
+  'Flower of life',
+  'Raindrops on a pond',
+  'Soak stain',
+  'Confetti',
+  'Heart tunnel',
+  'Hyperspace',
+  'Spiral galaxy',
+  'Plasma',
+  'Soap bubbles',
 ]
+const link = (a: string, ...bs: string[]) => bs.map((b): [string, string] => [a, b])
 export const BANK: Bank = {
-  scenes: LOOKS.flatMap((l) => [l.name, ...l.presets.map((p) => entryName(l.name, p.name))]),
+  scenes: RING,
   links: [
-    ...[ring, lattices, shapeRing, newRing].flatMap((r) =>
-      r.map((name, i): [string, string] => [name, r[(i + 1) % r.length]]),
-    ),
-    ...LOOKS.flatMap((l) => {
-      const presets = l.presets.map((p) => entryName(l.name, p.name))
-      return presets.flatMap((p, i): [string, string][] =>
-        i
-          ? [
-              [l.name, p],
-              [presets[i - 1], p],
-            ]
-          : [[l.name, p]],
-      )
-    }),
-    [remix('Square into hex'), T('1')],
-    [remix('Square into hex'), T('7')],
-    [remix('Star ladder'), T('2')],
-    [remix('Star ladder'), T('3')],
-    [remix('Pinwheel crosses'), T('6')],
-    [remix('Pinwheel crosses'), T('8')],
-    [remix('Swirled lattice'), T('5')],
-    [remix('Swirled lattice'), T('7b')],
-    [remix('Branching cells'), T('4')],
-    [remix('Branching cells'), remix('Square into hex')],
-    [remix('Square to hex'), T('7')],
-    [remix('Square to hex'), remix('Breathing lattice')],
-    [entryName(remix('Square to hex'), 'Square'), T('1')],
-    [entryName(remix('Square to hex'), 'Hex'), T('7')],
-    [remix('Breathing lattice'), T('7b')],
-    [remix('Breathing lattice'), T('1')],
-    [lattice('Rhombic walk'), remix('Square to hex')],
-    [lattice('Brick bond'), T('1')],
-    [lattice('Triangle gears'), T('7')],
-    [lattice('Mandala'), T('4')],
-    [lattice('Endless zoom'), T('5')],
-    [lattice('Kaleidoscope'), T('6')],
-    [lattice('Truchet'), T('8')],
-    [lattice('Organic cells'), remix('Branching cells')],
-    [remix('Rose window'), lattice('Mandala')],
-    [remix('Rose window'), lattice('Kaleidoscope')],
-    [remix('Spiral Truchet'), lattice('Truchet')],
-    [remix('Spiral Truchet'), lattice('Endless zoom')],
-    [shapes("iq's garden"), T('3')],
-    [shapes('Through the sphere'), T('5')],
-    [remix('Dotted hexes'), T('7')],
-    [remix('Dotted hexes'), shapes('Marching ants')],
-    [cells, T('1')],
-    [mirrorTiles, lattice('Kaleidoscope')],
-    [traps, T('7')],
-    [flam3('Hearts and discs'), T('5')],
-    [flam3('Complex plane'), remix('Swirled lattice')],
-    [flam3('Julia set'), lattice('Mandala')],
-    [remix('Kaleidoscope pond'), shapes("iq's garden")],
+    ...link('Tapestry 1 - Rainbow hex rings', 'Tapestry 7 - Hexes', 'Hypnotic rings', 'Soap bubbles'),
+    ...link('Tapestry 3 - sdStar is fun', 'Tapestry 4 - You spin me right round', 'Snowflakes', 'Spirograph'),
+    ...link('Tapestry 4 - You spin me right round', 'Hyperspace', 'Clockwork'),
+    ...link('Tapestry 7 - Hexes', 'Nested triangles', 'Snowflakes'),
+    ...link('Hypnotic rings', 'Pinwheel rings', 'Op art bricks'),
+    ...link('Pinwheel rings', 'Spirograph', 'Spiral galaxy'),
+    ...link('Spirograph', 'Atoms'),
+    ...link('Atoms', 'Clockwork'),
+    ...link('Nested triangles', 'Patchwork quilt'),
+    ...link('Patchwork quilt', 'Diagonal maze', 'Confetti'),
+    ...link('Diagonal maze', 'Op art bricks'),
+    ...link('Op art bricks', 'Fish scales'),
+    ...link('Fish scales', 'Flower of life'),
+    ...link('Flower of life', 'Raindrops on a pond', 'Soap bubbles'),
+    ...link('Raindrops on a pond', 'Soak stain', 'Plasma'),
+    ...link('Soak stain', 'Confetti'),
+    ...link('Confetti', 'Heart tunnel'),
+    ...link('Heart tunnel', 'Hyperspace', 'Spiral galaxy'),
+    ...link('Spiral galaxy', 'Plasma'),
+    ...link('Plasma', 'Soap bubbles'),
   ],
   autopilot: {
     // a keyframe every 2 beats, as long as a change takes: it never rests, passing through each on its curve

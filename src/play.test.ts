@@ -48,15 +48,17 @@ describe('the bank', () => {
   })
 
   it('drops the entries that name no look, and their links', () => {
-    const looks = LOOKS.filter((l) => !l.name.startsWith('Tapestry 7 '))
-    const kept = pruneBank(BANK, looks)
+    const t7 = LOOKS.find((l) => l.name === 'Tapestry 7 - Hexes')!
+    const bank = { ...BANK, scenes: [...BANK.scenes, ...t7.presets.map((p) => `${t7.name} / ${p.name}`)] }
+    const looks = LOOKS.filter((l) => l !== t7)
+    const kept = pruneBank(bank, looks)
     expect(kept.scenes.some((s) => s.startsWith('Tapestry 7 '))).toBe(false)
     expect(kept.links.every((l) => l.every((s) => kept.scenes.includes(s)))).toBe(true)
-    expect(kept.scenes.length).toBe(BANK.scenes.length - 3)
+    expect(kept.scenes.length).toBe(BANK.scenes.length - 1)
   })
 
   it('links two entries either way round, and a second toggle unlinks them', () => {
-    const [a, b] = ['Tapestry 1 - Rainbow hex rings', 'Tapestry 6 - Coloured layers']
+    const [a, b] = ['Tapestry 1 - Rainbow hex rings', 'Clockwork']
     const linked = toggleLink(BANK, b, a)
     expect(neighbours(linked, a)).toContain(b)
     expect(toggleLink(linked, a, b).links).toEqual(BANK.links)
@@ -93,7 +95,9 @@ describe('the autopilot', () => {
   })
 
   it("is at a preset's entry once it plays that preset", () => {
+    const t7 = LOOKS.find((l) => l.name === 'Tapestry 7 - Hexes')!
     const bank = withAuto({ busy: 0, change: 0 })
+    bank.scenes = [...bank.scenes, ...t7.presets.map((p) => `${t7.name} / ${p.name}`)]
     for (let i = 0; i < 8; i++) {
       const next = step(bank, LOOKS, start('Tapestry 7 - Hexes'), seeded(i))!
       const preset = next.scene.presets[next.preset!]
