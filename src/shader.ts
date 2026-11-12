@@ -1,7 +1,10 @@
-// The fragment shader, generated once for each program by feature (plain, fills, fills with metal): every module is
-// in it and uniforms pick which runs, so changing a scene never recompiles, and a scene picks the program its fills
-// need (render.ts). The levels live in a float texture, one row per level (render.ts packs it).
+// The fragment shader, generated from a set of parts: the core is in every program, and each part (a variation,
+// shape or lattice kind, or a feature such as spill, the morph or the fills) only in the programs given it, while
+// uniforms pick what runs, so changing a scene's values never needs another program. needs gives the parts a scene,
+// or a morph between two, draws with, by what it holds and never by its values. The levels live in a float texture,
+// one row per level, laid out alike for every program (render.ts packs it).
 import {
+  allLevels,
   CELLS,
   LATTICES,
   MAX_DEPTH,
@@ -10,6 +13,7 @@ import {
   SHAPES,
   VARIATIONS,
   type LatticeKind,
+  type Scene,
   type ShapeKind,
   type VariationKind,
 } from './scene'
@@ -91,6 +95,29 @@ const VARIATION_GLSL: Record<VariationKind, string> = {
   csch: '2. * vec2(sinh(pc.x) * cos(p.y), -cosh(pc.x) * sin(p.y)) * inv(cosh(2. * pc.x) - cos(2. * p.y))',
   coth: 'vec2(sh(2. * p.x), sin(2. * p.y)) * inv(ch(2. * p.x) - cos(2. * p.y))',
 }
+// flam3's ex, edisc, elliptic and foci, which take more than one line
+const VARIATION_FUNCTIONS: Partial<Record<VariationKind, string>> = {
+  ex: `vec2 ex(float r, float th) {
+  float a = sin(th + r), b = cos(th - r);
+  a *= a * a * r;
+  b *= b * b * r;
+  return vec2(a + b, a - b);
+}`,
+  edisc: `vec2 edisc(vec2 p, float r2) {
+  float xmax = .5 * (sqrt(max(r2 + 1. + 2. * p.x, 0.)) + sqrt(max(r2 + 1. - 2. * p.x, 0.)));
+  float a1 = log(xmax + sqrt(max(xmax - 1., 0.))), a2 = -acos(clamp(p.x / xmax, -1., 1.));
+  return vec2(cosh(a2) * cos(a1), sinh(a2) * (p.y > 0. ? -sin(a1) : sin(a1))) / 11.57034632;
+}`,
+  elliptic: `vec2 elliptic(vec2 p, float r2) {
+  float xmax = .5 * (sqrt(max(r2 + 1. + 2. * p.x, 0.)) + sqrt(max(r2 + 1. - 2. * p.x, 0.)));
+  float a = p.x / xmax, l = log(xmax + sqrt(max(xmax - 1., 0.)));
+  return vec2(atan(a, sqrt(max(1. - a * a, 0.))), p.y > 0. ? l : -l) / (.5 * PI);
+}`,
+  foci: `vec2 foci(vec2 p) {
+  float e = .5 * exp(clamp(p.x, -8., 8.)), en = .25 / e;
+  return vec2(e - en, sin(p.y)) * inv(e + en - cos(p.y));
+}`,
+}
 // the texel and component a variation's weight sits in (the layout above)
 const weightAt = (i: number) => (i < 8 ? [2 + (i >> 2), i & 3] : [VARY_TEXEL + ((i - 8) >> 2), (i - 8) & 3])
 
@@ -124,10 +151,15 @@ const LATTICE_BODY: Record<LatticeKind, string> = {
     return vec4(q - e2, s.x + 2. * sw, s.y + sw);`,
   voronoi: 'return voronoi(p, e2, t7.z);',
 }
-const LATTICE_GLSL = LATTICES.map((kind, i) => {
-  const test = i === 0 ? 'if (kind < .5) ' : i < LATTICES.length - 1 ? `else if (kind < ${i}.5) ` : 'else '
-  return `  ${test}{ // ${kind}\n    ${LATTICE_BODY[kind]}\n  }`
-}).join('\n')
+// the kinds kept chained by their index, the last untested
+const latticeGlsl = (kinds: LatticeKind[]) =>
+  kinds
+    .map((kind, i) => {
+      const at = LATTICES.indexOf(kind) || ''
+      const test = i === kinds.length - 1 ? (i === 0 ? '' : 'else ') : `${i === 0 ? '' : 'else '}if (kind < ${at}.5) `
+      return `  ${test}{ // ${kind}\n    ${LATTICE_BODY[kind]}\n  }`
+    })
+    .join('\n')
 // Each shape as GLSL over p, centred, pointing up and about r across from its middle, with f its form (0 to 1),
 // n its whole count and m the star's inner ratio: iq's 2D distance functions, their proportions set from f.
 const SHAPE_GLSL: Record<ShapeKind, string> = {
@@ -156,27 +188,273 @@ const SHAPE_GLSL: Record<ShapeKind, string> = {
   ziggurat: 'sdZiggurat(p, r, n, f)', // n steps, f: steepness
 }
 
-// FILL draws the fills, METAL (which brings FILL) their two-tone metal too.
-export function generateShader(defs: readonly ('FILL' | 'METAL')[] = []): string {
-  const shapes = SHAPES.map((kind, i) => `    case ${i}: return ${SHAPE_GLSL[kind]}; // ${kind}`).join('\n')
-  // each texel's four weights, skipped whole where all are 0
+// Each shape's function, where SHAPE_GLSL's line calls one of its own (sdStar, dot2 and sdBox, which the others
+// build on, are in every program)
+const SHAPE_FUNCTIONS: Partial<Record<ShapeKind, string>> = {
+  rhombus: `float sdRhombus(vec2 p, vec2 b) {
+  b.y = -b.y; p = abs(p);
+  float h = clamp((dot(b, p) + b.y * b.y) / dot(b, b), 0., 1.);
+  p -= b * vec2(h, h - 1.);
+  return length(p) * sign(p.x);
+}`,
+  triangle: `float sdTriangle(vec2 p, vec2 p0, vec2 p1, vec2 p2) {
+  vec2 e0 = p1 - p0, e1 = p2 - p1, e2 = p0 - p2;
+  vec2 v0 = p - p0, v1 = p - p1, v2 = p - p2;
+  vec2 pq0 = v0 - e0 * clamp(dot(v0, e0) / dot(e0, e0), 0., 1.);
+  vec2 pq1 = v1 - e1 * clamp(dot(v1, e1) / dot(e1, e1), 0., 1.);
+  vec2 pq2 = v2 - e2 * clamp(dot(v2, e2) / dot(e2, e2), 0., 1.);
+  float s = sign(e0.x * e2.y - e0.y * e2.x);
+  vec2 d = min(min(vec2(dot(pq0, pq0), s * (v0.x * e0.y - v0.y * e0.x)),
+                   vec2(dot(pq1, pq1), s * (v1.x * e1.y - v1.y * e1.x))),
+                   vec2(dot(pq2, pq2), s * (v2.x * e2.y - v2.y * e2.x)));
+  return -sqrt(d.x) * sign(d.y);
+}`,
+  trapezoid: `float sdTrapezoid(vec2 p, float r1, float r2, float he) {
+  vec2 k1 = vec2(r2, he), k2 = vec2(r2 - r1, 2. * he);
+  p.x = abs(p.x);
+  vec2 ca = vec2(p.x - min(p.x, p.y < 0. ? r1 : r2), abs(p.y) - he);
+  vec2 cb = p - k1 + k2 * clamp(dot(k1 - p, k2) / dot2(k2), 0., 1.);
+  float s = cb.x < 0. && ca.y < 0. ? -1. : 1.;
+  return s * sqrt(min(dot2(ca), dot2(cb)));
+}`,
+  parallelogram: `float sdParallelogram(vec2 p, float wi, float he, float sk) {
+  vec2 e = vec2(sk, he);
+  p = p.y < 0. ? -p : p;
+  vec2 w = p - e; w.x -= clamp(w.x, -wi, wi);
+  vec2 d = vec2(dot(w, w), -w.y);
+  float s = p.x * e.y - p.y * e.x;
+  p = s < 0. ? -p : p;
+  vec2 v = p - vec2(wi, 0); v -= e * clamp(dot(v, e) / dot(e, e), -1., 1.);
+  d = min(d, vec2(dot(v, v), wi * he - abs(s)));
+  return sqrt(d.x) * sign(-d.y);
+}`,
+  capsule: `float sdUnevenCapsule(vec2 p, float r1, float r2, float h) {
+  p.x = abs(p.x);
+  float b = (r1 - r2) / h, a = sqrt(1. - b * b), k = dot(p, vec2(-b, a));
+  if (k < 0.) return length(p) - r1;
+  if (k > a * h) return length(p - vec2(0, h)) - r2;
+  return dot(p, vec2(a, b)) - r1;
+}`,
+  pie: `float sdPie(vec2 p, vec2 c, float r) {
+  p.x = abs(p.x);
+  float l = length(p) - r, m = length(p - c * clamp(dot(p, c), 0., r));
+  return max(l, m * sign(c.y * p.x - c.x * p.y));
+}`,
+  arc: `float sdArc(vec2 p, vec2 sc, float ra, float rb) {
+  p.x = abs(p.x);
+  return (sc.y * p.x > sc.x * p.y ? length(p - sc * ra) : abs(length(p) - ra)) - rb;
+}`,
+  horseshoe: `float sdHorseshoe(vec2 p, vec2 c, float r, vec2 w) {
+  p.x = abs(p.x);
+  float l = length(p);
+  p = mat2(-c.x, c.y, c.y, c.x) * p;
+  p = vec2(p.y > 0. || p.x > 0. ? p.x : l * sign(-c.x), p.x > 0. ? p.y : l);
+  p = vec2(p.x, abs(p.y - r)) - w;
+  return length(max(p, 0.)) + min(0., max(p.x, p.y));
+}`,
+  vesica: `float sdVesica(vec2 p, float w, float h) {
+  float d = .5 * (w * w - h * h) / h;
+  p = abs(p);
+  vec3 c = w * p.y < d * (p.x - w) ? vec3(0, w, 0) : vec3(-d, 0, d + h);
+  return length(p - c.yx) - c.z;
+}`,
+  moon: `float sdMoon(vec2 p, float d, float ra, float rb) {
+  p.y = abs(p.y);
+  float a = (ra * ra - rb * rb + d * d) / (2. * d), b = sqrt(max(ra * ra - a * a, 0.));
+  if (d * (p.x * b - p.y * a) > d * d * max(b - p.y, 0.)) return length(p - vec2(a, b));
+  return max(length(p) - ra, -(length(p - vec2(d, 0)) - rb));
+}`,
+  heart: `float sdHeart(vec2 p) {
+  p.x = abs(p.x);
+  if (p.y + p.x > 1.) return sqrt(dot2(p - vec2(.25, .75))) - sqrt(2.) / 4.;
+  return sqrt(min(dot2(p - vec2(0, 1)), dot2(p - .5 * max(p.x + p.y, 0.)))) * sign(p.x - p.y);
+}`,
+  cross: `float sdCross(vec2 p, vec2 b) {
+  p = abs(p); p = p.y > p.x ? p.yx : p.xy;
+  vec2 q = p - b;
+  float k = max(q.y, q.x);
+  vec2 w = k > 0. ? q : vec2(b.y - p.x, -k);
+  return sign(k) * length(max(w, 0.));
+}`,
+  roundX: `float sdRoundedX(vec2 p, float w, float r) { p = abs(p); return length(p - min(p.x + p.y, w) * .5) - r; }`,
+  blobbyCross: `float sdBlobbyCross(vec2 pos, float he) {
+  he += he < 0. ? -1e-3 : 1e-3;
+  pos = abs(pos);
+  pos = vec2(abs(pos.x - pos.y), 1. - pos.x - pos.y) / sqrt(2.);
+  float p = (he - pos.y - .25 / he) / (6. * he), q = pos.x / (he * he * 16.), h = q * q - p * p * p, x;
+  if (h > 0.) { float r = sqrt(h); x = pow(q + r, 1. / 3.) - pow(abs(q - r), 1. / 3.) * sign(r - q); }
+  else { float r = sqrt(p); x = 2. * r * cos(acos(q / (p * r)) / 3.); }
+  x = min(x, sqrt(2.) / 2.);
+  vec2 z = vec2(x, he * (1. - 2. * x * x)) - pos;
+  return length(z) * sign(z.y);
+}`,
+  ellipse: `float sdEllipse(vec2 p, vec2 ab) {
+  p = abs(p);
+  if (p.x > p.y) { p = p.yx; ab = ab.yx; }
+  float l = ab.y * ab.y - ab.x * ab.x;
+  float m = ab.x * p.x / l, m2 = m * m, n = ab.y * p.y / l, n2 = n * n;
+  float c = (m2 + n2 - 1.) / 3., c3 = c * c * c;
+  float q = c3 + m2 * n2 * 2., d = c3 + m2 * n2, g = m + m * n2, co;
+  if (d < 0.) {
+    float h = acos(q / c3) / 3., s = cos(h), t = sin(h) * sqrt(3.);
+    float rx = sqrt(-c * (s + t + 2.) + m2), ry = sqrt(-c * (s - t + 2.) + m2);
+    co = (ry + sign(l) * rx + abs(g) / (rx * ry) - m) / 2.;
+  } else {
+    float h = 2. * m * n * sqrt(d);
+    float s = sign(q + h) * pow(abs(q + h), 1. / 3.), u = sign(q - h) * pow(abs(q - h), 1. / 3.);
+    float rx = -s - u - c * 4. + 2. * m2, ry = (s - u) * sqrt(3.), rm = sqrt(rx * rx + ry * ry);
+    co = (ry / sqrt(rm - rx) + 2. * g / rm - m) / 2.;
+  }
+  vec2 r = ab * vec2(co, sqrt(1. - co * co));
+  return length(r - p) * sign(p.y - r.y);
+}`,
+  cutDisk: `float sdCutDisk(vec2 p, float r, float h) {
+  float w = sqrt(r * r - h * h);
+  p.x = abs(p.x);
+  float s = max((h - r) * p.x * p.x + w * w * (h + r - 2. * p.y), h * p.x - w * p.y);
+  return s < 0. ? length(p) - r : p.x < w ? h - p.y : length(p - vec2(w, h));
+}`,
+  circleWave: `float sdCircleWave(vec2 p, float tb, float ra) {
+  tb = PI * 5. / 6. * max(tb, 1e-4);
+  vec2 co = ra * vec2(sin(tb), cos(tb));
+  p.x = abs(mod(p.x, co.x * 4.) - co.x * 2.);
+  vec2 p1 = p, p2 = vec2(abs(p.x - 2. * co.x), -p.y + 2. * co.y);
+  float d1 = co.y * p1.x > co.x * p1.y ? length(p1 - co) : abs(length(p1) - ra);
+  float d2 = co.y * p2.x > co.x * p2.y ? length(p2 - co) : abs(length(p2) - ra);
+  return min(d1, d2);
+}`,
+  stairs: `float sdStairs(vec2 p, vec2 wh, float n) {
+  vec2 ba = wh * n;
+  float d = min(dot2(p - vec2(clamp(p.x, 0., ba.x), 0)), dot2(p - vec2(ba.x, clamp(p.y, 0., ba.y))));
+  float s = sign(max(-p.y, p.x - ba.x)), dia = length(wh);
+  p = mat2(wh.x, -wh.y, wh.y, wh.x) * p / dia;
+  float id = clamp(round(p.x / dia), 0., n - 1.);
+  p.x = p.x - id * dia;
+  p = mat2(wh.x, wh.y, -wh.y, wh.x) * p / dia;
+  float hh = wh.y / 2.;
+  p.y -= hh;
+  if (p.y > hh * sign(p.x)) s = 1.;
+  p = id < .5 || p.x > 0. ? p : -p;
+  d = min(d, dot2(p - vec2(0, clamp(p.y, -hh, hh))));
+  d = min(d, dot2(p - vec2(clamp(p.x, 0., wh.x), hh)));
+  return sqrt(d) * s;
+}`,
+  coolS: `float sdCoolS(vec2 p) {
+  float six = p.y < 0. ? -p.x : p.x;
+  p.x = abs(p.x); p.y = abs(p.y) - .2;
+  float rex = p.x - min(round(p.x / .4), .4), aby = abs(p.y - .2) - .6;
+  float d = dot2(vec2(six, -p.y) - clamp(.5 * (six - p.y), 0., .2));
+  d = min(d, dot2(vec2(p.x, -aby) - clamp(.5 * (p.x - aby), 0., .4)));
+  d = min(d, dot2(vec2(rex, p.y - clamp(p.y, 0., .4))));
+  return sqrt(d) * sign(2. * p.x + aby + abs(aby + .4) - .4);
+}`,
+  ziggurat: `// a side-on ziggurat: n boxes on one base 2r wide, each a step narrower and higher, the whole mix(.4, 1, f) of
+// its base high; their union, so a fill's bands run inside it as stacked steps
+float sdZiggurat(vec2 p, float r, float n, float f) {
+  float H = 2. * r * mix(.4, 1., f), h = H / n, d = 1e9;
+  for (int k = 0; k < 16; k++) {
+    if (float(k) >= n) break;
+    float hk = .5 * (float(k) + 1.) * h;
+    d = min(d, sdBox(p - vec2(0, -.5 * H + hk), vec2(r * (1. - float(k) / n), hk)));
+  }
+  return d;
+}`,
+}
+
+// A part of the shader beside its core, which every program holds: each variation, shape and lattice kind but the
+// first of its list (linear, star and oblique are the core's), screen lines' stretch, the joined shape, spill, dots,
+// the soak, the morph's far end and lone-level crossfade, and Deco's fills and their metal (which brings the fills).
+export type Part =
+  | `variation.${Exclude<VariationKind, 'linear'>}`
+  | 'stretch'
+  | `shape.${Exclude<ShapeKind, 'star'>}`
+  | 'join'
+  | `lattice.${Exclude<LatticeKind, 'oblique'>}`
+  | 'spill'
+  | 'dots'
+  | 'soak'
+  | 'morph'
+  | 'fill'
+  | 'metal'
+const kinds = (family: string, list: readonly string[]) => list.slice(1).map((kind) => `${family}.${kind}` as Part)
+export const PARTS: readonly Part[] = [
+  ...kinds('variation', VARIATIONS),
+  'stretch',
+  ...kinds('shape', SHAPES),
+  'join',
+  ...kinds('lattice', LATTICES),
+  'spill',
+  'dots',
+  'soak',
+  'morph',
+  'fill',
+  'metal',
+]
+
+// The parts a scene draws with, sub-chains included, or a morph between two: both ends' and the morph's, as a
+// morph's scene grows what one end lacks from what draws as none. Each is there by what the scene holds, never by a
+// value, so no modulator, macro, preset or dice needs another program: a fill brings metal even at metal 0, and
+// metal the stretch, as metal reads its slope on the screen.
+export function needs(a: Scene, b?: Scene): Set<Part> {
+  if (b) return new Set([...needs(a), ...needs(b), 'morph'])
+  const parts = new Set<Part>()
+  const add = (part: string) => {
+    if ((PARTS as readonly string[]).includes(part)) parts.add(part as Part)
+  }
+  for (const { level } of allLevels(a.levels)) {
+    level.variations.forEach(({ kind }) => add(`variation.${kind}`))
+    for (const { shape } of level.variants) {
+      add(`shape.${shape.kind ?? 'star'}`)
+      if (!shape.join) continue
+      add('join')
+      add(`shape.${shape.join.shape.kind ?? 'star'}`)
+    }
+    add(`lattice.${level.lattice.kind}`)
+    if (level.cell.spill) add('spill')
+    if (level.fill) {
+      add('fill')
+      add('metal')
+    }
+  }
+  if (a.line.kind === 'dots' || a.line.dots) add('dots')
+  if (a.background?.kind === 'soak') add('soak')
+  if (a.line.units === 'screen' || parts.has('metal')) add('stretch')
+  return parts
+}
+
+// The shader of the core and the parts given, every part's by default. Fills and metal keep the preprocessor's FILL
+// and METAL (METAL brings FILL); a kind or feature left out leaves the rest of the core's text as it is.
+export function generateShader(parts: Iterable<Part> = PARTS): string {
+  const on = new Set(parts)
+  const has = (part: string) => on.has(part as Part)
+  const kept = <K extends string>(family: string, list: readonly K[]) =>
+    list.filter((kind, i) => i === 0 || has(`${family}.${kind}`))
+  const shapes = kept('shape', SHAPES)
+    .map((kind) => `    case ${SHAPES.indexOf(kind)}: return ${SHAPE_GLSL[kind]}; // ${kind}`)
+    .join('\n')
+  const shapeFunctions = kept('shape', SHAPES)
+    .flatMap((kind) => SHAPE_FUNCTIONS[kind] ?? [])
+    .join('\n')
+  // each texel's four weights, skipped whole where all are 0, and left out where none of its kinds is kept
+  const variations = new Set(kept('variation', VARIATIONS))
   const texels = [...new Set(VARIATIONS.map((_, i) => weightAt(i)[0]))]
   const vary = texels
-    .map((texel) => {
+    .flatMap((texel) => {
       const lines = VARIATIONS.flatMap((kind, i) => {
         const [at, c] = weightAt(i)
         const w = `g.${'xyzw'[c]}`
-        return at === texel
+        return at === texel && variations.has(kind)
           ? [`    if (${w} != 0.) { float w = ${w}; q += w * (${VARIATION_GLSL[kind]}); } // ${kind}`]
           : []
       })
-      return `  g = row(j, ${texel});\n  if (g != vec4(0)) {\n${lines.join('\n')}\n  }`
+      return lines.length ? [`  g = row(j, ${texel});\n  if (g != vec4(0)) {\n${lines.join('\n')}\n  }`] : []
     })
     .join('\n')
+  const varyFunctions = [...variations].flatMap((kind) => VARIATION_FUNCTIONS[kind] ?? [])
   const cell = (by: (typeof CELLS)[number]) => `${CELLS.indexOf(by)}.`
   const lattice = (kind: LatticeKind) => `${LATTICES.indexOf(kind)}.`
   return `#version 300 es
-${defs.map((d) => `#define ${d}\n`).join('')}#ifdef METAL
+${has('metal') ? '#define METAL\n' : has('fill') ? '#define FILL\n' : ''}#ifdef METAL
 #define FILL
 #endif
 precision highp float;
@@ -238,174 +516,7 @@ float sdStar(vec2 p, float r, float n, float m) {
 
 float dot2(vec2 v) { return dot(v, v); }
 float sdBox(vec2 p, vec2 b) { vec2 d = abs(p) - b; return length(max(d, 0.)) + min(max(d.x, d.y), 0.); }
-float sdRhombus(vec2 p, vec2 b) {
-  b.y = -b.y; p = abs(p);
-  float h = clamp((dot(b, p) + b.y * b.y) / dot(b, b), 0., 1.);
-  p -= b * vec2(h, h - 1.);
-  return length(p) * sign(p.x);
-}
-float sdTriangle(vec2 p, vec2 p0, vec2 p1, vec2 p2) {
-  vec2 e0 = p1 - p0, e1 = p2 - p1, e2 = p0 - p2;
-  vec2 v0 = p - p0, v1 = p - p1, v2 = p - p2;
-  vec2 pq0 = v0 - e0 * clamp(dot(v0, e0) / dot(e0, e0), 0., 1.);
-  vec2 pq1 = v1 - e1 * clamp(dot(v1, e1) / dot(e1, e1), 0., 1.);
-  vec2 pq2 = v2 - e2 * clamp(dot(v2, e2) / dot(e2, e2), 0., 1.);
-  float s = sign(e0.x * e2.y - e0.y * e2.x);
-  vec2 d = min(min(vec2(dot(pq0, pq0), s * (v0.x * e0.y - v0.y * e0.x)),
-                   vec2(dot(pq1, pq1), s * (v1.x * e1.y - v1.y * e1.x))),
-                   vec2(dot(pq2, pq2), s * (v2.x * e2.y - v2.y * e2.x)));
-  return -sqrt(d.x) * sign(d.y);
-}
-float sdTrapezoid(vec2 p, float r1, float r2, float he) {
-  vec2 k1 = vec2(r2, he), k2 = vec2(r2 - r1, 2. * he);
-  p.x = abs(p.x);
-  vec2 ca = vec2(p.x - min(p.x, p.y < 0. ? r1 : r2), abs(p.y) - he);
-  vec2 cb = p - k1 + k2 * clamp(dot(k1 - p, k2) / dot2(k2), 0., 1.);
-  float s = cb.x < 0. && ca.y < 0. ? -1. : 1.;
-  return s * sqrt(min(dot2(ca), dot2(cb)));
-}
-float sdParallelogram(vec2 p, float wi, float he, float sk) {
-  vec2 e = vec2(sk, he);
-  p = p.y < 0. ? -p : p;
-  vec2 w = p - e; w.x -= clamp(w.x, -wi, wi);
-  vec2 d = vec2(dot(w, w), -w.y);
-  float s = p.x * e.y - p.y * e.x;
-  p = s < 0. ? -p : p;
-  vec2 v = p - vec2(wi, 0); v -= e * clamp(dot(v, e) / dot(e, e), -1., 1.);
-  d = min(d, vec2(dot(v, v), wi * he - abs(s)));
-  return sqrt(d.x) * sign(-d.y);
-}
-float sdUnevenCapsule(vec2 p, float r1, float r2, float h) {
-  p.x = abs(p.x);
-  float b = (r1 - r2) / h, a = sqrt(1. - b * b), k = dot(p, vec2(-b, a));
-  if (k < 0.) return length(p) - r1;
-  if (k > a * h) return length(p - vec2(0, h)) - r2;
-  return dot(p, vec2(a, b)) - r1;
-}
-float sdPie(vec2 p, vec2 c, float r) {
-  p.x = abs(p.x);
-  float l = length(p) - r, m = length(p - c * clamp(dot(p, c), 0., r));
-  return max(l, m * sign(c.y * p.x - c.x * p.y));
-}
-float sdArc(vec2 p, vec2 sc, float ra, float rb) {
-  p.x = abs(p.x);
-  return (sc.y * p.x > sc.x * p.y ? length(p - sc * ra) : abs(length(p) - ra)) - rb;
-}
-float sdHorseshoe(vec2 p, vec2 c, float r, vec2 w) {
-  p.x = abs(p.x);
-  float l = length(p);
-  p = mat2(-c.x, c.y, c.y, c.x) * p;
-  p = vec2(p.y > 0. || p.x > 0. ? p.x : l * sign(-c.x), p.x > 0. ? p.y : l);
-  p = vec2(p.x, abs(p.y - r)) - w;
-  return length(max(p, 0.)) + min(0., max(p.x, p.y));
-}
-float sdVesica(vec2 p, float w, float h) {
-  float d = .5 * (w * w - h * h) / h;
-  p = abs(p);
-  vec3 c = w * p.y < d * (p.x - w) ? vec3(0, w, 0) : vec3(-d, 0, d + h);
-  return length(p - c.yx) - c.z;
-}
-float sdMoon(vec2 p, float d, float ra, float rb) {
-  p.y = abs(p.y);
-  float a = (ra * ra - rb * rb + d * d) / (2. * d), b = sqrt(max(ra * ra - a * a, 0.));
-  if (d * (p.x * b - p.y * a) > d * d * max(b - p.y, 0.)) return length(p - vec2(a, b));
-  return max(length(p) - ra, -(length(p - vec2(d, 0)) - rb));
-}
-float sdHeart(vec2 p) {
-  p.x = abs(p.x);
-  if (p.y + p.x > 1.) return sqrt(dot2(p - vec2(.25, .75))) - sqrt(2.) / 4.;
-  return sqrt(min(dot2(p - vec2(0, 1)), dot2(p - .5 * max(p.x + p.y, 0.)))) * sign(p.x - p.y);
-}
-float sdCross(vec2 p, vec2 b) {
-  p = abs(p); p = p.y > p.x ? p.yx : p.xy;
-  vec2 q = p - b;
-  float k = max(q.y, q.x);
-  vec2 w = k > 0. ? q : vec2(b.y - p.x, -k);
-  return sign(k) * length(max(w, 0.));
-}
-float sdRoundedX(vec2 p, float w, float r) { p = abs(p); return length(p - min(p.x + p.y, w) * .5) - r; }
-float sdBlobbyCross(vec2 pos, float he) {
-  he += he < 0. ? -1e-3 : 1e-3;
-  pos = abs(pos);
-  pos = vec2(abs(pos.x - pos.y), 1. - pos.x - pos.y) / sqrt(2.);
-  float p = (he - pos.y - .25 / he) / (6. * he), q = pos.x / (he * he * 16.), h = q * q - p * p * p, x;
-  if (h > 0.) { float r = sqrt(h); x = pow(q + r, 1. / 3.) - pow(abs(q - r), 1. / 3.) * sign(r - q); }
-  else { float r = sqrt(p); x = 2. * r * cos(acos(q / (p * r)) / 3.); }
-  x = min(x, sqrt(2.) / 2.);
-  vec2 z = vec2(x, he * (1. - 2. * x * x)) - pos;
-  return length(z) * sign(z.y);
-}
-float sdEllipse(vec2 p, vec2 ab) {
-  p = abs(p);
-  if (p.x > p.y) { p = p.yx; ab = ab.yx; }
-  float l = ab.y * ab.y - ab.x * ab.x;
-  float m = ab.x * p.x / l, m2 = m * m, n = ab.y * p.y / l, n2 = n * n;
-  float c = (m2 + n2 - 1.) / 3., c3 = c * c * c;
-  float q = c3 + m2 * n2 * 2., d = c3 + m2 * n2, g = m + m * n2, co;
-  if (d < 0.) {
-    float h = acos(q / c3) / 3., s = cos(h), t = sin(h) * sqrt(3.);
-    float rx = sqrt(-c * (s + t + 2.) + m2), ry = sqrt(-c * (s - t + 2.) + m2);
-    co = (ry + sign(l) * rx + abs(g) / (rx * ry) - m) / 2.;
-  } else {
-    float h = 2. * m * n * sqrt(d);
-    float s = sign(q + h) * pow(abs(q + h), 1. / 3.), u = sign(q - h) * pow(abs(q - h), 1. / 3.);
-    float rx = -s - u - c * 4. + 2. * m2, ry = (s - u) * sqrt(3.), rm = sqrt(rx * rx + ry * ry);
-    co = (ry / sqrt(rm - rx) + 2. * g / rm - m) / 2.;
-  }
-  vec2 r = ab * vec2(co, sqrt(1. - co * co));
-  return length(r - p) * sign(p.y - r.y);
-}
-float sdCutDisk(vec2 p, float r, float h) {
-  float w = sqrt(r * r - h * h);
-  p.x = abs(p.x);
-  float s = max((h - r) * p.x * p.x + w * w * (h + r - 2. * p.y), h * p.x - w * p.y);
-  return s < 0. ? length(p) - r : p.x < w ? h - p.y : length(p - vec2(w, h));
-}
-float sdCircleWave(vec2 p, float tb, float ra) {
-  tb = PI * 5. / 6. * max(tb, 1e-4);
-  vec2 co = ra * vec2(sin(tb), cos(tb));
-  p.x = abs(mod(p.x, co.x * 4.) - co.x * 2.);
-  vec2 p1 = p, p2 = vec2(abs(p.x - 2. * co.x), -p.y + 2. * co.y);
-  float d1 = co.y * p1.x > co.x * p1.y ? length(p1 - co) : abs(length(p1) - ra);
-  float d2 = co.y * p2.x > co.x * p2.y ? length(p2 - co) : abs(length(p2) - ra);
-  return min(d1, d2);
-}
-float sdStairs(vec2 p, vec2 wh, float n) {
-  vec2 ba = wh * n;
-  float d = min(dot2(p - vec2(clamp(p.x, 0., ba.x), 0)), dot2(p - vec2(ba.x, clamp(p.y, 0., ba.y))));
-  float s = sign(max(-p.y, p.x - ba.x)), dia = length(wh);
-  p = mat2(wh.x, -wh.y, wh.y, wh.x) * p / dia;
-  float id = clamp(round(p.x / dia), 0., n - 1.);
-  p.x = p.x - id * dia;
-  p = mat2(wh.x, wh.y, -wh.y, wh.x) * p / dia;
-  float hh = wh.y / 2.;
-  p.y -= hh;
-  if (p.y > hh * sign(p.x)) s = 1.;
-  p = id < .5 || p.x > 0. ? p : -p;
-  d = min(d, dot2(p - vec2(0, clamp(p.y, -hh, hh))));
-  d = min(d, dot2(p - vec2(clamp(p.x, 0., wh.x), hh)));
-  return sqrt(d) * s;
-}
-float sdCoolS(vec2 p) {
-  float six = p.y < 0. ? -p.x : p.x;
-  p.x = abs(p.x); p.y = abs(p.y) - .2;
-  float rex = p.x - min(round(p.x / .4), .4), aby = abs(p.y - .2) - .6;
-  float d = dot2(vec2(six, -p.y) - clamp(.5 * (six - p.y), 0., .2));
-  d = min(d, dot2(vec2(p.x, -aby) - clamp(.5 * (p.x - aby), 0., .4)));
-  d = min(d, dot2(vec2(rex, p.y - clamp(p.y, 0., .4))));
-  return sqrt(d) * sign(2. * p.x + aby + abs(aby + .4) - .4);
-}
-// a side-on ziggurat: n boxes on one base 2r wide, each a step narrower and higher, the whole mix(.4, 1, f) of
-// its base high; their union, so a fill's bands run inside it as stacked steps
-float sdZiggurat(vec2 p, float r, float n, float f) {
-  float H = 2. * r * mix(.4, 1., f), h = H / n, d = 1e9;
-  for (int k = 0; k < 16; k++) {
-    if (float(k) >= n) break;
-    float hk = .5 * (float(k) + 1.) * h;
-    d = min(d, sdBox(p - vec2(0, -.5 * H + hk), vec2(r * (1. - float(k) / n), hk)));
-  }
-  return d;
-}
+${shapeFunctions}
 
 // a shape of kind (SHAPES' index) at p, size r, form f, count n and the star's m
 float sdKind(float kind, vec2 p, float r, float f, float n, float m) {
@@ -423,14 +534,18 @@ float shapeOf(vec2 p, float kind, float n, float m, float r, float circle, float
   return mix(sdKind(kind, p, r - c, f, n, m) - c, length(p) - r, circle);
 }
 
-// iq's quadratic smooth minimum, k wide
+${
+  has('join')
+    ? `// iq's quadratic smooth minimum, k wide
 float smin(float a, float b, float k) {
   k = max(k, 1e-6) * 4.;
   float h = max(k - abs(a - b), 0.) / k;
   return min(a, b) - h * h * k * .25;
 }
 
-// the nearest point of the lattice a(1, 0) + b e2, centre-nested, from the 4 corners of p's parallelogram:
+`
+    : ''
+}// the nearest point of the lattice a(1, 0) + b e2, centre-nested, from the 4 corners of p's parallelogram:
 // the local offset and the id (a, b)
 vec4 oblique(vec2 p, vec2 e2) {
   vec2 q = vec2(p.x - e2.x * p.y / e2.y, p.y / e2.y);
@@ -443,7 +558,9 @@ vec4 oblique(vec2 p, vec2 e2) {
   }
   return best;
 }
-
+${
+  has('lattice.voronoi')
+    ? `
 // pad point id moved inside its own parallelogram by jitter (0 the pad itself, 1 organic cells)
 vec2 jittered(vec2 id, float jitter) { return id + jitter * (vec2(hash(id), hash(id + 19.19)) - .5); }
 
@@ -461,30 +578,17 @@ vec4 voronoi(vec2 p, vec2 e2, float jitter) {
   }
   return best;
 }
+`
+    : ''
+}
+${
+  varyFunctions.length
+    ? `// flam3's ex, edisc, elliptic and foci, which take more than one line
+${varyFunctions.join('\n')}
 
-// flam3's ex, edisc, elliptic and foci, which take more than one line
-vec2 ex(float r, float th) {
-  float a = sin(th + r), b = cos(th - r);
-  a *= a * a * r;
-  b *= b * b * r;
-  return vec2(a + b, a - b);
-}
-vec2 edisc(vec2 p, float r2) {
-  float xmax = .5 * (sqrt(max(r2 + 1. + 2. * p.x, 0.)) + sqrt(max(r2 + 1. - 2. * p.x, 0.)));
-  float a1 = log(xmax + sqrt(max(xmax - 1., 0.))), a2 = -acos(clamp(p.x / xmax, -1., 1.));
-  return vec2(cosh(a2) * cos(a1), sinh(a2) * (p.y > 0. ? -sin(a1) : sin(a1))) / 11.57034632;
-}
-vec2 elliptic(vec2 p, float r2) {
-  float xmax = .5 * (sqrt(max(r2 + 1. + 2. * p.x, 0.)) + sqrt(max(r2 + 1. - 2. * p.x, 0.)));
-  float a = p.x / xmax, l = log(xmax + sqrt(max(xmax - 1., 0.)));
-  return vec2(atan(a, sqrt(max(1. - a * a, 0.))), p.y > 0. ? l : -l) / (.5 * PI);
-}
-vec2 foci(vec2 p) {
-  float e = .5 * exp(clamp(p.x, -8., 8.)), en = .25 / e;
-  return vec2(e - en, sin(p.y)) * inv(e + en - cos(p.y));
-}
-
-// level row j's weighted sum of variations at p, held inside 1e5 either way
+`
+    : ''
+}// level row j's weighted sum of variations at p, held inside 1e5 either way
 vec2 vary(vec2 p, int j) {
   if (row(j, 7).w > .5) return row(j, 2).x * p;
   float r2 = dot(p, p), r = sqrt(r2), th = atan(p.x, p.y);
@@ -500,7 +604,7 @@ ${vary}
 vec4 lattice(vec2 p, vec2 e2, vec4 t7, out float k) {
   float kind = t7.x, n = t7.y;
   k = 1.;
-${LATTICE_GLSL}
+${latticeGlsl(kept('lattice', LATTICES))}
 }
 
 vec3 oklabToSrgb(vec3 c) {
@@ -535,12 +639,18 @@ vec3 palette(float t) {
   float a1 = k2 <= k ? b.x + 1. : b.x;
   float f = clamp(((t < a.x ? t + 1. : t) - a.x) / max(a1 - a.x, 1e-5), 0., 1.);
   vec3 lab = segment(a, b, f, uStopMix[k]);
-  if (uToward.y > 0. && uTowardMix[k] != uStopMix[k]) lab = mix(lab, segment(a, b, f, uTowardMix[k]), uToward.y);
-  lab.x = clamp(.5 + (lab.x - .5) * uPalette.y, 0., 1.);
+${
+  has('morph')
+    ? `  if (uToward.y > 0. && uTowardMix[k] != uStopMix[k]) lab = mix(lab, segment(a, b, f, uTowardMix[k]), uToward.y);
+`
+    : ''
+}  lab.x = clamp(.5 + (lab.x - .5) * uPalette.y, 0., 1.);
   return oklabToSrgb(lab);
 }
 
-// one dotted line of n dots round the cell: dash = (turn round the cell, radius from its middle in line units); each
+${
+  has('dots')
+    ? `// one dotted line of n dots round the cell: dash = (turn round the cell, radius from its middle in line units); each
 // dot a dash size of the gap to the next long and w wide, crawled phase dots along
 float dotted(float d, vec4 dash, float n, float phase, float w, float f) {
   float gap = 2. * PI * dash.y / n;
@@ -549,15 +659,21 @@ float dotted(float d, vec4 dash, float n, float phase, float w, float f) {
   return pow(1. - smoothstep(0., w, q), f);
 }
 
-// a line of kind at distance d from it; dots also take dash (dotted's, with the dot count in z), fading from the whole
+`
+    : ''
+}// a line of kind at distance d from it; dots also take dash (dotted's, with the dot count in z), fading from the whole
 // count below to the one above, and their crawl phase
 float lineOf(float kind, float d, float w, float f, vec4 dash, float phase) {
   if (kind < .5) return min(pow(w / max(d, 1e-6), f), 8.);
   if (kind < 1.5) return pow(1. - smoothstep(0., w, d), f);
   if (kind < 2.5) return 1. - step(w, d);
-  if (kind < 3.5) return 1. - smoothstep(w, w * (1. + f), d);
+${
+  has('dots')
+    ? `  if (kind < 3.5) return 1. - smoothstep(w, w * (1. + f), d);
   float n = max(floor(dash.z), 1.);
-  return mix(dotted(d, dash, n, phase, w, f), dotted(d, dash, n + 1., phase, w, f), clamp(dash.z - n, 0., 1.));
+  return mix(dotted(d, dash, n, phase, w, f), dotted(d, dash, n + 1., phase, w, f), clamp(dash.z - n, 0., 1.));`
+    : '  return 1. - smoothstep(w, w * (1. + f), d);'
+}
 }
 
 // a contour's line as kind: the outline, faded by rings from 0 to 1 into echo rings pi/k apart drifting by phase;
@@ -574,12 +690,16 @@ float noise(vec2 p) {
   vec2 i = floor(p), f = fract(p), u = f * f * (3. - 2. * f);
   return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + 1.), u.x), u.y);
 }
-float fbm(vec2 p) {
+${
+  has('soak')
+    ? `float fbm(vec2 p) {
   float v = 0., a = .5;
   for (int i = 0; i < 5; i++) { v += a * noise(p); p = rot(.5) * p * 2.03 + 17.; a *= .5; }
   return v;
 }
-
+`
+    : ''
+}
 // The colour field at p: the distance from its centre, the way along its angle from it, or a smooth wash of 3
 // octaves of noise from 0 to 4; with none, the distance from the plane's centre.
 float field(vec2 p) {
@@ -599,13 +719,13 @@ float shiftAt(vec2 p) {
 float gShift = 0.;
 vec3 colourAt(float idx) {
   vec3 c = palette(idx + uPalette.w + gShift);
-  return uToward.y > 0. ? mix(c, palette(idx + uToward.w + gShift), uToward.y) : c;
+  return ${has('morph') ? 'uToward.y > 0. ? mix(c, palette(idx + uToward.w + gShift), uToward.y) : c' : 'c'};
 }
 
 // a pigment at palette place at, blended into the far end's palette in a morph as the lines' colour is
 vec3 pigment(float at) {
   vec3 c = palette(at + uPalette.w);
-  return uToward.y > 0. ? mix(c, palette(at + uToward.w), uToward.y) : c;
+  return ${has('morph') ? 'uToward.y > 0. ? mix(c, palette(at + uToward.w), uToward.y) : c' : 'c'};
 }
 
 // The background under the lines, in screen space so the frame does not move it: a flat colour, a gradient along
@@ -619,7 +739,9 @@ vec3 background(vec2 fc) {
   else if (uBg.x < 2.5) {
     float reach = length(uRes) / uRes.y;
     c = mix(a, pigment(uBgSoak.y), smoothstep(-reach, reach, dot(uv, vec2(cos(uBg.z), sin(uBg.z)))));
-  } else {
+  }${
+    has('soak')
+      ? ` else {
     c = vec3(.86, .81, .71);
     float s = uBg.w, turn = 2. * PI * uBgSoak.w;
     for (int i = 0; i < 3; i++) {
@@ -632,6 +754,8 @@ vec3 background(vec2 fc) {
       c *= mix(vec3(1), ink, (.5 + .4 * n) * inside);
       c *= mix(vec3(1), .6 * ink, uBgSoak.z * inside * exp(-abs(d) * 30.));
     }
+  }`
+      : ''
   }
   return c * uBg.y;
 }
@@ -657,13 +781,17 @@ vec2 mirrored(vec2 h, vec2 id) { return h * (1. - 2. * mod(id, 2.)); }
 float variantDist(int j, int b, vec2 h, float dip) {
   vec4 s0 = row(j, b), s1 = row(j, b + 1), s2 = row(j, b + 2);
   float d = shapeOf(h, s1.w, s0.y, s0.z, s0.w, mix(s1.x, 1., dip), s1.y, s2.x, s2.y);
-  // the joined shape, smooth-unioned in by its weight
+${
+  has('join')
+    ? `  // the joined shape, smooth-unioned in by its weight
   if (s2.w > 0.) {
     vec4 s3 = row(j, b + 3), s4 = row(j, b + 4), s5 = row(j, b + 5);
     float e = shapeOf(h - s5.xy, s3.x, s3.y, s3.z, s3.w, mix(s4.x, 1., dip), s4.y, s4.z, s4.w);
     d = mix(d, smin(d, e, s5.z), s2.w);
   }
-  if (s2.z > 0.) d = abs(d) - s2.z;
+`
+    : ''
+}  if (s2.z > 0.) d = abs(d) - s2.z;
   return d;
 }
 
@@ -712,21 +840,29 @@ float drawn(Cell c, float ringPhase, float depth, float scale) {
   float lw = max(uLine.y + uLine.z * depth, 1e-5), lf = uFalloff.x + uFalloff.y * depth;
   vec4 dash = vec4(c.turn, c.rad * scale, max(uDots.x + uDots.y * depth, 1.), clamp(uDots.z + uDots.w * depth, 0., 1.));
   float a = contour(c.d, k, ra, uContour.z + c.f * ringPhase, uLine.x, scale, lw, lf, dash, c.sgn * uCrawl.x);
-  if (uToward.y > 0.)
+${
+  has('morph')
+    ? `  if (uToward.y > 0.)
     a = mix(a, contour(c.d, k, rb, uToward.z + c.f * ringPhase, uToward.x, scale, lw, lf, dash, c.sgn * uCrawl.y),
             uToward.y);
-  // in screen units a cell the warps shrink to a few line widths across fades out rather than filling with line
+`
+    : ''
+}  // in screen units a cell the warps shrink to a few line widths across fades out rather than filling with line
   return a * mix(1., smoothstep(2. * lw, 8. * lw, scale), uLine.w);
 }
 
-// how far level row j's variations stretch the plane at q0 (to q): the linear weight's scale alone, else measured
+${
+  has('stretch')
+    ? `// how far level row j's variations stretch the plane at q0 (to q): the linear weight's scale alone, else measured
 mat2 stretch(vec2 q0, vec2 q, int j) {
   if (row(j, 7).w > .5) return mat2(row(j, 2).x);
   float e = 1e-3 * max(length(q0), 1e-3);
   return mat2((vary(q0 + vec2(e, 0), j) - q) / e, (vary(q0 + vec2(0, e), j) - q) / e);
 }
 
-#ifdef FILL
+`
+    : ''
+}#ifdef FILL
 // whether cell id a is in front of cell id b: the lower row, then the one further left
 bool before(vec2 a, vec2 b) { return a.y < b.y || (a.y == b.y && a.x < b.x); }
 
@@ -801,14 +937,18 @@ vec3 render(vec2 fc, vec3 bg, int start) {
     bool mirror = t4.x == ${cell('mirror')};
     vec2 local = mirror ? mirrored(cell.xy, cell.zw) : cell.xy;
     mat2 Jq = t0.y * rot(t0.z) * J;
-#ifdef METAL
+${
+  has('stretch')
+    ? `#ifdef METAL
     // metal reads its slope on the screen, so it measures the stretch as lines in screen units do
     bool metal = f0.x > 0. && row(j, ${FILL_TEXEL} + 1).y > 0.;
 #else
     bool metal = false;
 #endif
     if (uLine.w > 0. || metal) Jq = stretch(q0, q, j) * Jq;
-    J = J * (1. - w) + kc * Jq * w;
+`
+    : ''
+}    J = J * (1. - w) + kc * Jq * w;
     // how many screen units a cell unit spans here
     float px = inversesqrt(max(abs(determinant(J)), 1e-12)), scale = mix(1., px, uLine.w);
     // draw: the cell's shape and line
@@ -829,16 +969,22 @@ vec3 render(vec2 fc, vec3 bg, int start) {
     vec2 fid = cell.zw, bid = cell.zw, fat = cell.xy;
     bool inFront = !fr || own.d < pxc, inBack = false;
 #endif
-    if (t6.w > 0.) {
+${
+  has('spill')
+    ? `    if (t6.w > 0.) {
       float st = t7.x == ${LATTICES.indexOf('triangle')}. ? .5 : 1.;
       for (int k = 0; k < 9; k++) {
         if (k == 4) continue;
         vec2 o = vec2(k % 3 - 1, k / 3 - 1);
         vec4 nc;
-        if (t7.x == ${LATTICES.indexOf('voronoi')}.) {
+${
+  has('lattice.voronoi')
+    ? `        if (t7.x == ${LATTICES.indexOf('voronoi')}.) {
           vec2 d = jittered(cell.zw + o, t7.z) - jittered(cell.zw, t7.z);
           nc = vec4(cell.xy - d.x * vec2(1, 0) - d.y * t1.zw, cell.zw + o);
-        } else {
+        } else {`
+    : '        {'
+}
           vec2 dq = st * (o.x * vec2(1, 0) + o.y * t1.zw);
           float kn;
 #ifdef FILL
@@ -878,7 +1024,9 @@ vec3 render(vec2 fc, vec3 bg, int start) {
       }
       a = mix(a, drawn(near, t4.z, depth, scale), t6.w);
     }
-    // the line over a fill keeps as much of itself as the fill's line
+`
+    : ''
+}    // the line over a fill keeps as much of itself as the fill's line
     a *= f0.y;
     // a level whose cells are under a few pixels fades out rather than shimmer (log-polar's centre)
     a *= exp(-r0 * (uRadial.x + uRadial.y * depth)) * w * smoothstep(1., 3., uRes.y * .5 * px);
@@ -941,11 +1089,15 @@ void main() {
   vec3 c = vec3(0), bg = background(gl_FragCoord.xy);
   for (int y = 0; y < 3; y++) for (int x = 0; x < 3; x++)
     if (x < uAA && y < uAA)
-      // a lone level's swap crossfades: its other switches' picture mixed in by how far in it is
+${
+  has('morph')
+    ? `      // a lone level's swap crossfades: its other switches' picture mixed in by how far in it is
       for (int k = 0; k < 2; k++) {
         float w = k == 0 ? 1. - uCross.y : uCross.y;
         if (w > 0.) c += w * render(gl_FragCoord.xy + (vec2(x, y) + .5) / float(uAA) - .5, bg, k * int(uCross.x));
-      }
+      }`
+    : '      c += render(gl_FragCoord.xy + (vec2(x, y) + .5) / float(uAA) - .5, bg, 0);'
+}
   c /= float(uAA * uAA);
   outColor = vec4(pow(c, vec3(1. / uGamma)), 1.);
 }

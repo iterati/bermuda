@@ -1,6 +1,8 @@
-// The renderer: compiles the shader's three programs once (plain, fills, fills with metal), then each frame picks the
-// one the live scene's fills need, packs the scene into its uniforms and level rows and draws one full-screen triangle
-// into whatever framebuffer is bound, over the whole canvas or a smaller picture in its bottom-left corner.
+// The renderer: compiles the shader's programs once, the app's three unless given parts (every part but fills and
+// metal, every part but metal, and every part), each frame picking the one the live scene's fills need, or else the
+// one program of the parts given, which draws every scene. It packs the scene into the program's uniforms (setting
+// one the program leaves out does nothing) and level rows, and draws one full-screen triangle into whatever
+// framebuffer is bound, over the whole canvas or a smaller picture in its bottom-left corner.
 import {
   allLevels,
   BACKGROUNDS,
@@ -17,7 +19,7 @@ import {
   type Scene,
   type Shape,
 } from './scene'
-import { FILL_TEXEL, generateShader, ROW_TEXELS, VARIANT_TEXELS, VARY_TEXEL } from './shader'
+import { FILL_TEXEL, generateShader, PARTS, ROW_TEXELS, VARIANT_TEXELS, VARY_TEXEL, type Part } from './shader'
 import type { Live } from './motion'
 
 const RAD = Math.PI / 180
@@ -124,7 +126,7 @@ export type Renderer = {
   draw: (scene: Scene, live: Pick<Live, 'drift' | 'colour' | 'crawl'>, toward?: Toward, size?: [number, number]) => void
 }
 
-export function createRenderer(canvas: HTMLCanvasElement): Renderer {
+export function createRenderer(canvas: HTMLCanvasElement, parts?: readonly Part[]): Renderer {
   const gl = canvas.getContext('webgl2', { antialias: false, preserveDrawingBuffer: true })
   if (!gl) throw new Error('WebGL2 is not available')
   const compile = (type: number, source: string) => {
@@ -138,11 +140,14 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     gl.VERTEX_SHADER,
     '#version 300 es\nvoid main() { gl_Position = vec4(vec2(gl_VertexID & 1, gl_VertexID >> 1) * 4. - 1., 0, 1); }',
   )
-  // plain, fills, and fills with metal, each with its own uniforms
-  const programs = ([[], ['FILL'], ['METAL']] as const).map((defs) => {
+  // plain, fills, and fills with metal, or the parts given, each with its own uniforms
+  const sets = parts
+    ? [parts]
+    : [PARTS.filter((p) => p !== 'fill' && p !== 'metal'), PARTS.filter((p) => p !== 'metal'), PARTS]
+  const programs = sets.map((set) => {
     const program = gl.createProgram()
     gl.attachShader(program, vertex)
-    gl.attachShader(program, compile(gl.FRAGMENT_SHADER, generateShader(defs)))
+    gl.attachShader(program, compile(gl.FRAGMENT_SHADER, generateShader(set)))
     gl.linkProgram(program)
     if (!gl.getProgramParameter(program, gl.LINK_STATUS))
       throw new Error(gl.getProgramInfoLog(program) ?? 'link failed')
@@ -204,11 +209,11 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     }
     const mixed = (a: boolean, b: boolean) => Number(a) * (1 - far.at) + Number(b) * far.at
     // the program the fills need: metal where a level paints metal, fills where one paints at all, else plain (a
-    // morph's scene holds both ends' fills)
+    // morph's scene holds both ends' fills); the parts' one program draws every scene
     const fills = allLevels(scene.levels).flatMap(({ level }) =>
       level.fill && level.fill.amount.value > 0 ? [level.fill] : [],
     )
-    const { program, loc } = programs[fills.some((f) => f.metal.value > 0) ? 2 : fills.length ? 1 : 0]
+    const { program, loc } = programs[parts ? 0 : fills.some((f) => f.metal.value > 0) ? 2 : fills.length ? 1 : 0]
     gl.useProgram(program)
     gl.viewport(0, 0, width, height)
     gl.uniform2f(loc.res, width, height)
