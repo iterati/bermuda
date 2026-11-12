@@ -1,4 +1,5 @@
-// The built-in looks: four Tapestries made through the level chain, the bank's twenty remixing them, then older remixes.
+// The built-in looks: four Tapestries made through the level chain, the bank's twenty remixing them, then older remixes,
+// then the deco family's fills.
 // Periods are in clock units, one a second at the default 60 bpm; angles are in degrees. Each is wired to the music
 // (music.ts wire) but the one made for it, wired its own way.
 import { stopsFromCosine } from './colour'
@@ -9,6 +10,7 @@ import type {
   Address,
   Bank,
   Dots,
+  Fill,
   Join,
   Knob,
   LatticeKind,
@@ -86,6 +88,7 @@ type LevelSpec = {
   at?: K
   speed?: K
   cellSpread?: K
+  fill?: Fill
 }
 
 export function level(id: string, s: LevelSpec = {}): Level {
@@ -111,6 +114,7 @@ export function level(id: string, s: LevelSpec = {}): Level {
   if (s.jitter !== undefined) out.lattice.jitter = k(s.jitter)
   if (s.sectors !== undefined) out.lattice.sectors = s.sectors
   if (s.link) out.link = s.link
+  if (s.fill) out.fill = structuredClone(s.fill)
   return out
 }
 
@@ -160,6 +164,7 @@ type SceneSpec = {
   radius?: K
   time?: K
   trap?: { weight: K; size: K }
+  field?: Scene['palette']['field']
   composite?: Scene['composite']
   aa?: Scene['post']['aa']
   gamma?: K
@@ -192,6 +197,7 @@ export const scene = (s: SceneSpec): Scene => ({
     radius: k(s.radius ?? 0.4),
     time: k(s.time ?? 0),
     ...(s.trap ? { trap: { weight: k(s.trap.weight), size: k(s.trap.size) } } : {}),
+    ...(s.field ? { field: s.field } : {}),
   },
   composite: s.composite ?? 'add',
   post: { aa: s.aa ?? 2, gamma: k(s.gamma ?? 2.2) },
@@ -216,6 +222,22 @@ export const background = (
   seep: k(0.2),
 })
 
+// a fill under the lines: solid, with no line over it, a light from the upper left and a shadow half way round the
+// palette, unless the spec says otherwise
+export const fill = (s: Partial<Record<Exclude<keyof Fill, 'front'>, K>> & { front?: true } = {}): Fill => ({
+  amount: k(s.amount ?? 1),
+  line: k(s.line ?? 0),
+  tone: k(s.tone ?? 0),
+  bands: k(s.bands ?? 0),
+  step: k(s.step ?? 0),
+  metal: k(s.metal ?? 0),
+  light: k(s.light ?? 135),
+  shade: k(s.shade ?? 0.5),
+  ramp: k(s.ramp ?? 0),
+  alternate: k(s.alternate ?? 0),
+  ...(s.front ? { front: true } : {}),
+})
+
 // a palette of OKLCh stops (lightness, chroma, hue) evenly round the index, each segment mixed the one way
 const stops = (lch: [number, number, number][], mix: Scene['palette']['stops'][number]['mix'] = 'short') =>
   lch.map(([L, C, h], i) => ({ at: i / lch.length, lch: [k(L), k(C), k(h)] as [Knob, Knob, Knob], mix }))
@@ -229,6 +251,13 @@ const palettePreset = (name: string, cosine: string): Preset => ({
 })
 
 const spokes = (n: number, r: number) => star(n, n, r)
+// the deco stops: jet, gold, cream and teal
+const DECO: [number, number, number][] = [
+  [0.16, 0.01, 260],
+  [0.78, 0.13, 85],
+  [0.95, 0.03, 90],
+  [0.55, 0.09, 195],
+]
 
 // A look's default macros, the Perform strip's first knobs, for the groups its knobs move together: Breathe the
 // levels' scale (those a modulator on the clock moves, else every level's), Morph the rounds and Character the
@@ -2381,6 +2410,207 @@ export const LOOKS: Scene[] = [
     }),
     (d) => blend(d, 0, 1),
   ),
+  // the deco family: fills in metal palettes, each level its own colour at 0 with no radius, so only the fill's bands,
+  // metal and alternate move round the palette
+  scene({
+    name: 'Deco - Sunburst',
+    levels: [
+      level('rays', {
+        scale: 0.5,
+        lattice: 'polar',
+        sectors: 24,
+        e2: [0, 2],
+        // a circle that covers its cell, short of r's top so the Size macro has room to play it
+        shape: star(6, 2, 1.9, { round: 1 }),
+        at: 0,
+        speed: 1,
+        fill: fill({ bands: 3, step: 0.12, alternate: 0.5 }),
+      }),
+    ],
+    drift: 0.3,
+    palette: 'gold',
+    radius: 0,
+    gamma: 1,
+    modulators: [mod('sway', 'cos', 32, [['levels[rays].affine.turn', 7.5]])],
+  }),
+  // overlapping fans in front order, as brick bond lays them
+  scene({
+    name: 'Deco - Fan bond',
+    zoom: 1.2,
+    levels: [
+      level('fan', {
+        scale: 1.6,
+        lattice: 'brick',
+        e2: [0.5, 0.5],
+        spill: 1,
+        shape: shape('pie', 0.5, 0.5),
+        at: 0,
+        speed: 1,
+        fill: fill({ bands: 10, step: 0.5, front: true }),
+      }),
+    ],
+    drift: 0.3,
+    palette: 'copper',
+    radius: 0,
+    gamma: 1,
+    modulators: [mod('open', 'cos', 24, [['levels[fan].variants[0].shape.form', 0.04]])],
+  }),
+  // seigaiha: the Japanese wave scales, overlapping circles in front order
+  scene({
+    name: 'Deco - Seigaiha',
+    zoom: 1.2,
+    levels: [
+      level('scale', {
+        scale: 1.6,
+        lattice: 'brick',
+        e2: [0.5, 0.5],
+        spill: 1,
+        shape: star(6, 2, 0.5, { round: 1 }),
+        at: 0,
+        speed: 1,
+        fill: fill({ bands: 8, step: 0.25, front: true }),
+      }),
+    ],
+    drift: 0.25,
+    palette: stops(DECO),
+    radius: 0,
+    gamma: 1,
+    modulators: [mod('swell', 'cos', 30, [['levels[scale].variants[0].shape.r', 0.04]])],
+  }),
+  // bevelled squares in metal, the light swinging round them
+  scene({
+    name: 'Deco - Ziggurat',
+    zoom: 1.2,
+    levels: [
+      level('z', {
+        scale: 1.2,
+        shape: shape('box', 0.44, 1),
+        at: 0,
+        speed: 1,
+        fill: fill({ bands: 14, step: 0.07, metal: 1, shade: 0.42, light: 115 }),
+      }),
+    ],
+    palette: 'gold',
+    radius: 0,
+    gamma: 1,
+    modulators: [mod('sun', 'cos', 32, [['levels[z].fill.light', 40]])],
+  }),
+  scene({
+    name: 'Deco - Chevron frieze',
+    levels: [
+      level('v', {
+        scale: 1.5,
+        lattice: 'brick',
+        e2: [0, 0.5],
+        shape: shape('triangle', 0.5, 1, { twist: 180 }),
+        at: 0,
+        speed: 1,
+        fill: fill({ bands: 9, step: 0.5 }),
+      }),
+    ],
+    drift: 0.3,
+    palette: 'gold',
+    radius: 0,
+    gamma: 1,
+    modulators: [mod('march', 'ramp', 24, [['levels[v].affine.offset[0]', 0.5]])],
+  }),
+  // Lattice - Truchet in gold metal, its lines kept over the fills
+  scene({
+    name: 'Deco - Gilded Truchet',
+    zoom: 0.8,
+    levels: [
+      level('tiles', {
+        scale: 1.4,
+        turn: 30,
+        e2: HEX,
+        by: 'hash',
+        cellTurn: 30,
+        shape: star(3, 2, 0.55, { round: 0.1 }),
+        at: 0,
+        speed: 1,
+        fill: fill({ bands: 8, step: 0.12, metal: 1, shade: 0.45, line: 1 }),
+      }),
+      level('weave', {
+        scale: R3,
+        turn: 30,
+        e2: HEX,
+        by: 'hash',
+        cellTurn: 30,
+        shape: star(3, 2, 0.5),
+        at: 0,
+        speed: 1,
+        fill: fill({ bands: 8, step: 0.12, metal: 1, shade: 0.45, line: 1 }),
+      }),
+    ],
+    rings: 2,
+    drift: { value: 0.3, play: [0.1, 0.6] },
+    radialWeight: 0.2,
+    width: { value: 0.005, spread: 0.003 },
+    falloff: 1.3,
+    palette: 'gold',
+    radius: 0,
+    gamma: 1,
+    modulators: [
+      mod('sway', 'cos', 32, [['levels[tiles].cell.turn', 15]]),
+      mod('weave', 'tri', 27, [['levels[weave].cell.turn', 15]], { phase: 0.5 }),
+      mod('round', 'cos', 13, [['levels[tiles].variants[0].shape.round', 0.1]]),
+      mod('sun', 'cos', 40, [
+        ['levels[tiles].fill.light', 35],
+        ['levels[weave].fill.light', 35],
+      ]),
+    ],
+  }),
+  // side-on ziggurats in brick bond, stepped back as a skyscraper's setbacks are
+  scene({
+    name: 'Deco - Setbacks',
+    levels: [
+      level('zig', {
+        lattice: 'brick',
+        e2: [0.5, 0.78],
+        shape: shape('ziggurat', 0.44, 0.5, { n: 5 }),
+        at: 0,
+        speed: 1,
+        fill: fill({ bands: 10, step: 0.08, metal: 1, shade: 0.45, light: 115 }),
+      }),
+    ],
+    drift: 0.25,
+    palette: 'gold',
+    radius: 0,
+    gamma: 1,
+    modulators: [mod('sun', 'cos', 32, [['levels[zig].fill.light', 40]])],
+  }),
+  // Deco - Fan bond in the deco stops, each fan one colour pair of four by a noise field read at its cell, which
+  // holds still: a stepped field that moved would hop whole fans, a blink
+  scene({
+    name: 'Deco - Fan bond in four',
+    zoom: 1.2,
+    levels: [
+      level('fan', {
+        scale: 1.6,
+        lattice: 'brick',
+        e2: [0.5, 0.5],
+        spill: 1,
+        shape: shape('pie', 0.5, 0.5),
+        at: 0,
+        speed: 1,
+        fill: fill({ bands: 10, step: 0.5, front: true }),
+      }),
+    ],
+    drift: 0.3,
+    palette: stops(DECO),
+    radius: 0,
+    field: {
+      kind: 'noise',
+      angle: k(0),
+      centre: [k(0), k(0)],
+      scale: k(0.7),
+      depth: k(0.75),
+      steps: 4,
+      atCells: true,
+    },
+    gamma: 1,
+    modulators: [mod('open', 'cos', 24, [['levels[fan].variants[0].shape.form', 0.04]])],
+  }),
 ]
   .map((look) => (look.modulators.some((m) => m.listen) ? look : update(look, wire)))
   // the default macros come before wire()'s tone macro, which holds the hue

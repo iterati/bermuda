@@ -32,6 +32,25 @@ export type Level = {
   cell: { by: (typeof CELLS)[number]; turn: Knob; phase: Knob; spill?: Knob } // spill: after milestone 1
   variants: { share: Knob; shape: Shape; below?: Level[] }[] // below: a per-cell sub-chain
   colour: { at: Knob; speed: Knob; cellSpread: Knob }
+  fill?: Fill // after the deco step: absent, the level draws its line alone
+}
+// A level's paint, under the lines and over the background, down the chain: its cells' shapes covered by amount,
+// softened inward by ramp, coloured from the palette tone round from the line's (alternate more on odd cells), in
+// bands stepping step round the palette and flowing as the echo rings do, and as two-tone metal, each facet lit
+// or shade round the palette by its slope against the light; line keeps that much of the line over it. In front
+// order a cell's paint is the covering cell's of the lowest row, then the leftmost's, as overlapping fans lie.
+export type Fill = {
+  amount: Knob
+  line: Knob
+  tone: Knob
+  bands: Knob
+  step: Knob
+  metal: Knob
+  light: Knob
+  shade: Knob
+  ramp: Knob
+  alternate: Knob
+  front?: true
 }
 export type Scene = {
   // a look: play ranges and macros travel with it
@@ -63,6 +82,7 @@ export type Scene = {
     radius: Knob
     time: Knob
     trap?: Trap // after milestone 1's shapes
+    field?: Field // after the deco step: absent, the index starts from the plane's centre
   }
   composite: 'add' | 'first'
   post: { aa: 1 | 2 | 3; gamma: Knob }
@@ -133,6 +153,18 @@ export type Dots = { count: Knob; size: Knob; crawl: Knob }
 // Orbit-trap colour: the palette index moved by weight times how near the pixel's point came, down the chain, to a
 // circle of radius size round its cell's middle (iq's point trap at size 0), in each cell's own units.
 export type Trap = { weight: Knob; size: Knob }
+// A colour field over the plane: radial round its centre, a linear sweep through it at angle, or a noise wash of
+// scale. Radius times it starts the palette index, and depth times it shifts every colour, in whole steps of 1/steps
+// when it has them, read at the middle of the first level's cell when atCells, so a shape takes one colour.
+export type Field = {
+  kind: (typeof FIELDS)[number]
+  angle: Knob
+  centre: [Knob, Knob]
+  scale: Knob
+  depth: Knob
+  steps?: number
+  atCells?: true
+}
 // The two scenes on the hand fader, where it sits and the edge it runs along: a pair kept as one file.
 export type Fader = { a: Scene; b: Scene; at: number; edge: Edge }
 
@@ -224,12 +256,15 @@ export const SHAPES = [
   'segment',
   'stairs',
   'coolS',
+  'ziggurat', // a side-on stepped pyramid: n steps, its form the steepness
 ] as const
 // the kinds with no proportion of their own, so no form
 export const FORMLESS: readonly ShapeKind[] = ['star', 'heart', 'coolS']
 export const LINES = ['glow', 'smooth', 'hard', 'band', 'dots'] as const
 // soak: Helen Frankenthaler's soak-stain pools of thinned paint on raw canvas
 export const BACKGROUNDS = ['flat', 'gradient', 'soak'] as const
+export const FIELDS = ['radial', 'linear', 'noise'] as const
+export const FIELD_STEPS: [number, number] = [1, 16]
 export const WAVES = ['cos', 'tri', 'beat', 'ramp', 'steps'] as const
 // What the app hears in the music (music.ts), each 0 to 1: the loudness, the tone (dark to light), the drive (a
 // sensual groove to a beat to speed to) and eight bands, low to high.
@@ -271,6 +306,27 @@ const ringsShow = (scene: Scene) =>
 const starM = (shape: Shape | undefined, at: KnobAt) => shape?.m === at.knob && (shape.kind ?? 'star') === 'star'
 const dotted = (scene: Scene) => scene.line.kind === 'dots'
 const soaked = (scene: Scene) => scene.background?.kind === 'soak'
+// the knob at address can rise above 0, or with any be other than 0: by its value, its spread, its play range, or a
+// modulator or macro on it, as ringsShow reads the rings
+export const canMove = (scene: Scene, address: Address, any = false) => {
+  const knob = resolve(scene, address)
+  const off = (v: number) => (any ? v !== 0 : v > 0)
+  return (
+    !!knob &&
+    (off(knob.value) ||
+      !!knob.spread ||
+      !!knob.play?.some(off) ||
+      [...scene.modulators, ...scene.macros].some((m) => m.targets.some((t) => t.knob === address)))
+  )
+}
+// the level's fill can rise above 0, and so can each of its knobs named
+const fills =
+  (...names: string[]) =>
+  (scene: Scene, at: KnobAt) =>
+    ['amount', ...names].every((name) => canMove(scene, `${at.level!.prefix}.fill.${name}`))
+// the colour field moves a colour: its depth or the palette's radius can be other than 0
+export const fielded = (scene: Scene) =>
+  canMove(scene, 'palette.field.depth', true) || canMove(scene, 'palette.radius', true)
 export const KINDS: Record<string, Kind> = {
   'background.at[0]': {
     range: [0, 1],
@@ -524,6 +580,64 @@ export const KINDS: Record<string, Kind> = {
     help: "scatters each cell's colour round the palette from colour at, by up to this much, as far as colour speed lets it",
     rest: 0,
   },
+  'levels[].fill.amount': {
+    range: [0, 1],
+    label: 'fill',
+    help: "paints this level's shapes from the palette, under the lines and over the background: 0 none, 1 solid",
+  },
+  'levels[].fill.line': {
+    range: [0, 1],
+    label: 'line',
+    help: "how much of this level's line draws over its fill: 1 the line as it was, 0 the fill alone",
+  },
+  'levels[].fill.tone': {
+    range: [-1, 1],
+    label: 'tone',
+    help: "moves the fill's colour round the palette from the line's: 0.5 is half way round",
+    shows: fills(),
+  },
+  'levels[].fill.bands': {
+    range: [0, 48],
+    label: 'bands',
+    help: "stepped bands of colour in from the shape's edge, this many a cell unit, flowing as the echo rings drift",
+    shows: fills(),
+  },
+  'levels[].fill.step': {
+    range: [-1, 1],
+    label: 'step',
+    help: 'how far round the palette each band steps from the one outside it; needs bands',
+    shows: fills('bands'),
+  },
+  'levels[].fill.metal': {
+    range: [0, 1],
+    label: 'metal',
+    help: 'two-tone metal: each facet lit or in shadow by its slope against the light; 0 flat paint, 1 the whole shadow',
+    shows: fills(),
+  },
+  'levels[].fill.light': {
+    range: [-360, 360],
+    label: 'light',
+    help: 'where the light falls on the metal from, in degrees round the screen: the facets facing it are lit; needs metal',
+    shows: fills('metal'),
+  },
+  'levels[].fill.shade': {
+    range: [-1, 1],
+    label: 'shade',
+    help: "how far round the palette the metal's shadow side is from its lit side: on a metal palette 0.5 is its dark half",
+    shows: fills('metal'),
+  },
+  'levels[].fill.ramp': {
+    range: [0, 1],
+    label: 'ramp',
+    help: "softens the fill inward from the shape's edge over this far, in cell units: 0 a clean edge",
+    shows: fills(),
+  },
+  'levels[].fill.alternate': {
+    range: [-1, 1],
+    label: 'alternate',
+    help: "moves every other cell's fill round the palette by this much, by its id's parity, as a sunburst's rays alternate",
+    shows: fills(),
+  },
   'contour.rings': {
     range: [0, 24],
     label: 'rings',
@@ -623,6 +737,35 @@ export const KINDS: Record<string, Kind> = {
     label: 'trap size',
     help: "the radius of the trap's circle round each cell's middle; 0 is iq's point trap",
   },
+  'palette.field.angle': {
+    range: [-360, 360],
+    label: 'angle',
+    help: "the linear field's direction, in degrees: the colours sweep along it",
+    shows: (s) => s.palette.field?.kind === 'linear' && fielded(s),
+  },
+  'palette.field.centre[0]': {
+    range: [-4, 4],
+    label: 'centre x',
+    help: "where the colour field is centred, across: the radial field's rings round it, the sweep and the wash through it",
+    shows: fielded,
+  },
+  'palette.field.centre[1]': {
+    range: [-4, 4],
+    label: 'centre y',
+    help: "where the colour field is centred, up and down: the radial field's rings round it, the sweep and the wash through it",
+    shows: fielded,
+  },
+  'palette.field.scale': {
+    range: [0.1, 8],
+    label: 'scale',
+    help: "how fine the noise field's wash is: higher packs its patches smaller",
+    shows: (s) => s.palette.field?.kind === 'noise' && fielded(s),
+  },
+  'palette.field.depth': {
+    range: [-2, 2],
+    label: 'depth',
+    help: 'how far the colour field shifts every colour round the palette for each unit of the field; 0 shifts none',
+  },
   'post.gamma': {
     range: [0.5, 3],
     label: 'gamma',
@@ -648,6 +791,11 @@ export const PERIOD: Record<string, number> = {
   'levels[].colour.at': 1,
   'palette.stops[].lch[2]': 360,
   'palette.hue': 360,
+  'levels[].fill.tone': 1,
+  'levels[].fill.step': 1,
+  'levels[].fill.shade': 1,
+  'levels[].fill.light': 360,
+  'palette.field.angle': 360,
 }
 
 // 'levels[a].variants[1].below[b].affine.offset[0]' -> 'levels[].affine.offset[0]'
@@ -890,7 +1038,12 @@ function levelList(v: unknown, path: string, ids: Set<string>): Level[] {
 }
 
 function level(v: unknown, path: string, before: Level[], ids: Set<string>): Level {
-  const o = obj(v, path, ['id', 'weight', 'affine', 'variations', 'lattice', 'cell', 'variants', 'colour'], ['link'])
+  const o = obj(
+    v,
+    path,
+    ['id', 'weight', 'affine', 'variations', 'lattice', 'cell', 'variants', 'colour'],
+    ['link', 'fill'],
+  )
   const out = { id: o.id as string } as Level
   if (o.link !== undefined) {
     const link = str(o.link, `${path}.link`)
@@ -952,6 +1105,31 @@ function level(v: unknown, path: string, before: Level[], ids: Set<string>): Lev
     at: knob(colour.at, `${path}.colour.at`),
     speed: knob(colour.speed, `${path}.colour.speed`),
     cellSpread: knob(colour.cellSpread, `${path}.colour.cellSpread`),
+  }
+  if (o.fill !== undefined) {
+    const at = `${path}.fill`
+    const fill = obj(
+      o.fill,
+      at,
+      ['amount', 'line', 'tone', 'bands', 'step', 'metal', 'light', 'shade', 'ramp', 'alternate'],
+      ['front'],
+    )
+    out.fill = {
+      amount: knob(fill.amount, `${at}.amount`),
+      line: knob(fill.line, `${at}.line`),
+      tone: knob(fill.tone, `${at}.tone`),
+      bands: knob(fill.bands, `${at}.bands`),
+      step: knob(fill.step, `${at}.step`),
+      metal: knob(fill.metal, `${at}.metal`),
+      light: knob(fill.light, `${at}.light`),
+      shade: knob(fill.shade, `${at}.shade`),
+      ramp: knob(fill.ramp, `${at}.ramp`),
+      alternate: knob(fill.alternate, `${at}.alternate`),
+    }
+    if (fill.front !== undefined) {
+      if (fill.front !== true) fail(`${at}.front`, 'must be true when given')
+      out.fill.front = true
+    }
   }
   return out
 }
@@ -1027,7 +1205,7 @@ export function parseScene(input: unknown): Scene {
   const frame = obj(o.frame, 'frame', ['origin', 'zoom', 'turn'])
   const contour = obj(o.contour, 'contour', ['rings', 'drift', 'radialWeight'])
   const line = obj(o.line, 'line', ['kind', 'width', 'falloff', 'units'], ['dots'])
-  const palette = obj(o.palette, 'palette', ['stops', 'hue', 'contrast', 'radius', 'time'], ['trap'])
+  const palette = obj(o.palette, 'palette', ['stops', 'hue', 'contrast', 'radius', 'time'], ['trap', 'field'])
   const post = obj(o.post, 'post', ['aa', 'gamma'])
   const scene: Scene = {
     name: str(o.name, 'name'),
@@ -1083,6 +1261,30 @@ export function parseScene(input: unknown): Scene {
     scene.palette.trap = {
       weight: knob(trap.weight, 'palette.trap.weight'),
       size: knob(trap.size, 'palette.trap.size'),
+    }
+  }
+  if (palette.field !== undefined) {
+    const field = obj(
+      palette.field,
+      'palette.field',
+      ['kind', 'angle', 'centre', 'scale', 'depth'],
+      ['steps', 'atCells'],
+    )
+    scene.palette.field = {
+      kind: oneOf(field.kind, 'palette.field.kind', FIELDS),
+      angle: knob(field.angle, 'palette.field.angle'),
+      centre: pair(field.centre, 'palette.field.centre', knob),
+      scale: knob(field.scale, 'palette.field.scale'),
+      depth: knob(field.depth, 'palette.field.depth'),
+    }
+    if (field.steps !== undefined) {
+      const steps = num(field.steps, 'palette.field.steps', FIELD_STEPS)
+      if (!Number.isInteger(steps)) fail('palette.field.steps', 'must be a whole number')
+      scene.palette.field.steps = steps
+    }
+    if (field.atCells !== undefined) {
+      if (field.atCells !== true) fail('palette.field.atCells', 'must be true when given')
+      scene.palette.field.atCells = true
     }
   }
   scene.palette.stops.forEach((s, i, all) => {

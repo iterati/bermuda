@@ -1,5 +1,6 @@
-// The one fragment shader, generated once: every module is in it and uniforms pick which runs,
-// so changing a scene never recompiles. The levels live in a float texture, one row per level (render.ts packs it).
+// The fragment shader, generated once for each program by feature (plain, fills, fills with metal): every module is
+// in it and uniforms pick which runs, so changing a scene never recompiles, and a scene picks the program its fills
+// need (render.ts). The levels live in a float texture, one row per level (render.ts packs it).
 import {
   CELLS,
   LATTICES,
@@ -28,9 +29,13 @@ import {
 //   12 + 6v: the joined shape's round, twist, form, corner
 //   13 + 6v: the join's offset x, offset y, blend, unused
 //   VARY_TEXEL on: the weights of the rest of VARIATIONS, four a texel, in order
+//   FILL_TEXEL: the fill's amount, line, tone, bands (a level without a fill: 0, 1, 0, 0)
+//   FILL_TEXEL + 1: its step, metal, light (radians), shade
+//   FILL_TEXEL + 2: its ramp, alternate, front order (0 or 1), unused
 export const VARIANT_TEXELS = 6
 export const VARY_TEXEL = 8 + VARIANT_TEXELS * MAX_VARIANTS
-export const ROW_TEXELS = VARY_TEXEL + Math.ceil((VARIATIONS.length - 8) / 4)
+export const FILL_TEXEL = VARY_TEXEL + Math.ceil((VARIATIONS.length - 8) / 4)
+export const ROW_TEXELS = FILL_TEXEL + 3
 
 // Each variation as GLSL over p, with r2 = |p|², r = |p|, th = atan(x, y) (flam3's angle, from the y axis),
 // sc = (x, y) / r (flam3's sina and cosa), ph = atan(y, x), pc = p held to ±4 and w its weight at hand: flam3's
@@ -148,9 +153,11 @@ const SHAPE_GLSL: Record<ShapeKind, string> = {
   segment: 'length(p - vec2(0, clamp(p.y, -r, r))) - .3 * r * f', // f: thickness
   stairs: 'sdStairs(p + r * vec2(1, mix(.3, 1.7, f)), 2. * r / n * vec2(1, mix(.3, 1.7, f)), n)', // n steps, f: steepness
   coolS: 'sdCoolS(p / r) * r', // no form
+  ziggurat: 'sdZiggurat(p, r, n, f)', // n steps, f: steepness
 }
 
-export function generateShader(): string {
+// FILL draws the fills, METAL (which brings FILL) their two-tone metal too.
+export function generateShader(defs: readonly ('FILL' | 'METAL')[] = []): string {
   const shapes = SHAPES.map((kind, i) => `    case ${i}: return ${SHAPE_GLSL[kind]}; // ${kind}`).join('\n')
   // each texel's four weights, skipped whole where all are 0
   const texels = [...new Set(VARIATIONS.map((_, i) => weightAt(i)[0]))]
@@ -169,6 +176,9 @@ export function generateShader(): string {
   const cell = (by: (typeof CELLS)[number]) => `${CELLS.indexOf(by)}.`
   const lattice = (kind: LatticeKind) => `${LATTICES.indexOf(kind)}.`
   return `#version 300 es
+${defs.map((d) => `#define ${d}\n`).join('')}#ifdef METAL
+#define FILL
+#endif
 precision highp float;
 precision highp int;
 precision highp sampler2D;
@@ -193,6 +203,8 @@ uniform int uStopMix[MAX_STOPS];  // 0 straight, 1 short, 2 long
 uniform int uTowardMix[MAX_STOPS]; // the far end's
 uniform vec4 uPalette;            // hue, contrast, radius, running index
 uniform vec2 uTrap;               // the orbit trap's weight, its circle's size
+uniform vec4 uField;              // the colour field: kind (FIELDS' index), angle (radians), scale, depth
+uniform vec4 uFieldC;             // its centre x, centre y, steps (0 smooth), at cells (0 or 1)
 uniform float uComposite;         // 0 add to 1 first hit
 uniform vec4 uToward;             // a morph's far end: its line kind, how far in (0 none), its ring phase, its index
 uniform vec2 uTowardRings;        // the far end's rings, their spread
@@ -383,6 +395,17 @@ float sdCoolS(vec2 p) {
   d = min(d, dot2(vec2(rex, p.y - clamp(p.y, 0., .4))));
   return sqrt(d) * sign(2. * p.x + aby + abs(aby + .4) - .4);
 }
+// a side-on ziggurat: n boxes on one base 2r wide, each a step narrower and higher, the whole mix(.4, 1, f) of
+// its base high; their union, so a fill's bands run inside it as stacked steps
+float sdZiggurat(vec2 p, float r, float n, float f) {
+  float H = 2. * r * mix(.4, 1., f), h = H / n, d = 1e9;
+  for (int k = 0; k < 16; k++) {
+    if (float(k) >= n) break;
+    float hk = .5 * (float(k) + 1.) * h;
+    d = min(d, sdBox(p - vec2(0, -.5 * H + hk), vec2(r * (1. - float(k) / n), hk)));
+  }
+  return d;
+}
 
 // a shape of kind (SHAPES' index) at p, size r, form f, count n and the star's m
 float sdKind(float kind, vec2 p, float r, float f, float n, float m) {
@@ -557,6 +580,28 @@ float fbm(vec2 p) {
   return v;
 }
 
+// The colour field at p: the distance from its centre, the way along its angle from it, or a smooth wash of 3
+// octaves of noise from 0 to 4; with none, the distance from the plane's centre.
+float field(vec2 p) {
+  vec2 q = p - uFieldC.xy;
+  if (uField.x < .5) return length(q);
+  if (uField.x < 1.5) return dot(q, vec2(cos(uField.y), sin(uField.y)));
+  q *= uField.z;
+  return 4. * (.5 * noise(q) + .25 * noise(rot(.7) * q * 2.03 + 5.) + .125 * noise(rot(1.9) * q * 4.1 + 9.)) / .875;
+}
+// how far round the palette the field shifts every colour at p: depth times the field, in whole steps when it has them
+float shiftAt(vec2 p) {
+  float s = uField.w * field(p);
+  return uFieldC.z > 0. ? floor(s * uFieldC.z + .5) / uFieldC.z : s;
+}
+// the field's shift at this sample, and a colour at palette index idx, shifted by it and blended into the far end's
+// palette in a morph
+float gShift = 0.;
+vec3 colourAt(float idx) {
+  vec3 c = palette(idx + uPalette.w + gShift);
+  return uToward.y > 0. ? mix(c, palette(idx + uToward.w + gShift), uToward.y) : c;
+}
+
 // a pigment at palette place at, blended into the far end's palette in a morph as the lines' colour is
 vec3 pigment(float at) {
   vec3 c = palette(at + uPalette.w);
@@ -593,8 +638,9 @@ vec3 background(vec2 fc) {
 
 // What one cell of a level draws: its distance, where it is round the cell's middle (turns) and how far out (rad), the
 // way its rings and dots run (sgn, -1 for a cell turned the other way), how far its cell turn and ring phase go (f),
-// the variant its hash picks and the seed it picked with.
-struct Cell { float d; float turn; float rad; float sgn; float f; int v; float seed; };
+// the variant its hash picks and the seed it picked with, and the point in the cell after the Cell step's turn and
+// how far its shapes dip into circles, for a metal fill's slope.
+struct Cell { float d; float turn; float rad; float sgn; float f; int v; float seed; vec2 h; float dip; };
 
 // how far out a cell is from the middle of the level, for the ring step: its middle's distance, in cells, on the
 // lattices whose cells are translates; polar's and logpolar's ring; fold's mirror count (its id's own way, above)
@@ -606,6 +652,20 @@ float ringOf(vec2 q, vec4 cell, float kind) {
 
 // the mirror step: a cell's offset reflected across each axis where its id is odd along it
 vec2 mirrored(vec2 h, vec2 id) { return h * (1. - 2. * mod(id, 2.)); }
+
+// the distance of variant row b of level row j at h, its shapes dipped into circles by dip
+float variantDist(int j, int b, vec2 h, float dip) {
+  vec4 s0 = row(j, b), s1 = row(j, b + 1), s2 = row(j, b + 2);
+  float d = shapeOf(h, s1.w, s0.y, s0.z, s0.w, mix(s1.x, 1., dip), s1.y, s2.x, s2.y);
+  // the joined shape, smooth-unioned in by its weight
+  if (s2.w > 0.) {
+    vec4 s3 = row(j, b + 3), s4 = row(j, b + 4), s5 = row(j, b + 5);
+    float e = shapeOf(h - s5.xy, s3.x, s3.y, s3.z, s3.w, mix(s4.x, 1., dip), s4.y, s4.z, s4.w);
+    d = mix(d, smin(d, e, s5.z), s2.w);
+  }
+  if (s2.z > 0.) d = abs(d) - s2.z;
+  return d;
+}
 
 // cell id's shape at h (in the cell, turned by the Cell step) on level row j of weight w, ring out from the middle
 Cell cellAt(int j, vec2 h, vec2 id, float w, float ring) {
@@ -634,18 +694,12 @@ Cell cellAt(int j, vec2 h, vec2 id, float w, float ring) {
     if (pick < shares) break;
   }
   int b = 8 + ${VARIANT_TEXELS} * c.v;
-  vec4 s0 = row(j, b), s1 = row(j, b + 1), s2 = row(j, b + 2);
-  c.d = shapeOf(h, s1.w, s0.y, s0.z, s0.w, mix(s1.x, 1., dip), s1.y, s2.x, s2.y);
-  // the joined shape, smooth-unioned in by its weight
-  if (s2.w > 0.) {
-    vec4 s3 = row(j, b + 3), s4 = row(j, b + 4), s5 = row(j, b + 5);
-    float e = shapeOf(h - s5.xy, s3.x, s3.y, s3.z, s3.w, mix(s4.x, 1., dip), s4.y, s4.z, s4.w);
-    c.d = mix(c.d, smin(c.d, e, s5.z), s2.w);
-  }
-  if (s2.z > 0.) c.d = abs(c.d) - s2.z;
-  vec2 q = rot(s1.y) * h;
+  c.d = variantDist(j, b, h, dip);
+  vec2 q = rot(row(j, b + 1).y) * h;
   c.turn = atan(q.x, q.y) / (2. * PI);
   c.rad = length(q);
+  c.h = h;
+  c.dip = dip;
   return c;
 }
 
@@ -672,13 +726,61 @@ mat2 stretch(vec2 q0, vec2 q, int j) {
   return mat2((vary(q0 + vec2(e, 0), j) - q) / e, (vary(q0 + vec2(0, e), j) - q) / e);
 }
 
-// one sample of the lines over the background bg, from the chain at row start: added to it, or over it where the
-// first hit leaves it uncovered
+#ifdef FILL
+// whether cell id a is in front of cell id b: the lower row, then the one further left
+bool before(vec2 a, vec2 b) { return a.y < b.y || (a.y == b.y && a.x < b.x); }
+
+// a fill's colour at index idx, its shadow side (lit 0) f1.w round the palette by f1.y (shade, by metal)
+vec3 metalAt(float idx, float lit, vec4 f1) {
+  vec3 c = colourAt(idx);
+  return f1.y > 0. && lit < 1. ? mix(c, colourAt(idx + f1.w), f1.y * (1. - lit)) : c;
+}
+
+#ifdef METAL
+// the slope of cell c's distance on level row j of weight w, in its cell before the Cell step's turn: taken for a
+// cell a fill paints, never for every cell spill looks at
+vec2 cellGrad(int j, Cell c, float w) {
+  int b = 8 + ${VARIANT_TEXELS} * c.v;
+  float e = 1e-3;
+  vec2 g = (vec2(variantDist(j, b, c.h + vec2(e, 0), c.dip), variantDist(j, b, c.h + vec2(0, e), c.dip)) - c.d) / e;
+  return transpose(rot(c.f * row(j, 4).y * w)) * g;
+}
+#endif
+
+// The paint of cell c (id id, reflected where mirror) of level row j of weight w, from the ancestry index ci and the
+// trap's distance as the level's line takes them: in bands in from its edge that flow as the echo rings do, each
+// band's edge blended over a pixel (pxc, in cell units) into the next but at the shape's own edge, where no band lies
+// beyond it, and on metal each facet lit or in shadow by its slope on the screen (through J) against the light; .a
+// is how much of the pixel it covers, its edge softened inward by the ramp.
+vec4 paint(int j, Cell c, vec2 id, float ci, float trap, float pxc, mat2 J, float w, bool mirror) {
+  vec4 t5 = row(j, 5), f0 = row(j, ${FILL_TEXEL}), f1 = row(j, ${FILL_TEXEL} + 1), f2 = row(j, ${FILL_TEXEL} + 2);
+  float cover = (1. - smoothstep(-max(pxc, f2.x), pxc, c.d)) * f0.x, lit = 1.;
+  float idx = mix(ci, t5.x + t5.z * hash(id + c.seed * 3.7 + 11.), t5.y * w) + uTrap.x * trap + f0.z +
+              f2.y * mod(id.x + id.y, 2.);
+#ifdef METAL
+  if (f1.y > 0.) {
+    vec2 g = cellGrad(j, c, w);
+    g = transpose(J) * (mirror ? mirrored(g, id) : g);
+    lit = length(g) > 1e-9 ? smoothstep(-.03, .03, dot(normalize(g), vec2(cos(f1.z), sin(f1.z)))) : 1.;
+  }
+#endif
+  if (f0.w <= 0.) return vec4(metalAt(idx, lit, f1), cover);
+  float x0 = (uContour.z + c.f * row(j, 4).z) / PI, x = x0 - min(c.d, 0.) * f0.w, b = floor(x), e = x - b;
+  float ww = pxc * f0.w, nb = e < .5 ? b - 1. : b + 1.;
+  float t = e < .5 ? (b > floor(x0) ? 1. - smoothstep(-ww, ww, e) : 0.) : smoothstep(1. - ww, 1. + ww, e);
+  return vec4(mix(metalAt(idx + b * f1.x, lit, f1), metalAt(idx + nb * f1.x, lit, f1), t), cover);
+}
+#endif
+
+// one sample of the lines over the paint, which lies down the chain over the background bg, from the chain at row
+// start: added to it, or over it where the first hit leaves it uncovered
 vec3 render(vec2 fc, vec3 bg, int start) {
   vec2 p = rot(uFrame.w) * ((fc * 2. - uRes) / uRes.y) / uFrame.z + uFrame.xy;
   float r0 = length(p);
-  float ci = uPalette.z * r0;
-  vec3 add = vec3(0), first = vec3(0);
+  // the ancestry index starts from the colour field, as far as the radius, and the field shifts every colour
+  float ci = uPalette.z * field(p);
+  gShift = shiftAt(p);
+  vec3 add = vec3(0), first = vec3(0), ground = bg;
   float cover = 0., grown = 0.;
   // the orbit trap: how near the point has come to the trap's circle, from the frame's point on down the chain
   float trap = abs(r0 - uTrap.y);
@@ -690,6 +792,7 @@ vec3 render(vec2 fc, vec3 bg, int start) {
     // a level is as deep as the weight above it, so a level collapsing or growing moves the depths below smoothly
     float depth = grown / uDepth;
     vec4 t0 = row(j, 0), t1 = row(j, 1), t4 = row(j, 4), t5 = row(j, 5), t6 = row(j, 6), t7 = row(j, 7);
+    vec4 f0 = row(j, ${FILL_TEXEL});
     float w = t0.x, kc;
     // affine, variations, lattice; the level weight blends the re-tiling toward pass-through
     vec2 q0 = t0.y * (rot(t0.z) * p) + t1.xy, q = vary(q0, j);
@@ -698,7 +801,13 @@ vec3 render(vec2 fc, vec3 bg, int start) {
     bool mirror = t4.x == ${cell('mirror')};
     vec2 local = mirror ? mirrored(cell.xy, cell.zw) : cell.xy;
     mat2 Jq = t0.y * rot(t0.z) * J;
-    if (uLine.w > 0.) Jq = stretch(q0, q, j) * Jq;
+#ifdef METAL
+    // metal reads its slope on the screen, so it measures the stretch as lines in screen units do
+    bool metal = f0.x > 0. && row(j, ${FILL_TEXEL} + 1).y > 0.;
+#else
+    bool metal = false;
+#endif
+    if (uLine.w > 0. || metal) Jq = stretch(q0, q, j) * Jq;
     J = J * (1. - w) + kc * Jq * w;
     // how many screen units a cell unit spans here
     float px = inversesqrt(max(abs(determinant(J)), 1e-12)), scale = mix(1., px, uLine.w);
@@ -711,6 +820,15 @@ vec3 render(vec2 fc, vec3 bg, int start) {
     // pad's neighbours, each at its own jittered point
     Cell near = own;
     vec2 nid = cell.zw;
+#ifdef FILL
+    // front order: of the cells whose paint reaches the pixel (pxc, a pixel in cell units), the lowest row's then the
+    // leftmost's in front, and the next behind it, painted first so the front's edge blends into it, not the ground
+    float pxc = 2. / uRes.y / px;
+    bool fr = f0.x > 0. && row(j, ${FILL_TEXEL} + 2).z > .5 && t6.w > 0.;
+    Cell front = own, back = own;
+    vec2 fid = cell.zw, bid = cell.zw, fat = cell.xy;
+    bool inFront = !fr || own.d < pxc, inBack = false;
+#endif
     if (t6.w > 0.) {
       float st = t7.x == ${LATTICES.indexOf('triangle')}. ? .5 : 1.;
       for (int k = 0; k < 9; k++) {
@@ -723,8 +841,16 @@ vec3 render(vec2 fc, vec3 bg, int start) {
         } else {
           vec2 dq = st * (o.x * vec2(1, 0) + o.y * t1.zw);
           float kn;
+#ifdef FILL
+          // in front order the neighbours are found from a point pulled a little toward the cell's middle, so a
+          // sample on a row's edge cannot round into a row past the one beside it and lose the cell in front
+          vec2 pull = fr ? 1e-3 * cell.xy : vec2(0);
+          nc = lattice(q - pull + dq, t1.zw, t7, kn);
+          nc.xy += pull - dq;
+#else
           nc = lattice(q + dq, t1.zw, t7, kn);
           nc.xy -= dq;
+#endif
         }
         if (nc.zw == cell.zw) continue;
         Cell c = cellAt(j, mix(p, mirror ? mirrored(nc.xy, nc.zw) : nc.xy, w), nc.zw, w, ringOf(q, nc, t7.x));
@@ -732,20 +858,72 @@ vec3 render(vec2 fc, vec3 bg, int start) {
           near = c;
           nid = nc.zw;
         }
+#ifdef FILL
+        if (fr && c.d < pxc) {
+          if (!inFront || before(nc.zw, fid)) {
+            back = front;
+            bid = fid;
+            inBack = inFront;
+            front = c;
+            fid = nc.zw;
+            fat = nc.xy;
+            inFront = true;
+          } else if (!inBack || before(nc.zw, bid)) {
+            back = c;
+            bid = nc.zw;
+            inBack = true;
+          }
+        }
+#endif
       }
       a = mix(a, drawn(near, t4.z, depth, scale), t6.w);
     }
+    // the line over a fill keeps as much of itself as the fill's line
+    a *= f0.y;
     // a level whose cells are under a few pixels fades out rather than shimmer (log-polar's centre)
     a *= exp(-r0 * (uRadial.x + uRadial.y * depth)) * w * smoothstep(1., 3., uRes.y * .5 * px);
+    // a colour field at cells is read at the middle of the first level's cell (its front cell's in front order), the
+    // level's warps left out, so a shape takes one colour
+    if (i == 0 && uFieldC.w > 0.) {
+      mat2 unturn = transpose(rot(t0.z)) / t0.y;
+      gShift = shiftAt(p - unturn * cell.xy);
+#ifdef FILL
+      // front order's cell fades in by spill, as its paint does
+      if (fr && inFront) gShift = mix(gShift, shiftAt(p - unturn * fat), t6.w);
+#endif
+    }
     // colour: the ancestry index pulls toward the level's own colour as far as the level is grown, plus a per-cell
     // spread; a spilled outline wears its own cell's, by spill
     float ni = mix(ci, t5.x + t5.z * hash(nid + near.seed * 3.7 + 11.), t5.y * w);
+#ifdef FILL
+    float ci0 = ci;
+#endif
     ci = mix(ci, t5.x + t5.z * hash(cell.zw + own.seed * 3.7 + 11.), t5.y * w);
     // the orbit trap takes in this level's point as far as the level is grown, and moves the index by its weight
     trap = mix(trap, min(trap, abs(length(mix(p, local, w)) - uTrap.y)), w);
     float li = mix(ci, ni, t6.w) + uTrap.x * trap;
-    vec3 col = palette(li + uPalette.w);
-    if (uToward.y > 0.) col = mix(col, palette(li + uToward.w), uToward.y);
+    vec3 col = colourAt(li);
+#ifdef FILL
+    // the paint, each painted cell wearing its own colour, faded as the line is by the level's weight and its cells'
+    // size, laid over the ground
+    if (f0.x > 0.) {
+      float shown = w * smoothstep(1., 3., uRes.y * .5 * px);
+      vec3 under = ground;
+      if (inBack) {
+        vec4 c = paint(j, back, bid, ci0, trap, pxc, J, w, mirror);
+        ground = mix(ground, c.rgb, clamp(c.a * shown, 0., 1.));
+      }
+      if (inFront) {
+        vec4 c = paint(j, front, fid, ci0, trap, pxc, J, w, mirror);
+        ground = mix(ground, c.rgb, clamp(c.a * shown, 0., 1.));
+      }
+      // front order fades in by spill over the cell's own paint, so a morph swaps it unseen where spill is nothing
+      if (fr && t6.w < 1.) {
+        vec4 c = paint(j, own, cell.zw, ci0, trap, pxc, J, w, mirror);
+        ground = mix(mix(under, c.rgb, clamp(c.a * shown, 0., 1.)), ground, t6.w);
+      }
+    }
+#endif
     add += col * a;
     float c = clamp(a, 0., 1.);
     first += (1. - cover) * col * c;
@@ -756,7 +934,7 @@ vec3 render(vec2 fc, vec3 bg, int start) {
     float below = row(j, 9 + ${VARIANT_TEXELS} * own.v).z;
     j = below >= 0. ? int(below) : int(t0.w);
   }
-  return mix(add + bg, first + (1. - cover) * bg, uComposite);
+  return mix(ground + add, first + (1. - cover) * ground, uComposite);
 }
 
 void main() {

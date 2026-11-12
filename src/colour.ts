@@ -43,6 +43,26 @@ export const COSINES: Record<string, [Vec3, Vec3, Vec3, Vec3]> = {
     [1, 0.7, 0.4],
     [0, 0.15, 0.2],
   ],
+  // the metals: the light metal at 0 and its dark pair half a turn round (gold and brass, silver and jet, copper
+  // and verdigris), for two-tone metal fills
+  gold: [
+    [0.68, 0.53, 0.27],
+    [0.3, 0.27, 0.18],
+    [1, 1, 1],
+    [0, 0, 0],
+  ],
+  silver: [
+    [0.47, 0.48, 0.5],
+    [0.43, 0.43, 0.43],
+    [1, 1, 1],
+    [0, 0, 0],
+  ],
+  copper: [
+    [0.53, 0.49, 0.38],
+    [0.33, -0.01, -0.08],
+    [1, 1, 1],
+    [0, 0, 0],
+  ],
 }
 
 const cosine = ([a, b, c, d]: [Vec3, Vec3, Vec3, Vec3], t: number): Vec3 =>

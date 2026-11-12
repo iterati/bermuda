@@ -373,6 +373,15 @@ describe('the built-in looks', () => {
       }
   })
 
+  // a stepped field that moved would hop whole cells from one colour to the next: a blink
+  it('hold every stepped palette field still: no modulator moves its knobs', () => {
+    const stepped = LOOKS.filter((l) => l.palette.field?.steps)
+    expect(stepped.map((l) => l.name)).toContain('Deco - Fan bond in four')
+    for (const look of stepped)
+      for (const m of look.modulators)
+        for (const { knob } of m.targets) expect(knob, `${look.name}: ${m.id}`).not.toMatch(/^palette\.field\./)
+  })
+
   it('aim no macro at a linked level, which plays its leader knobs', () => {
     for (const look of LOOKS) {
       const at = new Map(knobsOf(look).map((k) => [k.address, k]))

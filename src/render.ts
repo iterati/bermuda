@@ -1,10 +1,11 @@
-// The renderer: compiles the one shader once, then each frame packs a live scene into its uniforms
-// and level rows and draws one full-screen triangle into whatever framebuffer is bound, over the whole canvas or a
-// smaller picture in its bottom-left corner.
+// The renderer: compiles the shader's three programs once (plain, fills, fills with metal), then each frame picks the
+// one the live scene's fills need, packs the scene into its uniforms and level rows and draws one full-screen triangle
+// into whatever framebuffer is bound, over the whole canvas or a smaller picture in its bottom-left corner.
 import {
   allLevels,
   BACKGROUNDS,
   CELLS,
+  FIELDS,
   LATTICES,
   LINES,
   MAX_LEVELS,
@@ -16,7 +17,7 @@ import {
   type Scene,
   type Shape,
 } from './scene'
-import { generateShader, ROW_TEXELS, VARIANT_TEXELS, VARY_TEXEL } from './shader'
+import { FILL_TEXEL, generateShader, ROW_TEXELS, VARIANT_TEXELS, VARY_TEXEL } from './shader'
 import type { Live } from './motion'
 
 const RAD = Math.PI / 180
@@ -74,7 +75,7 @@ export function packLevels(
     const row = start + i
     const at = (texel: number, ...values: number[]) => data.set(values, (row * ROW_TEXELS + texel) * 4)
     const next = list[list.indexOf(level) + 1]
-    const { affine, lattice, cell, colour, variants } = level
+    const { affine, lattice, cell, colour, variants, fill } = level
     at(0, level.weight.value, affine.scale.value, affine.turn.value * RAD, next ? rows.get(next)! : -1)
     at(1, affine.offset[0].value, affine.offset[1].value, lattice.e2[0].value, lattice.e2[1].value)
     const weights = VARIATIONS.map((kind) => variationWeight(level, kind))
@@ -109,6 +110,11 @@ export function packLevels(
       at(base + 4, s.round.value, s.twist.value * RAD, s.form?.value ?? 0, s.corner?.value ?? 0)
       at(base + 5, join.offset[0].value, join.offset[1].value, join.blend.value, 0)
     })
+    // a level without a fill draws its line alone
+    at(FILL_TEXEL, fill?.amount.value ?? 0, fill?.line.value ?? 1, fill?.tone.value ?? 0, fill?.bands.value ?? 0)
+    if (!fill) return
+    at(FILL_TEXEL + 1, fill.step.value, fill.metal.value, fill.light.value * RAD, fill.shade.value)
+    at(FILL_TEXEL + 2, fill.ramp.value, fill.alternate.value, fill.front ? 1 : 0, 0)
   })
   return data
 }
@@ -128,52 +134,57 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) ?? 'shader failed')
     return s
   }
-  const program = gl.createProgram()
-  gl.attachShader(
-    program,
-    compile(
-      gl.VERTEX_SHADER,
-      '#version 300 es\nvoid main() { gl_Position = vec4(vec2(gl_VertexID & 1, gl_VertexID >> 1) * 4. - 1., 0, 1); }',
-    ),
+  const vertex = compile(
+    gl.VERTEX_SHADER,
+    '#version 300 es\nvoid main() { gl_Position = vec4(vec2(gl_VertexID & 1, gl_VertexID >> 1) * 4. - 1., 0, 1); }',
   )
-  gl.attachShader(program, compile(gl.FRAGMENT_SHADER, generateShader()))
-  gl.linkProgram(program)
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program) ?? 'link failed')
-  gl.useProgram(program)
-  const u = (name: string) => gl.getUniformLocation(program, name)
-  const loc = {
-    res: u('uRes'),
-    frame: u('uFrame'),
-    levels: u('uLevels'),
-    depth: u('uDepth'),
-    contour: u('uContour'),
-    radial: u('uRadial'),
-    line: u('uLine'),
-    falloff: u('uFalloff'),
-    dots: u('uDots'),
-    crawl: u('uCrawl'),
-    stopCount: u('uStopCount'),
-    stops: u('uStops'),
-    stopMix: u('uStopMix'),
-    palette: u('uPalette'),
-    trap: u('uTrap'),
-    composite: u('uComposite'),
-    bg: u('uBg'),
-    bgSoak: u('uBgSoak'),
-    aa: u('uAA'),
-    gamma: u('uGamma'),
-    toward: u('uToward'),
-    towardRings: u('uTowardRings'),
-    towardMix: u('uTowardMix'),
-    cross: u('uCross'),
-  }
+  // plain, fills, and fills with metal, each with its own uniforms
+  const programs = ([[], ['FILL'], ['METAL']] as const).map((defs) => {
+    const program = gl.createProgram()
+    gl.attachShader(program, vertex)
+    gl.attachShader(program, compile(gl.FRAGMENT_SHADER, generateShader(defs)))
+    gl.linkProgram(program)
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS))
+      throw new Error(gl.getProgramInfoLog(program) ?? 'link failed')
+    const u = (name: string) => gl.getUniformLocation(program, name)
+    const loc = {
+      res: u('uRes'),
+      frame: u('uFrame'),
+      levels: u('uLevels'),
+      depth: u('uDepth'),
+      contour: u('uContour'),
+      radial: u('uRadial'),
+      line: u('uLine'),
+      falloff: u('uFalloff'),
+      dots: u('uDots'),
+      crawl: u('uCrawl'),
+      stopCount: u('uStopCount'),
+      stops: u('uStops'),
+      stopMix: u('uStopMix'),
+      palette: u('uPalette'),
+      trap: u('uTrap'),
+      composite: u('uComposite'),
+      bg: u('uBg'),
+      bgSoak: u('uBgSoak'),
+      aa: u('uAA'),
+      gamma: u('uGamma'),
+      toward: u('uToward'),
+      towardRings: u('uTowardRings'),
+      towardMix: u('uTowardMix'),
+      field: u('uField'),
+      fieldC: u('uFieldC'),
+      cross: u('uCross'),
+    }
+    gl.useProgram(program)
+    gl.uniform1i(loc.levels, 0)
+    return { program, loc }
+  })
   const texture = gl.createTexture()
   gl.activeTexture(gl.TEXTURE0)
   gl.bindTexture(gl.TEXTURE_2D, texture)
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, ROW_TEXELS, MAX_LEVELS, 0, gl.RGBA, gl.FLOAT, null)
-  gl.uniform1i(loc.levels, 0)
   gl.bindVertexArray(gl.createVertexArray())
 
   const draw: Renderer['draw'] = (scene, live, toward, [width, height] = [canvas.width, canvas.height]) => {
@@ -192,6 +203,13 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
       at: 0,
     }
     const mixed = (a: boolean, b: boolean) => Number(a) * (1 - far.at) + Number(b) * far.at
+    // the program the fills need: metal where a level paints metal, fills where one paints at all, else plain (a
+    // morph's scene holds both ends' fills)
+    const fills = allLevels(scene.levels).flatMap(({ level }) =>
+      level.fill && level.fill.amount.value > 0 ? [level.fill] : [],
+    )
+    const { program, loc } = programs[fills.some((f) => f.metal.value > 0) ? 2 : fills.length ? 1 : 0]
+    gl.useProgram(program)
     gl.viewport(0, 0, width, height)
     gl.uniform2f(loc.res, width, height)
     gl.uniform4f(loc.frame, frame.origin[0].value, frame.origin[1].value, frame.zoom.value, frame.turn.value * RAD)
@@ -237,6 +255,16 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     )
     gl.uniform4f(loc.palette, palette.hue.value * RAD, palette.contrast.value, palette.radius.value, live.colour)
     gl.uniform2f(loc.trap, palette.trap?.weight.value ?? 0, palette.trap?.size.value ?? 0)
+    // no field: radial round the plane's centre at depth 0, which the radius reads as before and shifts nothing
+    const fl = palette.field
+    gl.uniform4f(
+      loc.field,
+      fl ? FIELDS.indexOf(fl.kind) : 0,
+      (fl?.angle.value ?? 0) * RAD,
+      fl?.scale.value ?? 0,
+      fl?.depth.value ?? 0,
+    )
+    gl.uniform4f(loc.fieldC, fl?.centre[0].value ?? 0, fl?.centre[1].value ?? 0, fl?.steps ?? 0, fl?.atCells ? 1 : 0)
     gl.uniform1f(loc.composite, mixed(scene.composite === 'first', far.composite === 'first'))
     gl.uniform4f(loc.toward, LINES.indexOf(far.line), far.at, far.drift, far.colour)
     gl.uniform2f(loc.towardRings, ...far.rings)

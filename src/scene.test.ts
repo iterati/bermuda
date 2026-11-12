@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { background, BANK, join, level, LOOKS, mod, scene, shape, star } from './looks'
+import { background, BANK, fill, join, level, LOOKS, mod, scene, shape, star } from './looks'
 import { capturePreset } from './motion'
 import {
   BACKGROUNDS,
   CELLS,
   chipKnobs,
+  fielded,
+  FIELDS,
   folded,
   FEATURES,
   FORMLESS,
@@ -25,9 +27,18 @@ import {
   VARIATIONS,
   type Bank,
   type Fader,
+  type Fill,
   type Scene,
 } from './scene'
 
+// a colour field at its + colour field values
+const field = (): NonNullable<Scene['palette']['field']> => ({
+  kind: 'radial',
+  angle: { value: 0 },
+  centre: [{ value: 0 }, { value: 0 }],
+  scale: { value: 1 },
+  depth: { value: 0.25 },
+})
 const broken = (fn: (s: Record<string, unknown> & Scene) => void) => {
   const s = structuredClone(LOOKS[0]) as Record<string, unknown> & Scene
   fn(s)
@@ -94,6 +105,37 @@ describe('a scene as JSON', () => {
     })
     expect(parseScene(JSON.stringify(look))).toEqual(look)
     expect(resolve(look, 'palette.trap.size')?.value).toBe(0.2)
+  })
+
+  // flat with a ramp, bands, metal and outline over a fill, in front order on a spilled brick lattice
+  it('round-trips a fill of each mode with front order, and a palette field of each kind with steps and at cells', () => {
+    const modes = [
+      fill({ ramp: 0.2 }),
+      fill({ bands: { value: 8, play: [4, 12] }, step: 0.25, front: true }),
+      fill({ bands: 10, step: 0.08, metal: 1, shade: 0.45, light: 115 }),
+      fill({ line: 1, tone: 0.5, alternate: -0.3 }),
+    ]
+    for (const kind of FIELDS) {
+      const look = scene({
+        name: kind,
+        levels: modes.map((f, i) =>
+          level(`l${i}`, { lattice: 'brick', e2: [0.5, 0.5], spill: 1, shape: star(6, 2, 0.5), fill: f }),
+        ),
+        field: {
+          kind,
+          angle: { value: 25 },
+          centre: [{ value: 1.2 }, { value: -0.4 }],
+          scale: { value: 0.7 },
+          depth: { value: 0.5, spread: 0.1 },
+          steps: 4,
+          atCells: true,
+        },
+        modulators: [mod('sun', 'cos', 32, [['levels[l2].fill.light', 40]])],
+      })
+      expect(parseScene(JSON.stringify(look))).toEqual(look)
+      expect(resolve(look, 'levels[l1].fill.bands')?.value).toBe(8)
+      expect(kindOf('palette.field.centre[1]')).toBe('palette.field.centre[1]')
+    }
   })
 
   it('names every knob by a path through level ids, sub-chains included', () => {
@@ -210,6 +252,54 @@ describe('the knob kinds', () => {
       'background.turn',
     ])
     expect(showing('soak')).toEqual(at.filter((a) => a !== 'background.turn'))
+  })
+
+  it("shows the fill's knobs once fill can rise, step once bands can, light and shade once metal can", () => {
+    const at = ['amount', 'line', 'tone', 'bands', 'step', 'metal', 'light', 'shade', 'ramp', 'alternate']
+    const showing = (o: Parameters<typeof fill>[0], more: Partial<Parameters<typeof scene>[0]> = {}) =>
+      at.filter((k) =>
+        shows(scene({ name: 'f', levels: [level('a', { fill: fill(o) })], ...more }), `levels[a].fill.${k}`),
+      )
+    expect(showing({ amount: 0 })).toEqual(['amount', 'line'])
+    expect(showing({})).toEqual(['amount', 'line', 'tone', 'bands', 'metal', 'ramp', 'alternate'])
+    expect(showing({ amount: { value: 0, spread: 1 }, bands: 4 })).toContain('step')
+    expect(showing({ amount: { value: 0, play: [0, 1] }, metal: 1 })).toEqual(at.filter((k) => k !== 'step'))
+    const driven = (knob: string) => [mod('m', 'cos', 8, [[`levels[a].fill.${knob}`, 1]])]
+    expect(showing({ amount: 0 }, { modulators: driven('amount') })).toContain('tone')
+    const macros = [{ id: 'x', name: 'x', value: 0, targets: [{ knob: 'levels[a].fill.metal', from: 0, to: 1 }] }]
+    expect(showing({}, { macros })).toEqual(at.filter((k) => k !== 'step'))
+    expect(showing({ bands: 0 }, { modulators: driven('bands') })).toContain('step')
+  })
+
+  it("shows the field's kind and centre once depth or radius can move, its angle on linear and its scale on noise", () => {
+    const at = ['depth', 'centre[0]', 'centre[1]', 'angle', 'scale'].map((k) => `palette.field.${k}`)
+    const showing = (kind: (typeof FIELDS)[number], depth: number, more: Partial<Parameters<typeof scene>[0]> = {}) => {
+      const s = scene({
+        name: kind,
+        levels: [level('a')],
+        radius: 0,
+        field: {
+          kind,
+          angle: { value: 0 },
+          centre: [{ value: 0 }, { value: 0 }],
+          scale: { value: 1 },
+          depth: { value: depth },
+        },
+        ...more,
+      })
+      return [fielded(s), ...at.filter((a) => shows(s, a))]
+    }
+    expect(showing('radial', 0)).toEqual([false, 'palette.field.depth'])
+    expect(showing('radial', -0.25)).toEqual([true, ...at.slice(0, 3)])
+    expect(showing('radial', 0, { radius: 0.4 })).toEqual([true, ...at.slice(0, 3)])
+    expect(showing('linear', 0.25)).toEqual([true, ...at.slice(0, 4)])
+    expect(showing('noise', 0.25)).toEqual([true, ...at.slice(0, 3), 'palette.field.scale'])
+    expect(showing('noise', 0, { modulators: [mod('m', 'cos', 8, [['palette.field.depth', 0.2]])] })).toEqual([
+      true,
+      ...at.slice(0, 3),
+      'palette.field.scale',
+    ])
+    expect(showing('linear', 0, { radius: { value: 0, play: [-0.5, 0] } })).toEqual([true, ...at.slice(0, 4)])
   })
 
   it('shows the dots knobs only on a dotted line, though they stay when the kind moves on', () => {
@@ -636,6 +726,44 @@ describe('the parse refuses a broken scene, naming its field', () => {
       /^levels\[0\]\.id: line names a fixed part/,
     ],
     ['stops out of order', broken((s) => (s.palette.stops[1].at = 0)), /^palette\.stops\[1\]\.at: must be above/],
+    [
+      'a fill with too many bands',
+      broken((s) => (s.levels[0].fill = fill({ bands: 49 }))),
+      /^levels\[sq1\]\.fill\.bands\.value: 49 is outside 0 to 48/,
+    ],
+    [
+      'a fill with front false',
+      broken((s) => (s.levels[0].fill = { ...fill(), front: false as unknown as true })),
+      /^levels\[sq1\]\.fill\.front: must be true when given/,
+    ],
+    [
+      'a fill missing a knob',
+      broken((s) => {
+        s.levels[0].fill = fill()
+        delete (s.levels[0].fill as Partial<Fill>).ramp
+      }),
+      /^levels\[sq1\]\.fill\.ramp: is missing/,
+    ],
+    [
+      'a colour field of an unknown kind',
+      broken((s) => (s.palette.field = { ...field(), kind: 'spiral' as 'radial' })),
+      /^palette\.field\.kind: must be one of radial, linear, noise/,
+    ],
+    [
+      'a colour field in fractional steps',
+      broken((s) => (s.palette.field = { ...field(), steps: 1.5 })),
+      /^palette\.field\.steps: must be a whole number/,
+    ],
+    [
+      'a colour field in too many steps',
+      broken((s) => (s.palette.field = { ...field(), steps: 17 })),
+      /^palette\.field\.steps: 17 is outside 1 to 16/,
+    ],
+    [
+      'a colour field at cells false',
+      broken((s) => (s.palette.field = { ...field(), atCells: false as unknown as true })),
+      /^palette\.field\.atCells: must be true when given/,
+    ],
     ['a NaN', broken((s) => (s.post.gamma.value = NaN)), /^post\.gamma\.value: must be a finite number/],
     [
       'a shape of no kind',

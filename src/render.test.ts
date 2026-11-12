@@ -6,7 +6,9 @@
 // and dots fade from one count to the next and crawl. The Decks' three pictures, each drawn at its own size in the
 // canvas's corner, are finite and not blank. A background of each kind draws under the lines, and at amount 0 draws as none. Every
 // variation warps finite and not blank, ring and mirror draw as none where they have nothing to do, and the orbit
-// trap draws as none at weight 0.
+// trap draws as none at weight 0. Each fill mode draws on every lattice, at fill 0 as none, in front order from one
+// cell, over the background and under the lines; a palette field at depth 0 draws as none, each kind recolours, and
+// one stepped at cells gives each fan one colour pair.
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
@@ -14,7 +16,7 @@ import { build, type Rollup } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { findLevel, removeLevel, setLattice } from './edit'
 import { snapLoop } from './loop'
-import { background, BANK, join, level, LOOKS, scene, shape, star } from './looks'
+import { background, BANK, fill, join, level, LOOKS, scene, shape, star } from './looks'
 import { morph, smooth } from './morph'
 import { advance, applyPreset, newLive, update, type Live } from './motion'
 import { bend, bendOf, entryScene, step, tangent, valuesOf, type Keyframe } from './play'
@@ -22,11 +24,14 @@ import type { Toward } from './render'
 import {
   BACKGROUNDS,
   CELLS,
+  FIELDS,
   LATTICES,
   SHAPES,
   SPILLS,
   VARIATIONS,
   type Edge,
+  type Field,
+  type Fill,
   type Scene,
   type ShapeKind,
   type VariationKind,
@@ -111,6 +116,8 @@ function stats(px: number[]) {
   return { finite, mean, spread: Math.sqrt(Math.max(0, sq / n - mean * mean)) }
 }
 
+const dot = (x: number[], y: number[]) => x.reduce((s, v, i) => s + v * y[i], 0)
+const dist = (x: number[], y: number[]) => Math.hypot(...x.map((v, i) => v - y[i]))
 const furthest = (x: number[], y: number[]) => x.reduce((most, v, i) => Math.max(most, Math.abs(v - y[i])), 0)
 const look = (name: string) => LOOKS.find((l) => l.name.startsWith(name))!
 const preset = (name: string, p: string) =>
@@ -128,11 +135,24 @@ function morphAt(a: Scene, b: Scene, x: number, edge: Edge, t: number) {
 
 // the first draw compiles the shader's software code, slow while another browser test runs beside it
 describe('the one shader', { timeout: 30_000 }, () => {
-  it('compiles and links', async () => {
+  // createRenderer compiles and links all three programs, and the first draw of each builds its software code: 40 s
+  // the three, metal's the longest
+  it('compiles and links', { timeout: 90_000 }, async () => {
     const ok = await page.evaluate(
       () => !!(window.renderer ??= window.Bermuda.createRenderer(document.querySelector('canvas')!)),
     )
     expect(ok).toBe(true)
+    const lines = look('Tapestry 7 ')
+    const filled = (f: Parameters<typeof fill>[0]) => update(lines, (d) => d.levels.forEach((l) => (l.fill = fill(f))))
+    for (const [name, s] of [
+      ['plain', lines],
+      ['fills', filled({ bands: 4 })],
+      ['metal', filled({ metal: 1 })],
+    ] as const) {
+      const { finite, mean } = await shoot(s, newLive())
+      expect(finite, name).toBe(true)
+      expect(mean, name).toBeGreaterThan(0.01)
+    }
   })
 
   const cases = LOOKS.flatMap((look) => [
@@ -527,5 +547,209 @@ describe('the cells, colour and variations', () => {
     })
     expect(furthest(await drawn(trap(0)), none)).toBeLessThan(1e-4)
     expect(furthest(await drawn(trap(2)), none)).toBeGreaterThan(0.1)
+  })
+})
+
+describe('fills', () => {
+  const still = { drift: 0, colour: 0, crawl: 0 }
+  const drawn = (s: Scene) => pixels(advance(s, newLive(), 0, 60), still)
+  const modes: [string, Fill][] = [
+    ['flat with ramp', fill({ ramp: 0.3 })],
+    ['bands', fill({ bands: 6, step: 0.2 })],
+    ['metal', fill({ bands: 6, step: 0.1, metal: 1 })],
+    ['outline over a fill', fill({ line: 1, tone: 0.3 })],
+  ]
+  const lines = scene({
+    name: 'lines',
+    levels: [level('a', { scale: 1.3, turn: 20, shape: star(6, 2.5, 0.4), at: 0, speed: 1, cellSpread: 0.3 })],
+    rings: 2,
+    radius: 0,
+    width: 0.004,
+  })
+  const filled = (s: Scene, f: Fill) => update(s, (d) => (d.levels[0].fill = structuredClone(f)))
+
+  it.each(LATTICES)('draws each fill mode on a %s lattice finite and not blank', async (kind) => {
+    const base = update(lines, (d) => setLattice(d, 'a', kind))
+    for (const [name, f] of modes) {
+      const { finite, mean, spread } = stats(await drawn(filled(base, f)))
+      expect(finite, name).toBe(true)
+      expect(mean, name).toBeGreaterThan(0.01)
+      expect(spread, name).toBeGreaterThan(0.01)
+    }
+  })
+
+  it('at fill 0 draws a level as without the chip, alone and beside a filled level', async () => {
+    const off = fill({ amount: 0, line: 1, bands: 6, metal: 1 })
+    expect(furthest(await drawn(filled(lines, off)), await drawn(lines))).toBe(0)
+    // a second, filled level runs the fills program over both
+    const pair = update(lines, (d) =>
+      d.levels.push(level('b', { scale: 1.7, shape: star(5, 2, 0.4), at: 0.5, speed: 1, fill: fill({ bands: 4 }) })),
+    )
+    expect(furthest(await drawn(filled(pair, off)), await drawn(pair))).toBeLessThan(1e-4)
+  })
+
+  it("front order paints each covered pixel from one cell, the lowest row's then the leftmost's", async () => {
+    // brick circles that overlap their neighbours in the rows beside them and along their own, each cell its own
+    // colour, painted flat with no line
+    const [scale, r, margin] = [2, 0.7, 0.08]
+    const circles = (front: boolean) =>
+      scene({
+        name: 'circles',
+        levels: [
+          level('c', {
+            scale,
+            lattice: 'brick',
+            e2: [0.5, 0.5],
+            spill: 1,
+            shape: star(6, 2, r, { round: 1 }),
+            at: 0,
+            speed: 1,
+            cellSpread: 1,
+            fill: fill(front ? { front: true } : {}),
+          }),
+        ],
+        radius: 0,
+      })
+    // the cell in front at each pixel by the brick's centres, or none within the margin of a circle's edge
+    const fronts = Array.from({ length: 160 * 90 }, (_, i) => {
+      const q = [((((i % 160) + 0.5) * 2 - 160) / 90) * scale, (((Math.floor(i / 160) + 0.5) * 2 - 90) / 90) * scale]
+      let best: [number, number] | undefined
+      for (let b = Math.floor(q[1] / 0.5) - 3; b <= Math.floor(q[1] / 0.5) + 3; b++)
+        for (let a = Math.floor(q[0]) - 3; a <= Math.floor(q[0]) + 3; a++) {
+          const d = Math.hypot(q[0] - a - (b & 1) * 0.5, q[1] - b * 0.5) - r
+          if (Math.abs(d) < margin) return undefined
+          if (d < 0 && (!best || b < best[1] || (b === best[1] && a < best[0]))) best = [a, b]
+        }
+      return best && best.join()
+    })
+    const groups = (px: number[]) => {
+      const by = new Map<string, number[][]>()
+      fronts.forEach((id, i) => id && by.set(id, [...(by.get(id) ?? []), px.slice(i * 4, i * 4 + 3)]))
+      return [...by.values()].filter((g) => g.length >= 4)
+    }
+    const spread = (g: number[][]) => Math.max(...g.map((c) => furthest(c, g[0])))
+    const inFront = groups(await drawn(circles(true)))
+    expect(inFront.length).toBeGreaterThan(20)
+    expect(Math.max(...inFront.map(spread))).toBeLessThan(1e-3)
+    expect(new Set(inFront.map((g) => g[0].map((v) => v.toFixed(2)).join())).size).toBeGreaterThan(10)
+    // without front order a cell paints over the overlaps it holds, so some of them wear another's colour
+    expect(Math.max(...groups(await drawn(circles(false))).map(spread))).toBeGreaterThan(0.05)
+  })
+
+  it.each(modes)('a morph from lines into %s lands on A and B exactly at its ends', async (_, f) => {
+    const edge: Edge = { seconds: 2, stagger: 0.4, deepFirst: false }
+    for (const [x, end] of [
+      [0, 'a'],
+      [1, 'b'],
+    ] as const) {
+      const m = morphAt(lines, filled(lines, f), x, edge, 7.3)
+      const [s, live] = end === 'a' ? [m.sa, m.la] : [m.sb, m.lb]
+      expect(furthest(await pixels(m.scene, m.la, m.toward), await pixels(s, live)), `at ${x}`).toBeLessThan(1e-4)
+    }
+  })
+
+  it('paints over the background, under the lines', async () => {
+    // at gamma 1 the lines add over the paint as they add over the background: the paint changes only the ground
+    const ground = { ...lines, background: background('flat'), post: { ...lines.post, gamma: { value: 1 } } }
+    const [painted, paintedLines, bare, bareLines] = await Promise.all([
+      drawn(filled(ground, fill())),
+      drawn(filled(ground, fill({ line: 1 }))),
+      drawn(filled(ground, fill({ amount: 0, line: 0 }))),
+      drawn(ground),
+    ])
+    const sub = (x: number[], y: number[]) => x.map((v, i) => v - y[i])
+    expect(furthest(painted, bare)).toBeGreaterThan(0.1)
+    expect(furthest(sub(bareLines, bare), Array(bare.length).fill(0))).toBeGreaterThan(0.1)
+    expect(furthest(sub(paintedLines, painted), sub(bareLines, bare))).toBeLessThan(1e-4)
+  })
+})
+
+describe('a palette field', () => {
+  const still = { drift: 0, colour: 0, crawl: 0 }
+  const drawn = (s: Scene) => pixels(advance(s, newLive(), 0, 60), still)
+  const fielded = (s: Scene, f: Partial<Field>) =>
+    update(s, (d) => {
+      d.palette.field = {
+        kind: 'radial',
+        angle: { value: 30 },
+        centre: [{ value: 0 }, { value: 0 }],
+        scale: { value: 1 },
+        depth: { value: 0.25 },
+        ...f,
+      }
+    })
+
+  it('a radial field at centre 0, 0 and depth 0 draws as none', async () => {
+    const t7 = look('Tapestry 7 ')
+    expect(furthest(await drawn(fielded(t7, { depth: { value: 0 } })), await drawn(t7))).toBeLessThan(1e-4)
+  })
+
+  it('each field kind recolours Tapestry 7 at depth 0.25, and an off-centre radial field differs from the centred one', async () => {
+    const t7 = look('Tapestry 7 ')
+    const none = await drawn(t7)
+    for (const kind of FIELDS) expect(furthest(await drawn(fielded(t7, { kind })), none), kind).toBeGreaterThan(0.05)
+    const off = fielded(t7, { centre: [{ value: 0.6 }, { value: -0.3 }] })
+    expect(furthest(await drawn(off), await drawn(fielded(t7, {})))).toBeGreaterThan(0.05)
+  })
+
+  it('a stepped field at cells gives each fan of Deco - Fan bond in four one colour pair', async () => {
+    // held still, the fans upper half discs on the brick's centres, the lowest row's then the leftmost's in front
+    const four = { ...look('Deco - Fan bond in four'), modulators: [], macros: [] }
+    const { zoom } = four.frame
+    const { scale } = four.levels[0].affine
+    const [r, margin] = [0.5, 0.08]
+    const fronts = Array.from({ length: 160 * 90 }, (_, i) => {
+      const s = scale.value / zoom.value
+      const q = [((((i % 160) + 0.5) * 2 - 160) / 90) * s, (((Math.floor(i / 160) + 0.5) * 2 - 90) / 90) * s]
+      let best: [number, number] | undefined
+      for (let b = Math.floor(q[1] / 0.5) - 3; b <= Math.floor(q[1] / 0.5) + 3; b++)
+        for (let a = Math.floor(q[0]) - 3; a <= Math.floor(q[0]) + 3; a++) {
+          const [x, y] = [q[0] - a - (b & 1) * 0.5, q[1] - b * 0.5]
+          const d = Math.max(Math.hypot(x, y) - r, -y)
+          if (Math.abs(d) < margin) return undefined
+          if (d < 0 && (!best || b < best[1] || (b === best[1] && a < best[0]))) best = [a, b]
+        }
+      return best && best.join()
+    })
+    // how far the colours of the fan furthest from one pair stray from the line between its pair: at gamma 1 a band's
+    // edge blends the pair along it, and nothing else does
+    const stray = (px: number[]) => {
+      const by = new Map<string, number[][]>()
+      fronts.forEach((id, i) => id && by.set(id, [...(by.get(id) ?? []), px.slice(i * 4, i * 4 + 3)]))
+      return Math.max(
+        ...[...by.values()]
+          .filter((fan) => fan.length >= 20)
+          .map((fan) => {
+            const far = (from: number[]) => fan.reduce((x, c) => (dist(c, from) > dist(x, from) ? c : x))
+            const a = far(fan[0])
+            const b = far(a)
+            const ab = b.map((v, i) => v - a[i])
+            const ll = Math.max(dot(ab, ab), 1e-12)
+            return Math.max(
+              ...fan.map((c) => {
+                const t = Math.min(
+                  1,
+                  Math.max(
+                    0,
+                    dot(
+                      c.map((v, i) => v - a[i]),
+                      ab,
+                    ) / ll,
+                  ),
+                )
+                return dist(
+                  c,
+                  a.map((v, i) => v + t * ab[i]),
+                )
+              }),
+            )
+          }),
+      )
+    }
+    expect(four.post.gamma.value).toBe(1)
+    expect(stray(await drawn(four))).toBeLessThan(0.01)
+    // read at each pixel instead, the steps cut across the fans
+    const loose = update(four, (d) => delete d.palette.field!.atCells)
+    expect(stray(await drawn(loose))).toBeGreaterThan(0.1)
   })
 })

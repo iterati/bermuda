@@ -17,9 +17,13 @@ import {
 import { dice } from '../motion'
 import {
   BACKGROUNDS,
+  canMove,
   CELLS,
   chipKnobs,
   clamp,
+  FIELD_STEPS,
+  fielded,
+  FIELDS,
   folded,
   hardRange,
   LATTICES,
@@ -471,6 +475,106 @@ function PaletteSection() {
           + orbit trap
         </button>
       )}
+      {scene.palette.field ? (
+        <Row
+          title="colour field"
+          knobs={[
+            ['depth', 'palette.field.depth'],
+            ['centre x', 'palette.field.centre[0]'],
+            ['centre y', 'palette.field.centre[1]'],
+            ['angle', 'palette.field.angle'],
+            ['scale', 'palette.field.scale'],
+          ]}
+        >
+          {fielded(scene) && (
+            <Choice
+              label="kind"
+              value={scene.palette.field.kind}
+              options={FIELDS}
+              onChange={(v) => edit((d) => (d.palette.field!.kind = v))}
+            />
+          )}
+          {canMove(scene, 'palette.field.depth', true) && (
+            <>
+              {scene.palette.field.steps === undefined ? (
+                <button
+                  className="mini"
+                  title="shift the colours in whole steps, so a two-tone metal pair hops to another pair and never blends to mud"
+                  onClick={() => edit((d) => (d.palette.field!.steps = 4))}
+                >
+                  + steps
+                </button>
+              ) : (
+                <span
+                  className="pair"
+                  title="the shift in whole steps of 1/steps round the palette; a stepped field holds still, moved only by a morph or a preset"
+                >
+                  <Stepper
+                    label="steps"
+                    value={scene.palette.field.steps}
+                    range={FIELD_STEPS}
+                    onChange={(n) => edit((d) => (d.palette.field!.steps = n))}
+                  />
+                  <button
+                    className="mini"
+                    title="drop the steps: a smooth shift"
+                    onClick={() => edit((d) => delete d.palette.field!.steps)}
+                  >
+                    ×
+                  </button>
+                </span>
+              )}
+              <label
+                className="check"
+                title="read the field at the middle of each first-level cell, so a shape takes one colour"
+              >
+                <input
+                  type="checkbox"
+                  checked={!!scene.palette.field.atCells}
+                  onChange={(e) =>
+                    edit((d) => {
+                      if (e.target.checked) d.palette.field!.atCells = true
+                      else delete d.palette.field!.atCells
+                    })
+                  }
+                />
+                at cells
+              </label>
+            </>
+          )}
+          <button
+            className="mini"
+            title="drop the colour field"
+            onClick={() =>
+              edit((d) => {
+                delete d.palette.field
+                prune(d)
+              })
+            }
+          >
+            ×
+          </button>
+        </Row>
+      ) : (
+        <button
+          className="mini"
+          title="a colour field: the index starts from it by the radius, and its depth shifts every colour, radial round a centre, a linear sweep or a noise wash"
+          onClick={() =>
+            edit(
+              (d) =>
+                (d.palette.field = {
+                  kind: 'radial',
+                  angle: { value: 0 },
+                  centre: [{ value: 0 }, { value: 0 }],
+                  scale: { value: 1 },
+                  depth: { value: 0.25 },
+                }),
+            )
+          }
+        >
+          + colour field
+        </button>
+      )}
       <div className="stops">
         {stops.map((s, i) => (
           <div className="stop" key={i}>
@@ -854,6 +958,82 @@ function LevelSection({ id }: { id: string }) {
           ['cell spread', `${at}.colour.cellSpread`],
         ]}
       />
+      {level.fill ? (
+        <Row
+          title="fill"
+          knobs={[
+            ['fill', `${at}.fill.amount`],
+            ['line', `${at}.fill.line`],
+            ['tone', `${at}.fill.tone`],
+            ['bands', `${at}.fill.bands`],
+            ['step', `${at}.fill.step`],
+            ['metal', `${at}.fill.metal`],
+            ['light', `${at}.fill.light`],
+            ['shade', `${at}.fill.shade`],
+            ['ramp', `${at}.fill.ramp`],
+            ['alternate', `${at}.fill.alternate`],
+          ]}
+        >
+          {level.cell.spill && (
+            <label
+              className="check"
+              title="front order: where shapes overlap, the lowest row's paint lies in front, then the leftmost's"
+            >
+              <input
+                type="checkbox"
+                checked={!!level.fill.front}
+                onChange={(e) =>
+                  edit((d) => {
+                    const { fill } = findLevel(d, id).level
+                    if (e.target.checked) fill!.front = true
+                    else delete fill!.front
+                  })
+                }
+              />
+              front
+            </label>
+          )}
+          <button
+            className="mini"
+            title="drop the fill"
+            onClick={() =>
+              edit((d) => {
+                delete findLevel(d, id).level.fill
+                prune(d)
+              })
+            }
+          >
+            ×
+          </button>
+        </Row>
+      ) : (
+        <div className="row">
+          <span className="row-title">fill</span>
+          <button
+            className="mini"
+            title="paint this level's shapes under the lines: flat, in bands or two-tone metal"
+            onClick={() =>
+              edit(
+                (d) =>
+                  (findLevel(d, id).level.fill = {
+                    amount: { value: 1 },
+                    line: { value: 1 },
+                    tone: { value: 0 },
+                    bands: { value: 0 },
+                    step: { value: 0 },
+                    metal: { value: 0 },
+                    light: { value: 135 },
+                    shade: { value: 0.5 },
+                    ramp: { value: 0 },
+                    alternate: { value: 0 },
+                  }),
+              )
+            }
+          >
+            + fill
+          </button>
+        </div>
+      )}
     </Group>
   )
 }
@@ -879,6 +1059,7 @@ const FORM: Partial<Record<ShapeKind, string>> = {
   circleWave: 'depth',
   segment: 'thickness',
   stairs: 'steepness',
+  ziggurat: 'steepness',
 }
 
 // A shape's knobs: the star's m, a kind's form, its size, round and twist.
@@ -894,8 +1075,8 @@ function shapeKnobs(at: Address, shape: Shape): [string, Address][] {
   ]
 }
 
-// A shape's menus: its kind, the star's points (the stairs' steps) and its corner; change edits the shape on a
-// draft, then prunes what pointed at a knob it dropped.
+// A shape's menus: its kind, the star's points (the stairs' and the ziggurat's steps) and its corner; change edits
+// the shape on a draft, then prunes what pointed at a knob it dropped.
 function ShapeMenus({ at, shape, change }: { at: Address; shape: Shape; change: (fn: (s: Shape) => void) => void }) {
   const kind = shape.kind ?? 'star'
   return (
@@ -913,7 +1094,7 @@ function ShapeMenus({ at, shape, change }: { at: Address; shape: Shape; change: 
           })
         }
       />
-      {(kind === 'star' || kind === 'stairs') && (
+      {(kind === 'star' || kind === 'stairs' || kind === 'ziggurat') && (
         <Stepper
           label={kind === 'star' ? 'points' : 'steps'}
           value={shape.n}

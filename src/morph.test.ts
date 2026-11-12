@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { paletteAt } from './colour'
-import { background, join, level, LOOKS, scene, shape, star } from './looks'
+import { background, fill, join, level, LOOKS, scene, shape, star } from './looks'
 import { depthWindow, morph, smooth } from './morph'
 import type { Edge, Scene } from './scene'
 
@@ -100,6 +100,35 @@ describe('the morph', () => {
     expect(none.line.dots).toBeUndefined()
   })
 
+  it('grows a fill one side lacks from fill 0 and line 1, and swaps front inside a dip of its spill', () => {
+    const lines = scene({ name: 'a', levels: [level('s', { spill: 1 })] })
+    const metal = fill({ bands: 10, step: 0.08, metal: 1, shade: 0.42, light: 115, ramp: 0.2 })
+    const filled = scene({ name: 'b', levels: [level('s', { spill: 1, fill: metal })] })
+    expect(at(lines, filled, 0.25).levels[0].fill).toEqual({
+      amount: { value: 0.25 },
+      line: { value: 0.75 },
+      tone: { value: 0 },
+      bands: { value: 2.5 },
+      step: { value: 0.02 },
+      metal: { value: 0.25 },
+      light: { value: 115 },
+      shade: { value: 0.42 },
+      ramp: { value: 0.05 },
+      alternate: { value: 0 },
+    })
+    expect(at(filled, lines, 1).levels[0].fill).toMatchObject({ amount: { value: 0 }, line: { value: 1 } })
+    expect(at(lines, lines, 0.5).levels[0].fill).toBeUndefined()
+    const front = scene({ name: 'c', levels: [level('s', { spill: 1, fill: fill({ amount: 0.8, front: true }) })] })
+    const flat = scene({ name: 'd', levels: [level('s', { spill: 1, fill: fill({ amount: 0.8 }) })] })
+    expect(at(flat, front, 0.49).levels[0].fill!.front).toBeUndefined()
+    // the paint stays: a lone level's picture never goes, only its overlaps fold back into each cell's own shape
+    expect(at(flat, front, 0.5).levels[0]).toMatchObject({ fill: { front: true, amount: { value: 0.8 } } })
+    expect(at(flat, front, 0.5).levels[0].cell.spill!.value).toBe(0)
+    expect(at(flat, front, 0.2).levels[0].cell.spill!.value).toBeGreaterThan(0)
+    expect(at(flat, front, 1).levels[0]).toEqual(front.levels[0])
+    expect(at(front, front, 0.5).levels[0].cell.spill!.value).toBe(1)
+  })
+
   it('drops spill where the lattice swaps into one that cannot spill', () => {
     const a = scene({ name: 'a', levels: [level('s', { spill: 1 })] })
     const b = scene({ name: 'b', levels: [level('s', { lattice: 'polar', sectors: 6 })] })
@@ -134,6 +163,51 @@ describe('the morph', () => {
     expect(at(a, b, 0.25).palette.trap).toEqual({ weight: { value: 0.5 }, size: { value: 0.3 } })
     expect(at(b, a, 0.25).palette.trap).toEqual({ weight: { value: 1.5 }, size: { value: 0.3 } })
     expect(at(a, a, 0.5).palette.trap).toBeUndefined()
+  })
+
+  it('grows a palette field one side lacks from depth 0, and swaps its kind inside a dip of its depth', () => {
+    const none = scene({ name: 'a', levels: [level('l')] })
+    const field = (kind: 'radial' | 'linear' | 'noise', depth: number, more = {}) =>
+      scene({
+        name: kind,
+        levels: [level('l')],
+        field: {
+          kind,
+          angle: { value: 30 },
+          centre: [{ value: 1 }, { value: -1 }],
+          scale: { value: 0.7 },
+          depth: { value: depth },
+          ...more,
+        },
+      })
+    const radial = field('radial', 0.4)
+    expect(at(none, radial, 0.25).palette.field).toEqual({
+      kind: 'radial',
+      angle: { value: 30 },
+      centre: [{ value: 0.25 }, { value: -0.25 }],
+      scale: { value: 0.7 },
+      depth: { value: 0.1 },
+    })
+    expect(at(radial, none, 1).palette.field).toMatchObject({
+      kind: 'radial',
+      centre: [{ value: 0 }, { value: 0 }],
+      depth: { value: 0 },
+    })
+    expect(at(none, none, 0.5).palette.field).toBeUndefined()
+    // a kind, steps or cells one side lacks swaps where the depth dips to nothing
+    const noise = field('noise', 0.75, { steps: 4, atCells: true })
+    expect(at(radial, noise, 0.49).palette.field).toMatchObject({ kind: 'radial' })
+    expect(at(radial, noise, 0.49).palette.field!.steps).toBeUndefined()
+    expect(at(radial, noise, 0.5).palette.field).toMatchObject({
+      kind: 'noise',
+      steps: 4,
+      atCells: true,
+      depth: { value: 0 },
+    })
+    expect(at(radial, noise, 0.2).palette.field!.depth.value).toBeGreaterThan(0)
+    expect(at(none, noise, 1).palette.field).toEqual(noise.palette.field)
+    expect(at(field('noise', 0.75, { steps: 2 }), noise, 0.5).palette.field!.depth.value).toBe(0)
+    expect(at(noise, noise, 0.5).palette.field!.depth.value).toBe(0.75)
   })
 
   it('morphs oblique into voronoi by its jitter, and swaps another lattice kind where the level weighs nothing', () => {

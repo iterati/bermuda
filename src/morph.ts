@@ -17,6 +17,8 @@ import {
   VARIATIONS,
   variationWeight,
   type Edge,
+  type Field,
+  type Fill,
   type Knob,
   type Level,
   type Scene,
@@ -58,6 +60,30 @@ function vector(a: [Knob, Knob], b: [Knob, Knob], t: number): [Knob, Knob] {
 // a knob either side may lack, from none (the value that draws as if it were not there); undefined if both lack it
 const either = (a: Knob | undefined, b: Knob | undefined, none: number, t: number) =>
   a || b ? knob(a ?? { value: none }, b ?? { value: none }, t) : undefined
+
+// A fill that is not there, beside one that is: fill 0 and line 1, which draw the line alone, with the fill's light
+// and shade.
+const unfilled = ({ light, shade }: Fill): Fill => ({
+  amount: { value: 0 },
+  line: { value: 1 },
+  tone: { value: 0 },
+  bands: { value: 0 },
+  step: { value: 0 },
+  metal: { value: 0 },
+  light,
+  shade,
+  ramp: { value: 0 },
+  alternate: { value: 0 },
+})
+// A colour field that is not there, beside one that is: radial round the plane's centre at depth 0, which the radius
+// reads as the distance from the centre and which shifts nothing, with the field's angle and scale.
+const unfielded = ({ angle, scale }: Field): Field => ({
+  kind: 'radial',
+  angle,
+  centre: [{ value: 0 }, { value: 0 }],
+  scale,
+  depth: { value: 0 },
+})
 
 // The part of the fader depth k of n morphs over: with stagger 0 every depth takes the whole fader, with 1 each
 // takes its own nth in turn, the shallowest first unless the edge runs deep first.
@@ -205,7 +231,9 @@ function mixLevels(
       ? vector(a.lattice.e2, b.lattice.e2, t)
       : [k(a.lattice.e2[0], b.lattice.e2[0]), k(a.lattice.e2[1], b.lattice.e2[1])]
     const jitter = voronoi ? k(a.lattice.jitter ?? { value: 0 }, b.lattice.jitter ?? { value: 0 }) : undefined
+    // front order, which spill fades in, swaps where spill dips to nothing, and the cells paint their own shapes alone
     const spill = either(a.cell.spill, b.cell.spill, 0, t)
+    if (spill && !a.fill?.front !== !b.fill?.front) spill.value *= 1 - dip(t, 0.1)
     const [turn, phase] = [scaled(k(a.cell.turn, b.cell.turn), by), scaled(k(a.cell.phase, b.cell.phase), by)]
     // a side's switches on the morphed knobs: its lattice kind and sectors, and its cell step; spill only where
     // the lattice can, so it drops where a swap's weight is nothing
@@ -245,6 +273,25 @@ function mixLevels(
         speed: k(a.colour.speed, b.colour.speed),
         cellSpread: scaled(k(a.colour.cellSpread, b.colour.cellSpread), a.id === b.id ? 1 : 1 - dip(t, 0.2)),
       },
+    }
+    // a fill one side lacks morphs from one that draws as if it were not there; front order swaps at the middle,
+    // where spill dips to nothing (above)
+    if (a.fill || b.fill) {
+      const [fa, fb] = [a.fill ?? unfilled(b.fill!), b.fill ?? unfilled(a.fill!)]
+      const front = t < 0.5 ? fa.front : fb.front
+      level.fill = {
+        amount: k(fa.amount, fb.amount),
+        line: k(fa.line, fb.line),
+        tone: k(fa.tone, fb.tone),
+        bands: k(fa.bands, fb.bands),
+        step: k(fa.step, fb.step),
+        metal: k(fa.metal, fb.metal),
+        light: k(fa.light, fb.light),
+        shade: k(fa.shade, fb.shade),
+        ramp: k(fa.ramp, fb.ramp),
+        alternate: k(fa.alternate, fb.alternate),
+        ...(front ? { front } : {}),
+      }
     }
     if (a.id !== b.id) far.set(level, { id: b.id, at: t })
     // the far side's picture shares the level's knobs, so a bend of the scene bends both
@@ -346,6 +393,23 @@ export function morph(
     const ta = a.palette.trap ?? { ...b.palette.trap!, weight: { value: 0 } }
     const tb = b.palette.trap ?? { ...a.palette.trap!, weight: { value: 0 } }
     scene.palette.trap = { weight: k(ta.weight, tb.weight), size: k(ta.size, tb.size) }
+  }
+  // a colour field one side lacks morphs from one that is no field; a change of kind, steps or cells swaps at the
+  // middle, where its depth dips to nothing
+  if (a.palette.field || b.palette.field) {
+    const fa = a.palette.field ?? unfielded(b.palette.field!)
+    const fb = b.palette.field ?? unfielded(a.palette.field!)
+    const side = x < 0.5 ? fa : fb
+    const swaps = fa.kind !== fb.kind || fa.steps !== fb.steps || !fa.atCells !== !fb.atCells
+    scene.palette.field = {
+      kind: side.kind,
+      angle: k(fa.angle, fb.angle),
+      centre: [k(fa.centre[0], fb.centre[0]), k(fa.centre[1], fb.centre[1])],
+      scale: k(fa.scale, fb.scale),
+      depth: scaled(k(fa.depth, fb.depth), swaps ? 1 - dip(x, 0.1) : 1),
+      ...(side.steps ? { steps: side.steps } : {}),
+      ...(side.atCells ? { atCells: side.atCells } : {}),
+    }
   }
   // dots one side lacks morph from the other side's, which that side does not draw
   const dots = a.line.dots ?? b.line.dots
