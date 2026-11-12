@@ -1,11 +1,15 @@
 // The scroll wheel on the knobs, the app itself in headless Chrome at 1280x800, in Stage, Edit and Decks: a knob
-// clicked and then wheeled where it was clicked takes every notch, a wheel over a knob in a panel that scrolls turns
-// the knob and leaves the panel where it was, a burst of wheel events before one render takes every step, and a
-// wheel over the picture turns the focused knob.
+// clicked and then wheeled where it was clicked takes every notch, a notch 1/40 of its play range, a wheel over a
+// knob in a panel that scrolls turns the knob and leaves the panel where it was, a burst of wheel events in one frame
+// takes every step up to 4 notches and drops the rest, and a wheel over the picture turns the knob Tab is on and
+// leaves a clicked one alone. A drag turns no knob and no slider, the wheel turns the sliders, and the A/B fader and
+// the lattice pad still drag.
 import { execFileSync } from 'node:child_process'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import { createServer, type ViteDevServer } from 'vite'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { LOOKS } from './looks'
+import { hardRange, notch } from './scene'
 
 let server: ViteDevServer
 let browser: Browser
@@ -32,6 +36,8 @@ afterAll(async () => {
 
 // a knob of Tapestry 1's first level, on screen in every view, at 0°
 const TURN = 'levels[sq1].affine.turn'
+// a notch of it, as a share of its hard range
+const STEP = notch(LOOKS[0], { knob: TURN }) / (hardRange(TURN)[1] - hardRange(TURN)[0])
 const PANEL = { stage: '.stage .bottom', edit: '.edit .rack', decks: '.mixer > .panel:nth-child(2)' }
 // a spot on the picture that no panel covers
 const OPEN = { stage: { x: 640, y: 300 }, edit: { x: 360, y: 400 }, decks: { x: 640, y: 120 } }
@@ -41,7 +47,7 @@ type Mode = (typeof modes)[number]
 let mode: Mode
 beforeEach(async () => {
   await page.goto(server.resolvedUrls!.local[0])
-  await page.waitForSelector('.knob')
+  await page.waitForSelector('.knob', { timeout: 55_000 })
   mode = 'stage'
 }, 60_000)
 
@@ -101,10 +107,10 @@ describe('the wheel on a knob', () => {
       await page.mouse.click(x, y)
       await new Promise((r) => setTimeout(r, 200))
       await notches(3)
-      expect(await settle(TURN, f + 0.03)).toBeCloseTo(f + 0.03, 6)
+      expect(await settle(TURN, f + 3 * STEP)).toBeCloseTo(f + 3 * STEP, 6)
       expect(others(before, await knobs(), TURN)).toEqual([])
     },
-    30_000,
+    60_000,
   )
 
   it.each(modes)(
@@ -117,27 +123,46 @@ describe('the wheel on a knob', () => {
       const { x, y, f } = before[TURN]
       await page.mouse.move(x, y)
       for (let i = 0; i < 3; i++) await page.mouse.wheel({ deltaY: 100 })
-      expect(await settle(TURN, f - 0.03)).toBeCloseTo(f - 0.03, 6)
+      expect(await settle(TURN, f - 3 * STEP)).toBeCloseTo(f - 3 * STEP, 6)
       expect(await scrollOf()).toBe(top)
       expect(others(before, await knobs(), TURN)).toEqual([])
     },
-    30_000,
+    60_000,
   )
+
+  // a burst of n wheel events up on the knob at address, sent in one go, so in one frame and before a render
+  const burst = (n: number, address: string) =>
+    page.evaluate(
+      (n, address) => {
+        const el = [...document.querySelectorAll<HTMLElement>('.knob')].find((k) =>
+          k.title.split('\n')[1].startsWith(`${address} · `),
+        )!
+        for (let i = 0; i < n; i++)
+          el.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true, cancelable: true }))
+      },
+      n,
+      address,
+    )
 
   it('takes every one of a burst of wheel events before a render', async () => {
     const { f } = (await knobs())[TURN]
-    await page.evaluate((address) => {
-      const el = [...document.querySelectorAll<HTMLElement>('.knob')].find((k) =>
-        k.title.split('\n')[1].startsWith(`${address} · `),
-      )!
-      for (let i = 0; i < 8; i++)
-        el.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true, cancelable: true }))
-    }, TURN)
-    expect(await settle(TURN, f + 0.08)).toBeCloseTo(f + 0.08, 6)
-  }, 30_000)
+    await burst(4, TURN)
+    expect(await settle(TURN, f + 4 * STEP)).toBeCloseTo(f + 4 * STEP, 6)
+  }, 60_000)
+
+  it('caps a burst of 8 wheel events in one frame at 4 notches', async () => {
+    const { f } = (await knobs())[TURN]
+    await burst(8, TURN)
+    expect(await settle(TURN, f + 4 * STEP)).toBeCloseTo(f + 4 * STEP, 6)
+    await new Promise((r) => setTimeout(r, 300))
+    expect((await knobs())[TURN].f).toBeCloseTo(f + 4 * STEP, 6)
+    // a later frame's turn lands
+    await burst(1, TURN)
+    expect(await settle(TURN, f + 5 * STEP)).toBeCloseTo(f + 5 * STEP, 6)
+  }, 60_000)
 
   it.each(modes)(
-    'in %s over the picture turns the focused knob',
+    'in %s over the picture leaves a clicked knob alone',
     async (m) => {
       await to(m)
       const { x, y } = (await knobs())[TURN]
@@ -147,9 +172,119 @@ describe('the wheel on a knob', () => {
       expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.tagName, open)).toBe('CANVAS')
       await page.mouse.move(open.x, open.y)
       await notches(3)
-      expect(await settle(TURN, before[TURN].f + 0.03)).toBeCloseTo(before[TURN].f + 0.03, 6)
+      await new Promise((r) => setTimeout(r, 300))
+      expect(others(before, await knobs(), '')).toEqual([])
+    },
+    60_000,
+  )
+
+  it.each(modes)(
+    'in %s over the picture turns the Tab-focused knob',
+    async (m) => {
+      await to(m)
+      // Tab on to the knob
+      const on = () => page.evaluate(() => (document.activeElement as HTMLElement).dataset.knob)
+      for (let i = 0; i < 200 && (await on()) !== TURN; i++) await page.keyboard.press('Tab')
+      expect(await on()).toBe(TURN)
+      const before = await knobs()
+      const open = OPEN[mode]
+      expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.tagName, open)).toBe('CANVAS')
+      await page.mouse.move(open.x, open.y)
+      await notches(3)
+      expect(await settle(TURN, before[TURN].f + 3 * STEP)).toBeCloseTo(before[TURN].f + 3 * STEP, 6)
       expect(others(before, await knobs(), TURN)).toEqual([])
     },
-    30_000,
+    60_000,
   )
+})
+
+describe('a drag', () => {
+  it('a drag on a knob leaves its value', async () => {
+    await to('stage')
+    const before = await knobs()
+    const { x, y } = before[TURN]
+    await page.mouse.move(x, y)
+    await page.mouse.down()
+    for (let i = 1; i <= 10; i++) await page.mouse.move(x + i * 3, y - i * 12)
+    await page.mouse.up()
+    // and a pointer moving over it after, with no button down
+    await page.mouse.move(x, y - 60)
+    await new Promise((r) => setTimeout(r, 300))
+    expect(others(before, await knobs(), '')).toEqual([])
+  }, 60_000)
+
+  // the range input picked by its label, or the first macro's: its value, centre and width, scrolled into view
+  const slider = (pick: string) =>
+    page.evaluate((pick) => {
+      const input = [...document.querySelectorAll<HTMLInputElement>('input[type=range]')].find((el) =>
+        pick === 'macro' ? el.matches('.macro-slider') : el.closest('label')?.textContent?.startsWith(pick),
+      )!
+      input.scrollIntoView({ block: 'center' })
+      const r = input.getBoundingClientRect()
+      return { value: input.valueAsNumber, x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width }
+    }, pick)
+  const tab = (name: string) =>
+    page.evaluate((name) => {
+      ;[...document.querySelectorAll<HTMLButtonElement>('.tabs button')].find((b) => b.textContent === name)!.click()
+    }, name)
+  const pause = () => new Promise((r) => setTimeout(r, 200))
+
+  it('a press or drag on the macro slider, a Bank slider and the stagger leaves its value, and the wheel turns it', async () => {
+    for (const [where, pick] of [
+      ['Macros', 'macro'],
+      ['Bank', 'busy'],
+      [undefined, 'stagger'],
+    ] as const) {
+      if (where) await tab(where)
+      const { value, x, y, w } = await slider(pick)
+      // a click well off the thumb, then a drag along it
+      await page.mouse.click(x + w / 3, y)
+      await pause()
+      expect((await slider(pick)).value, pick).toBe(value)
+      await page.mouse.move(x, y)
+      await page.mouse.down()
+      for (let i = 1; i <= 10; i++) await page.mouse.move(x + (i * w) / 25, y)
+      await page.mouse.up()
+      await pause()
+      expect((await slider(pick)).value, pick).toBe(value)
+      // a notch is 1% of 0 to 1, each way
+      await page.mouse.wheel({ deltaY: -100 })
+      await pause()
+      expect((await slider(pick)).value, pick).toBeCloseTo(value + 0.01, 6)
+      await page.mouse.wheel({ deltaY: 100 })
+      await pause()
+      expect((await slider(pick)).value, pick).toBeCloseTo(value, 6)
+    }
+  }, 60_000)
+
+  it('the A/B fader and the lattice pad still drag', async () => {
+    const at = () => page.$eval('.fader-at', (el) => el.textContent)
+    expect(await at()).toBe('0%')
+    const r = await page.$eval('svg.fader', (el) => {
+      const b = el.getBoundingClientRect()
+      return { x: b.x, y: b.y + b.height / 2, w: b.width }
+    })
+    await page.mouse.move(r.x + 1, r.y)
+    await page.mouse.down()
+    for (let i = 1; i <= 10; i++) await page.mouse.move(r.x + (i * r.w) / 20, r.y)
+    await page.mouse.up()
+    await pause()
+    expect(Number.parseInt((await at())!)).toBeGreaterThan(40)
+    // the first level's pad moves its lattice's second vector, and nothing else
+    await to('stage')
+    const before = await knobs()
+    const pad = await page.$eval('svg.pad', (el) => {
+      el.scrollIntoView({ block: 'center' })
+      const b = el.getBoundingClientRect()
+      return { x: b.x + b.width / 2, y: b.y + b.height / 2 }
+    })
+    await page.mouse.move(pad.x, pad.y)
+    await page.mouse.down()
+    for (let i = 1; i <= 10; i++) await page.mouse.move(pad.x + i * 2, pad.y - i * 2)
+    await page.mouse.up()
+    await pause()
+    const moved = others(before, await knobs(), '')
+    expect(moved.length).toBeGreaterThan(0)
+    expect(moved.every((k) => /^levels\[sq1\]\.lattice\.e2\[[01]\]$/.test(k))).toBe(true)
+  }, 60_000)
 })

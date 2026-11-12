@@ -7,7 +7,7 @@ import { detunePeriods, learnMacro, setMacro, wave } from '../motion'
 import { blend } from '../music'
 import { clamp, FEATURES, hardRange, LISTENS, resolve, WAVES, type Modulator } from '../scene'
 import { Choice, Num, useCtl } from './controls'
-import { MOD_DRAG, short } from './Knob'
+import { MOD_DRAG, short, Slider } from './Knob'
 import { MidiLearn } from './Midi'
 
 // A modulator's wave over one period, as a small sparkline.
@@ -315,16 +315,14 @@ export function Macros() {
             </button>
           </div>
           {armed?.id === m.id && <div className="armed-note">move knobs, by hand or MIDI, then press learn</div>}
-          <input
+          <Slider
             className="macro-slider"
-            type="range"
             min={0}
             max={1}
             step={0.001}
             // one that listens shows where the music has it
             value={m.listen ? (live.macros.find((x) => x.id === m.id)?.value ?? m.value) : m.value}
-            onKeyDown={(e) => e.stopPropagation()}
-            onChange={(e) => edit((d) => setMacro(d, m.id, e.target.valueAsNumber))}
+            onChange={(v) => edit((d) => setMacro(d, m.id, v))}
           />
           <div className="targets">
             {m.targets.map((t, i) => (

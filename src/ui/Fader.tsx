@@ -3,6 +3,7 @@
 import { useMemo } from 'react'
 import { depthWindow, morphSize } from '../morph'
 import { parseFader, type Edge, type Fader as Pair, type Scene } from '../scene'
+import { Slider } from './Knob'
 import { download } from './Looks'
 import type { Side } from './Picture'
 
@@ -95,14 +96,12 @@ export function Fader({
         {pickup && <span className="pickup">{pickup}</span>}
         <label className="slide" title="how far apart the depths morph: 0 all at once, 1 one after another">
           <span>stagger</span>
-          <input
-            type="range"
+          <Slider
             min={0}
             max={1}
             step={0.01}
             value={edge.stagger}
-            onKeyDown={(e) => e.stopPropagation()}
-            onChange={(e) => onEdge({ ...edge, stagger: e.target.valueAsNumber })}
+            onChange={(stagger) => onEdge({ ...edge, stagger })}
           />
           <b>{edge.stagger.toFixed(2)}</b>
         </label>

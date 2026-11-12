@@ -821,6 +821,16 @@ export function playRange(address: Address, knob: Knob): [number, number] {
   return knob.play ?? hardRange(address)
 }
 
+// A wheel notch, or an arrow key's step: 1/40 of a knob's play range, else (none, or one of no width) 1% of its
+// hard range; a macro's 1% of its 0 to 1.
+export function notch(scene: Scene, t: MidiTarget): number {
+  if ('macro' in t) return 0.01
+  const play = resolve(scene, t.knob)!.play
+  if (play && play[1] > play[0]) return (play[1] - play[0]) / 40
+  const [lo, hi] = hardRange(t.knob)
+  return (hi - lo) / 100
+}
+
 export const clamp = (v: number, [lo, hi]: [number, number]) => Math.min(hi, Math.max(lo, v))
 
 // Every knob of a scene with its address and the level list and level it sits in, if any.
@@ -869,6 +879,14 @@ export function strip(scene: Scene, chip: string): MidiTarget[] {
 }
 export const STRIP = 8
 
+// The knob is played: a spread, play range or glide, a modulator or macro on it, or a MIDI control of the look's.
+const played = (scene: Scene, { address, knob }: KnobAt) =>
+  !!knob.spread ||
+  !!knob.play ||
+  !!knob.glide ||
+  [...scene.modulators, ...scene.macros].some((m) => m.targets.some((t) => t.knob === address)) ||
+  !!scene.midi?.some((m) => 'knob' in m && m.knob === address)
+
 // A knob to fold out of sight: dead under the scene's settings, or at its kind's rest and untouched, with no spread,
 // play range or glide, no modulator or macro on it, no preset holding it elsewhere and no MIDI control on it.
 export function folded(scene: Scene, at: KnobAt): boolean {
@@ -878,13 +896,23 @@ export function folded(scene: Scene, at: KnobAt): boolean {
   const still = (v: number) => kind.rest !== undefined && Math.abs(v - kind.rest) < 1e-9
   return (
     still(knob.value) &&
-    !knob.spread &&
-    !knob.play &&
-    !knob.glide &&
-    ![...scene.modulators, ...scene.macros].some((m) => m.targets.some((t) => t.knob === address)) &&
-    scene.presets.every((p) => !(address in p.values) || still(p.values[address])) &&
-    !scene.midi?.some((m) => 'knob' in m && m.knob === address)
+    !played(scene, at) &&
+    scene.presets.every((p) => !(address in p.values) || still(p.values[address]))
   )
+}
+
+// A knob live to the hand, a stop of Tab's walk: not dead under the scene's settings, and played, on the picked
+// chip's Perform strip (onStrip, strip's), or turned since its look was put on its side. The strip's macros are live
+// too.
+export function liveKnob(
+  scene: Scene,
+  at: KnobAt,
+  onStrip: readonly MidiTarget[],
+  turned: ReadonlySet<Address>,
+): boolean {
+  const kind = knobKind(at.address)
+  if (kind.shows && !kind.shows(scene, at)) return false
+  return played(scene, at) || turned.has(at.address) || onStrip.some((t) => 'knob' in t && t.knob === at.address)
 }
 
 const isLevel = (v: unknown): v is Level => !!v && typeof v === 'object' && 'id' in v && 'affine' in v

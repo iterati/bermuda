@@ -3,6 +3,7 @@
 // unlinks it.
 import { entryScene, neighbours, toggleLink } from '../play'
 import { parseBank, type Bank as BankShape, type Scene } from '../scene'
+import { Slider } from './Knob'
 import { download } from './Looks'
 
 type Props = {
@@ -43,15 +44,7 @@ function Slide(props: {
   return (
     <label className="slide" title={props.title}>
       <span>{props.label}</span>
-      <input
-        type="range"
-        min={props.min}
-        max={props.max}
-        step={props.step}
-        value={props.value}
-        onKeyDown={(e) => e.stopPropagation()}
-        onChange={(e) => props.onChange(e.target.valueAsNumber)}
-      />
+      <Slider min={props.min} max={props.max} step={props.step} value={props.value} onChange={props.onChange} />
       <b>{props.shown ?? props.value.toFixed(2)}</b>
     </label>
   )

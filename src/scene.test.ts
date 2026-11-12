@@ -10,11 +10,14 @@ import {
   folded,
   FEATURES,
   FORMLESS,
+  hardRange,
   KINDS,
   kindOf,
   knobsOf,
   LINES,
   LISTENS,
+  liveKnob,
+  notch,
   parseBank,
   parseControls,
   parseFader,
@@ -405,6 +408,94 @@ describe('folding', () => {
       )
     expect(falloff(t1)).toBe(false)
     expect(falloff({ ...t1, line: { ...t1.line, kind: 'hard' } })).toBe(true)
+  })
+})
+
+describe('the notch', () => {
+  const t1 = LOOKS.find((l) => l.name.startsWith('Tapestry 1 '))!
+  const turn = 'levels[sq1].affine.turn'
+
+  it('a notch is 1/40 of the play range', () => {
+    const s = structuredClone(t1)
+    s.levels[0].affine.turn.play = [10, 90]
+    expect(notch(s, { knob: turn })).toBe(2)
+    // every knob a look plays inside a range
+    for (const { address, knob } of knobsOf(t1).filter((k) => k.knob.play))
+      expect(notch(t1, { knob: address })).toBeCloseTo((knob.play![1] - knob.play![0]) / 40, 12)
+  })
+
+  it('a notch is 1% of the hard range without a play range or with an empty one, and of 0 to 1 for a macro', () => {
+    const [lo, hi] = hardRange(turn)
+    const s = structuredClone(t1)
+    delete s.levels[0].affine.turn.play
+    expect(notch(s, { knob: turn })).toBeCloseTo((hi - lo) / 100, 12)
+    s.levels[0].affine.turn.play = [30, 30]
+    expect(notch(s, { knob: turn })).toBeCloseTo((hi - lo) / 100, 12)
+    expect(notch(t1, { macro: t1.macros[0].id })).toBe(0.01)
+  })
+})
+
+describe('a live knob', () => {
+  const t1 = LOOKS.find((l) => l.name.startsWith('Tapestry 1 '))!
+  const none = new Set<Address>()
+  const liveOf = (s: Scene, chip: string, turned = none) =>
+    knobsOf(s)
+      .filter((k) => liveKnob(s, k, strip(s, chip), turned))
+      .map((k) => k.address)
+  const played = (s: Scene) =>
+    knobsOf(s)
+      .filter((k) => liveKnob(s, k, [], none))
+      .map((k) => k.address)
+
+  it("a knob is live when played, on the picked chip's strip, or turned since its look was put", () => {
+    // Tapestry 1 plays 16 knobs, as the design round counted them; its first level's strip adds the top knobs it does
+    // not play
+    expect(played(t1)).toHaveLength(16)
+    const onStrip = strip(t1, 'sq1').flatMap((t) => ('knob' in t ? [t.knob] : []))
+    expect(liveOf(t1, 'sq1')).toEqual(
+      knobsOf(t1)
+        .filter((k) => played(t1).includes(k.address) || onStrip.includes(k.address))
+        .map((k) => k.address),
+    )
+    expect(liveOf(t1, 'sq1')).toHaveLength(20)
+    // a knob off the strip, unplayed, is live once turned
+    const address = 'levels[sq1].weight'
+    expect(liveOf(t1, 'post')).not.toContain(address)
+    expect(liveOf(t1, 'post', new Set([address]))).toContain(address)
+    // and once played, by any of the ways a look plays a knob
+    const plays: ((s: Scene) => void)[] = [
+      (s) => s.modulators.push(mod('m', 'cos', 8, [[address, 0.2]])),
+      (s) => s.macros.push({ id: 'x', name: 'x', value: 0, targets: [{ knob: address, from: 0, to: 1 }] }),
+      (s) => (s.levels[0].weight.spread = 0.2),
+      (s) => (s.levels[0].weight.play = [0.5, 1]),
+      (s) => (s.levels[0].weight.glide = 2),
+      (s) => (s.midi = [{ channel: 1, control: 1, knob: address }]),
+    ]
+    for (const play of plays) {
+      const s = structuredClone(t1)
+      play(s)
+      expect(liveOf(s, 'post')).toContain(address)
+    }
+  })
+
+  it('a dead knob is never live, and an unplayed untouched one off the strip is not', () => {
+    // Tapestry 1's 4 dead knobs, one of them its first level's share of its one variant
+    const dead = knobsOf(t1).filter((k) => {
+      const kind = KINDS[kindOf(k.address)]
+      return kind.shows && !kind.shows(t1, k)
+    })
+    expect(dead).toHaveLength(4)
+    const share = 'levels[sq1].variants[0].share'
+    expect(dead.map((k) => k.address)).toContain(share)
+    const s = structuredClone(t1)
+    s.levels[0].variants[0].share.play = [0.2, 0.8]
+    s.modulators.push(mod('m', 'cos', 8, [[share, 0.2]]))
+    const all = new Set(knobsOf(s).map((k) => k.address))
+    for (const k of dead) expect(liveOf(s, 'sq1', all), k.address).not.toContain(k.address)
+    // the rest of the knobs, neither played nor turned nor on the strip of the picked chip, are not live
+    expect(liveOf(t1, 'post')).toEqual(played(t1))
+    expect(liveOf(t1, 'post')).not.toContain('levels[sq1].colour.cellSpread')
+    expect(liveOf(t1, 'frame')).not.toContain('levels[sq1].variants[0].shape.round')
   })
 })
 

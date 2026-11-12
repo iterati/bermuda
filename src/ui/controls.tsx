@@ -1,6 +1,6 @@
 // The controls of each chip of the chain: background, frame, a level, contour, line, palette, post.
 // Stage shows the picked chip's; Edit shows every chip's at once.
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useContext, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import { COSINES, css, paletteAt, stopsFromCosine } from '../colour'
 import {
   addSubChain,
@@ -56,7 +56,13 @@ export type Ctl = {
   setFocus: (address: Address) => void
   edit: (fn: (draft: Scene) => void) => void
   setKnob: (address: Address, value: number) => void
-  nudge: (t: MidiTarget, steps: number) => void // steps of 1% of a knob's range or a macro's 0 to 1, up for more
+  // steps of a notch (scene.ts notch), up for more: the wheel's, and ↑ ↓'s one, ten with shift; the knob turned
+  nudge: (t: MidiTarget, steps: number) => void
+  set: (t: MidiTarget, value: number) => void // a value typed, clamped to the hard range (a macro's 0 to 1); turned
+  liveKnobs: ReadonlySet<Address> // the knobs live to the hand (scene.ts liveKnob), the stops of Tab's walk
+  typing: MidiTarget | null // the knob or macro whose value is being typed
+  type: Dispatch<SetStateAction<MidiTarget | null>>
+  walk: (by: 1 | -1) => void // Tab's walk on to the next live knob on screen, or back to the one before
   pick: (chip: string) => void
   learning: Learning | null // what the next MIDI control or button maps to
   learn: (target: Learning | null) => void

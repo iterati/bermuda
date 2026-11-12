@@ -47,10 +47,11 @@ import {
   CHIPS,
   clamp,
   depthOf,
-  hardRange,
   knobsOf,
+  liveKnob,
   MAX_DEPTH,
   MAX_LEVELS,
+  notch,
   parseBank,
   parseControls,
   parseScene,
@@ -75,7 +76,7 @@ import { CtlContext, Dice, Section, type Armed, type Ctl } from './ui/controls'
 import { Deck } from './ui/Deck'
 import { Fader } from './ui/Fader'
 import { FrameTime, type Frames } from './ui/FrameTime'
-import { wheelSteps } from './ui/Knob'
+import { wheelTurn } from './ui/Knob'
 import { KnobDetail } from './ui/KnobDetail'
 import { Looks } from './ui/Looks'
 import { Midi } from './ui/Midi'
@@ -198,6 +199,12 @@ export function App() {
   const [frames, setFrames] = useState<Frames>()
   const [picked, setPicked] = useState<string>(LOOKS[0].levels[0].id)
   const [focus, setFocus] = useState<Address | null>(null)
+  // the browser's focus on a knob came from Tab's walk, not a click, so the wheel over the picture turns it
+  const tabbing = useRef(false)
+  // the knob or macro whose value is being typed
+  const [typing, setTyping] = useState<MidiTarget | null>(null)
+  // each side's knobs turned by the wheel, typing or ↑ ↓ since a look was put there, which are live
+  const [turned, setTurned] = useState<Record<Side, ReadonlySet<Address>>>({ a: new Set(), b: new Set() })
   // the Stage's bottom panel: the Perform strip, or every knob of the picked chip; and its right column's tab
   const [more, setMore] = useState(false)
   const [tab, setTab] = useState<(typeof TABS)[number]>('Motion')
@@ -339,20 +346,36 @@ export function App() {
     },
     [scene, pair, side, setScene],
   )
-  // a knob stepped by 1% of its range a step, a macro by 1% of its 0 to 1, from its value as it is when the step
-  // lands, so no step is lost
+  // a knob turned by the wheel, typing or ↑ ↓, which makes it live until a look is put on its side
+  const turn = useCallback(
+    (address: Address) =>
+      setTurned((t) => (t[side].has(address) ? t : { ...t, [side]: new Set([...t[side], address]) })),
+    [side],
+  )
+  // a knob or macro stepped by notches, from its value as it is when the step lands, so no step is lost
   const nudge = useCallback(
     (t: MidiTarget, steps: number) => {
+      // a step the wheel's cap dropped turns nothing
+      if (!steps) return
       if ('macro' in t)
         return setScene((s) =>
           update(s, (d) =>
-            setMacro(d, t.macro, clamp(d.macros.find((m) => m.id === t.macro)!.value + steps * 0.01, [0, 1])),
+            setMacro(d, t.macro, clamp(d.macros.find((m) => m.id === t.macro)!.value + steps * notch(d, t), [0, 1])),
           ),
         )
-      const [lo, hi] = hardRange(t.knob)
-      setScene((s) => setKnob(s, t.knob, resolve(s, t.knob)!.value + steps * (hi - lo) * 0.01))
+      turn(t.knob)
+      setScene((s) => setKnob(s, t.knob, resolve(s, t.knob)!.value + steps * notch(s, t)))
     },
-    [setScene],
+    [setScene, turn],
+  )
+  // a value typed
+  const set = useCallback(
+    (t: MidiTarget, value: number) => {
+      if ('macro' in t) return setScene((s) => update(s, (d) => setMacro(d, t.macro, clamp(value, [0, 1]))))
+      turn(t.knob)
+      setScene((s) => setKnob(s, t.knob, value))
+    },
+    [setScene, turn],
   )
   // a keyframe on the edited side, or on the deck cued, which the controls then edit, at once
   const put = useCallback(
@@ -368,6 +391,11 @@ export function App() {
       setPicked(next.levels[0].id)
       setFocus(null)
       setLearning(null)
+      setTurned((t) => ({ ...t, [to]: new Set() }))
+      setTyping(null)
+      tabbing.current = false
+      if (document.activeElement instanceof HTMLElement && document.activeElement.matches('.knob'))
+        document.activeElement.blur()
     },
     [lives, pair, side],
   )
@@ -390,6 +418,7 @@ export function App() {
     }
     Object.assign(lives[to], scene.name === pair[from].name ? copyLive(lives[from]) : newLive())
     setPair((p) => ({ ...p, [to]: scene }))
+    setTurned((t) => ({ ...t, [to]: new Set() }))
     setEntries((e) => ({ ...e, [to]: next.entry }))
     setPresets((p) => ({ ...p, [to]: next.preset ?? -1 }))
     const upcoming = after ?? (auto.on ? step(bank, looks, { entry: next.entry, scene }) : undefined)
@@ -467,6 +496,7 @@ export function App() {
   const swap = useCallback(() => {
     ;[lives.a, lives.b] = [lives.b, lives.a]
     setPair((p) => ({ a: p.b, b: p.a }))
+    setTurned((t) => ({ a: t.b, b: t.a }))
     setFader((x) => 1 - x)
     setEdge((e) => ({ ...e, deepFirst: !e.deepFirst }))
     setSide(other)
@@ -477,6 +507,7 @@ export function App() {
     if (why) return setError(why)
     Object.assign(lives[to], copyLive(lives[side]))
     setPair((p) => ({ ...p, [to]: structuredClone(p[side]) }))
+    setTurned((t) => ({ ...t, [to]: t[side] }))
   }, [lives, pair, scene, side])
   // Mutate the look showing: at once, or in Play as a transition from the look coming in
   const mutateShown = () => {
@@ -499,6 +530,33 @@ export function App() {
     setSaved(next)
     prune(next)
   }
+
+  // the walk of Tab (by 1) and Shift-Tab (by -1) over the live knobs on screen, round from the last to the first: the
+  // Perform strip's first, then the rest in the page's order; from anywhere else, the next one after it on the page.
+  // A scene knob takes the app's focus too, as a click gives it.
+  const walk = useCallback((by: 1 | -1) => {
+    const shown = [...document.querySelectorAll<HTMLElement>('[data-tab]')].filter((el) => el.checkVisibility())
+    const stops = [...shown.filter((el) => el.closest('.perform')), ...shown.filter((el) => !el.closest('.perform'))]
+    if (!stops.length) return
+    const at = document.activeElement!
+    const i = stops.indexOf(at as HTMLElement)
+    const after = (el: HTMLElement) => !!(at.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)
+    const next =
+      i >= 0
+        ? stops[(i + by + stops.length) % stops.length]
+        : by > 0
+          ? (stops.find(after) ?? stops[0])
+          : (stops.findLast((el) => !after(el)) ?? stops[stops.length - 1])
+    tabbing.current = true
+    next.focus()
+    if (next.dataset.knob) setFocus(next.dataset.knob)
+  }, [])
+  // a click ends the Tab focus
+  useEffect(() => {
+    const click = () => (tabbing.current = false)
+    window.addEventListener('pointerdown', click, true)
+    return () => window.removeEventListener('pointerdown', click, true)
+  }, [])
 
   // a focused knob that an edit took away is dropped
   const focused = focus && knobsOf(scene).some((k) => k.address === focus) ? focus : null
@@ -533,6 +591,15 @@ export function App() {
   const pageOf = (p: typeof paged) => (p.key === pageKey ? Math.min(p.page, pages - 1) : 0)
   const page = pageOf(paged)
   const slots: (MidiTarget | undefined)[] = Array.from({ length: STRIP }, (_, i) => performing[page * STRIP + i])
+  const liveKnobs = useMemo(
+    () =>
+      new Set(
+        knobsOf(scene)
+          .filter((at) => liveKnob(scene, at, performing, turned[side]))
+          .map((at) => at.address),
+      ),
+    [scene, performing, turned, side],
+  )
   // the next page or the one before, round from the last to the first
   const turnPage = (by: 1 | -1) => setPaged((p) => ({ key: pageKey, page: (pageOf(p) + by + pages) % pages }))
 
@@ -682,6 +749,11 @@ export function App() {
     edit,
     setKnob: (address, value) => setScene((s) => setKnob(s, address, value)),
     nudge,
+    set,
+    liveKnobs,
+    typing,
+    type: setTyping,
+    walk,
     pick: setPicked,
     learning: learningNow,
     learn: learnMidi,
@@ -696,10 +768,21 @@ export function App() {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return
       if (e.key === 'Tab') {
         e.preventDefault()
-        setHidden((h) => !h)
-      } else if (mode === 'direct') {
+        walk(e.shiftKey ? -1 : 1)
+      } else if ((e.key === 'h' || e.key === 'H') && !e.metaKey && !e.ctrlKey) setHidden((h) => !h)
+      else if (mode === 'direct') {
         // Direct takes the song's keys itself
         if (e.key === 't' || e.key === 'Escape') toMode('stage')
+      } else if (e.key === 'Enter') {
+        // the value of the focused knob, or of the strip macro Tab is on, typed in its field; a button keeps its Enter
+        const el = document.activeElement
+        if (el !== document.body && !el?.matches('.knob')) return
+        const macro = tabbing.current && el instanceof HTMLElement ? el.dataset.macro : undefined
+        const t = macro ? { macro } : focused && { knob: focused }
+        if (!t || !document.querySelector(`[data-${macro ? 'macro' : 'knob'}="${CSS.escape(macro ?? focused!)}"]`))
+          return
+        e.preventDefault()
+        setTyping(t)
       } else if (e.key === 't') toMode('direct')
       else if (e.key === 'i') {
         setReadout((r) => !r)
@@ -743,6 +826,8 @@ export function App() {
         setFocus(null)
         setLearning(null)
         setArmed(null)
+        if (tabbing.current && document.activeElement instanceof HTMLElement) document.activeElement.blur()
+        tabbing.current = false
       } else if (e.key === 'l') toggleLoop()
       else if (e.key === 'r') mutateShown()
       // the hand fader's keys are Stage's and Edit's: in Play every change rides a transition
@@ -760,14 +845,18 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey)
   })
 
-  // the wheel over the picture turns the focused knob (over a knob, each knob takes its own)
+  // the wheel over the picture turns the knob or strip macro Tab is on, and else nothing (over a knob, each knob
+  // takes its own)
   const app = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = app.current!
     const onWheel = (e: WheelEvent) => {
-      if (!focused || mode === 'play' || !(e.target instanceof Element && e.target.matches('.picture'))) return
+      const on = document.activeElement
+      if (!tabbing.current || !(on instanceof HTMLElement) || !on.checkVisibility()) return
+      const t = on.dataset.knob ? { knob: on.dataset.knob } : on.dataset.macro ? { macro: on.dataset.macro } : null
+      if (!t || mode === 'play' || !(e.target instanceof Element && e.target.matches('.picture'))) return
       e.preventDefault()
-      nudge({ knob: focused }, wheelSteps(e))
+      nudge(t, wheelTurn(e))
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
@@ -826,6 +915,7 @@ export function App() {
         Object.assign(lives.a, newLive())
         Object.assign(lives.b, newLive())
         setPair({ a: f.a, b: f.b })
+        setTurned({ a: new Set(), b: new Set() })
         setFader(f.at)
         setEdge(f.edge)
       }}
@@ -960,14 +1050,15 @@ export function App() {
             </button>
             {mode === 'direct' ? (
               <span className="dim keys">
-                Tab hides · Space play · Home rewinds · wheel zooms · shift-drag the waveform loops · double-click adds
-                a key · T or Esc to Stage
+                H hides · Space play · Home rewinds · wheel zooms · shift-drag the waveform loops · double-click adds a
+                key · T or Esc to Stage
               </span>
             ) : (
               <span className="dim keys">
-                Tab hides · E edit · D decks · T direct · Space pause · 1-0 looks · [ ] presets · ← → chips · ↑ ↓ knob ·
-                PgDn PgUp strip page · M MIDI learn · S save · P preset · A B side · , . fader · X swap · L loop · R
-                mutate · C roll chip · ⇧C roll look · F play · O autopilot · N next · I readout
+                H hides · Tab live knobs · Enter types · E edit · D decks · T direct · Space pause · 1-0 looks · [ ]
+                presets · ← → chips · ↑ ↓ knob · PgDn PgUp strip page · M MIDI learn · S save · P preset · A B side · ,
+                . fader · X swap · L loop · R mutate · C roll chip · ⇧C roll look · F play · O autopilot · N next · I
+                readout
               </span>
             )}
           </header>

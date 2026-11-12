@@ -598,12 +598,48 @@ button {
   align-items: center;
   user-select: none;
   touch-action: none;
-  cursor: ns-resize;
   border-radius: 8px;
   padding: 2px 0;
 }
 .knob.focused {
   background: rgba(127, 216, 255, 0.12);
+}
+/* Tab's stop, and the typed value's field with its hint above, over the page (Knob.tsx) */
+.knob:focus {
+  outline: none;
+}
+.knob:focus-visible,
+.knob.typing {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 8px;
+}
+.knob-type {
+  width: 54px;
+  margin-top: -4px;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  background: #0b0f15;
+  color: #fff;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 1px 2px;
+}
+.type-hint {
+  position: fixed;
+  transform: translate(-50%, calc(-100% - 4px));
+  white-space: nowrap;
+  z-index: 50;
+  pointer-events: none;
+  font-size: 10.5px;
+  background: #10202c;
+  border: 1px solid var(--accent);
+  color: #dff4ff;
+  padding: 2px 7px;
+  border-radius: 5px;
 }
 .knob svg path {
   fill: none;
