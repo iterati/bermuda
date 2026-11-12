@@ -1,9 +1,11 @@
 // The analysis of synthetic sound: click tracks at known tempi give their tempo and where their beats fall, tones
 // at known pitches light their own band and read dark or light, a fast sharp click drives where a slow soft swell
 // grooves, and silence reads as none; the felt beat snaps each beat's move to its start. The tap loads from a file
-// of its own, as a page whose policy refuses blob: and data: scripts (the board viewer's) would refuse it.
-import { describe, expect, it } from 'vitest'
-import { felt, hear, heardAt, newEar, TAP, type Ear } from './music'
+// of its own, as a page whose policy refuses blob: and data: scripts (the board viewer's) would refuse it. A tab's
+// share, through a stubbed picker, feeds the tap its sound alone, its video stopped and nothing played out; one
+// without sound is refused, and one the browser ends stops the listening.
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { felt, hear, heardAt, listen, newEar, NO_TAB_AUDIO, TAP, type Ear } from './music'
 import { BANDS } from './scene'
 
 const RATE = 44100
@@ -109,5 +111,114 @@ describe('the tap', () => {
   it('loads from a file of its own, never a blob: or data: URL', () => {
     expect(TAP).not.toMatch(/^(blob|data):/)
     expect(TAP).toMatch(/tap[\w.-]*\.js/)
+  })
+})
+
+// The browser's side of a tab's share, stubbed: a track the browser may end, a stream of such tracks, and an audio
+// graph that keeps what each node is connected to, its tap's port fed by hand.
+class Track extends EventTarget {
+  readyState = 'live'
+  constructor(readonly kind: 'audio' | 'video') {
+    super()
+  }
+  stop() {
+    this.readyState = 'ended'
+  }
+}
+
+class Stream {
+  constructor(public tracks: Track[]) {}
+  getTracks = () => this.tracks
+  getAudioTracks = () => this.tracks.filter((t) => t.kind === 'audio')
+  getVideoTracks = () => this.tracks.filter((t) => t.kind === 'video')
+  removeTrack = (t: Track) => (this.tracks = this.tracks.filter((u) => u !== t))
+}
+
+class Node {
+  to: Node[] = []
+  connect(to: Node) {
+    this.to.push(to)
+  }
+}
+
+function share(tracks: Track[]) {
+  const got: { ctx?: Context; tap?: Tap; fed?: Stream; source?: Node } = {}
+  class Context {
+    sampleRate = RATE
+    currentTime = 0
+    closed = false
+    destination = new Node()
+    audioWorklet = { addModule: async () => undefined }
+    constructor() {
+      got.ctx = this
+    }
+    createMediaStreamSource(stream: Stream) {
+      got.fed = stream
+      return (got.source = new Node())
+    }
+    async close() {
+      this.closed = true
+    }
+  }
+  class Tap extends Node {
+    port: { onmessage?: (e: { data: { at: number; samples: Float32Array } }) => void } = {}
+    constructor() {
+      super()
+      got.tap = this
+    }
+  }
+  const getDisplayMedia = vi.fn(async () => new Stream(tracks))
+  vi.stubGlobal('AudioContext', Context)
+  vi.stubGlobal('AudioWorkletNode', Tap)
+  vi.stubGlobal('navigator', { mediaDevices: { getDisplayMedia } })
+  return { got, getDisplayMedia }
+}
+
+describe("a tab's sound", () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('feeds the tap the sound alone, its video stopped at once, and plays nothing out', async () => {
+    const [sound, video] = [new Track('audio'), new Track('video')]
+    const { got, getDisplayMedia } = share([sound, video])
+    const l = await listen('tab')
+    expect(getDisplayMedia).toHaveBeenCalledWith({ audio: true, video: true })
+    expect(video.readyState).toBe('ended')
+    expect(got.fed!.tracks).toEqual([sound])
+    expect(sound.readyState).toBe('live')
+    expect(l.name).toBe('tab audio')
+    expect([l.song, l.file]).toEqual([undefined, undefined])
+    // the stream's source goes to the tap and nowhere else
+    expect(got.source!.to).toEqual([got.tap])
+    // a second of a 1 kHz tone, as the tap posts it, is heard
+    const block = new Float32Array(1024)
+    for (let i = 0; i < RATE; i += block.length) {
+      block.forEach((_, j) => (block[j] = 0.5 * Math.sin((2 * Math.PI * 1000 * (i + j)) / RATE)))
+      got.tap!.port.onmessage!({ data: { at: 0.25, samples: block } })
+    }
+    expect(l.start).toBe(0.25)
+    expect(l.ear.frame).toBeGreaterThan(80)
+    expect(l.ear.features.level).toBeGreaterThan(0.5)
+    l.stop()
+  })
+
+  it('a share without sound is refused in plain words, and stopped', async () => {
+    const video = new Track('video')
+    const { got } = share([video])
+    await expect(listen('tab')).rejects.toThrow(NO_TAB_AUDIO)
+    expect(video.readyState).toBe('ended')
+    expect(got.fed).toBeUndefined()
+    expect(got.ctx!.closed).toBe(true)
+  })
+
+  it('a share the browser ends stops the listening and says it ended', async () => {
+    const sound = new Track('audio')
+    const { got } = share([sound, new Track('video')])
+    const ended = vi.fn()
+    await listen('tab', ended)
+    expect(ended).not.toHaveBeenCalled()
+    sound.dispatchEvent(new Event('ended'))
+    expect(ended).toHaveBeenCalledOnce()
+    expect(sound.readyState).toBe('ended')
+    expect(got.ctx!.closed).toBe(true)
   })
 })

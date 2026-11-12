@@ -3,8 +3,8 @@
 // own previews either side of the mix, like a DJ mixer, so B can be cued while A plays. The controls edit one side,
 // A or B; every change is instant, and so is MIDI, which plays the side being edited and the fader. Play is the
 // picture alone with the bank over it: every change there rides a timed transition, the fader run from the side
-// showing to the other with the change loaded on it, and the autopilot walks the bank. A song or the microphone,
-// once heard, sets the clock's tempo and lands Play's transitions on its beats. Key I shows the frame-time readout
+// showing to the other with the change loaded on it, and the autopilot walks the bank. A song, the microphone or
+// a tab, once heard, sets the clock's tempo and lands Play's transitions on its beats. Key I shows the frame-time readout
 // over the picture in every view.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { director, missingKeys, pruneTimeline, type Shot } from './direct'
@@ -27,7 +27,7 @@ import {
 } from './midi'
 import { morphSize } from './morph'
 import { applyPreset, capturePreset, copyLive, dice, newLive, setKnob, setMacro, update } from './motion'
-import { listen, type Heard, type Listening } from './music'
+import { listen, type From, type Heard, type Listening } from './music'
 import {
   bendOf,
   entryName,
@@ -209,14 +209,16 @@ export function App() {
   const [more, setMore] = useState(false)
   const [tab, setTab] = useState<(typeof TABS)[number]>('Motion')
   const [bpm, setBpm] = useState(60)
-  // the song or microphone being heard, and what it heard as the picture last drew
+  // the song, microphone or tab being heard, and what it heard as the picture last drew; and why a tab's sound,
+  // once heard, is heard no more
   const [music, setMusic] = useState<Listening | null>(null)
   const [heard, setHeard] = useState<Heard>()
+  const [ended, setEnded] = useState<string>()
   // the clock's tempo: the music's once it has found the beat, in whole bpm moved only when the music's moves a
   // whole bpm off it, so a tempo between two holds the autopilot's timer still
   const [heardBpm, setHeardBpm] = useState<number>()
   const tempo = heardBpm ?? bpm
-  // each ask for a song or the microphone: one answered after a later ask stops at once
+  // each ask for a song, the microphone or a tab: one answered after a later ask stops at once
   const asked = useRef(0)
   const [running, setRunning] = useState(true)
   const [lives] = useState(() => ({ a: newLive(), b: newLive() }))
@@ -250,24 +252,33 @@ export function App() {
     },
     [midi, connect],
   )
-  // a song or the microphone in place of what was heard before
-  const unhear = useCallback(() => {
+  // a song, the microphone or a tab in place of what was heard before; a tab's share ended stops it as stop does
+  const forget = useCallback(() => {
     asked.current++
-    music?.stop()
     setMusic(null)
     setHeard(undefined)
     setHeardBpm(undefined)
-  }, [music])
+  }, [])
+  const unhear = useCallback(() => {
+    music?.stop()
+    forget()
+  }, [music, forget])
   const hear = useCallback(
-    (from: File | 'mic') => {
+    (from: From) => {
       unhear()
+      setEnded(undefined)
       const ask = asked.current
-      listen(from).then(
+      const gone = () => {
+        if (ask !== asked.current) return
+        forget()
+        setEnded("the tab's share ended, so it is heard no more")
+      }
+      listen(from, gone).then(
         (l) => (ask === asked.current ? setMusic(l) : l.stop()),
         (err: Error) => setError(`music: ${err.message}`),
       )
     },
-    [unhear],
+    [unhear, forget],
   )
   const saveControls = useCallback((next: Controls) => {
     localStorage.setItem(CONTROLS, JSON.stringify(next))
@@ -928,7 +939,7 @@ export function App() {
     />
   )
 
-  const musicBlock = <Music music={music} heard={heard} onListen={hear} onStop={unhear} />
+  const musicBlock = <Music music={music} heard={heard} ended={ended} onListen={hear} onStop={unhear} />
 
   const midiBlock = (
     <Midi

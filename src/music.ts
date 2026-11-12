@@ -1,4 +1,4 @@
-// Music: what the app hears in a song file or the microphone, read from the samples alone. Each hop of samples
+// Music: what the app hears in a song file, the microphone or a browser tab, read from the samples alone. Each hop of samples
 // is one frame: its spectrum gives the loudness in eight bands, the tone (where the sound sits, dark to light)
 // and the onset strength (how much louder it got, bin by bin, each band counting alike); the last few seconds of
 // onsets give the tempo (their autocorrelation) and where the beats fall (a comb of beats laid over them), and the
@@ -296,7 +296,14 @@ export function heardAt(ear: Ear, time: number): Heard {
 // the tap's URL: its own file beside the build's assets, never a blob: or data: URL, which a page's policy may refuse
 export { TAP }
 
-// A song or the microphone being heard: the audio clock's time at the ear's first sample, and the song's player.
+// Where the music comes from: a song file, the microphone, or what a browser tab plays
+export type From = File | 'mic' | 'tab'
+
+// what a tab shared without its sound tells
+export const NO_TAB_AUDIO = 'No tab audio: pick a tab and tick Share tab audio'
+
+// A song, the microphone or a tab being heard: the audio clock's time at the ear's first sample, and the song's
+// player.
 export type Listening = {
   name: string
   ctx: AudioContext
@@ -307,12 +314,15 @@ export type Listening = {
   stop: () => void
 }
 
-// Hear a song file, playing it round, or the microphone.
-export async function listen(from: File | 'mic'): Promise<Listening> {
+// Hear a song file, playing it round, the microphone, or a tab's sound, shared through the browser's picker (which
+// offers a tab's sound only with its video asked for too: the video stops at once). The tab plays its sound
+// itself, so it is heard and never played out again; a share that ends (the tab closed, or its sharing stopped)
+// stops the listening and calls ended.
+export async function listen(from: From, ended?: () => void): Promise<Listening> {
   const ctx = new AudioContext()
   const urls: string[] = []
   const url = (o: Blob) => (urls.push(URL.createObjectURL(o)), urls[urls.length - 1])
-  const song = from === 'mic' ? undefined : new Audio(url(from))
+  const song = typeof from === 'string' ? undefined : new Audio(url(from))
   let stream: MediaStream | undefined
   const stop = () => {
     song?.pause()
@@ -321,20 +331,28 @@ export async function listen(from: File | 'mic'): Promise<Listening> {
     urls.forEach(URL.revokeObjectURL)
   }
   const out: Listening = {
-    name: from === 'mic' ? 'microphone' : from.name,
+    name: from === 'mic' ? 'microphone' : from === 'tab' ? 'tab audio' : from.name,
     ctx,
     ear: newEar(ctx.sampleRate),
     start: ctx.currentTime,
     song,
-    file: from === 'mic' ? undefined : from,
+    file: typeof from === 'string' ? undefined : from,
     stop,
   }
   try {
     if (!ctx.audioWorklet) throw new Error('the browser hears music only on a secure page: localhost, https or a file')
-    if (!song)
+    if (from === 'mic')
       stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
       })
+    if (from === 'tab') {
+      stream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true })
+      for (const video of stream.getVideoTracks()) {
+        video.stop()
+        stream.removeTrack(video)
+      }
+      if (!stream.getAudioTracks().length) throw new Error(NO_TAB_AUDIO)
+    }
     await ctx.audioWorklet.addModule(TAP)
     const tap = new AudioWorkletNode(ctx, 'bermuda-tap', { numberOfOutputs: 0 })
     let first = true
@@ -350,6 +368,8 @@ export async function listen(from: File | 'mic'): Promise<Listening> {
       // a browser that wants a press first leaves it paused, for the play button
       await song.play().catch(() => undefined)
     }
+    // a track stopped here fires no ended, so only the browser's ending of the share stops it
+    if (from === 'tab') stream!.getAudioTracks()[0].addEventListener('ended', () => (stop(), ended?.()), { once: true })
   } catch (err) {
     stop()
     throw err

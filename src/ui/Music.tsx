@@ -1,13 +1,15 @@
-// The music block: a song file from this computer (played round) or the microphone; what is heard (the tempo and
+// The music block: a song file from this computer (played round), the microphone or a browser tab's sound; why a
+// tab is heard no more, once its share ends; what is heard (the tempo and
 // the beat, the tone, the drive and the feel it sets, the eight bands); and wiring the look to it.
-import { wire, type Heard, type Listening } from '../music'
+import { wire, type From, type Heard, type Listening } from '../music'
 import { BANDS } from '../scene'
 import { useCtl } from './controls'
 
 type Props = {
   music: Listening | null
   heard?: Heard
-  onListen: (from: File | 'mic') => void
+  ended?: string // why the tab heard last is heard no more
+  onListen: (from: From) => void
   onStop: () => void
 }
 
@@ -26,7 +28,7 @@ function Meter({ ends: [lo, hi], value, title }: { ends: [string, string]; value
   )
 }
 
-export function Music({ music, heard, onListen, onStop }: Props) {
+export function Music({ music, heard, ended, onListen, onStop }: Props) {
   const { scene, edit } = useCtl()
   const song = music?.song
   const wired = [...scene.modulators, ...scene.macros].some((m) => m.listen)
@@ -49,6 +51,13 @@ export function Music({ music, heard, onListen, onStop }: Props) {
           </label>
           <button className="mini" title="hear the room through the microphone" onClick={() => onListen('mic')}>
             mic
+          </button>
+          <button
+            className="mini"
+            title="listen to a tab: what another tab plays, such as a music video (pick the tab and tick Share tab audio)"
+            onClick={() => onListen('tab')}
+          >
+            tab
           </button>
           {music && (
             <button className="mini" title="stop listening" onClick={onStop}>
@@ -91,9 +100,11 @@ export function Music({ music, heard, onListen, onStop }: Props) {
             </>
           )}
         </div>
+      ) : ended ? (
+        <div className="dim music-now music-ended">{ended}</div>
       ) : (
         <div className="dim music-now">
-          a song or the mic sets the tempo, lands Play&apos;s changes on the beat and drives what listens to it
+          a song, the mic or a tab sets the tempo, lands Play&apos;s changes on the beat and drives what listens to it
         </div>
       )}
       {heard && (
