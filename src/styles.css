@@ -245,7 +245,7 @@ button {
   right: 320px;
   padding: 6px 10px;
 }
-/* the frame-time readout (I): a small panel centred over the picture, under the Stage's fader */
+/* the frame-time readout (I): a small panel centred over the picture, under the Stage's fader (its foot at 128px) */
 .frame-time {
   position: absolute;
   top: 140px;
@@ -258,6 +258,9 @@ button {
     monospace;
   text-align: center;
   z-index: 3;
+}
+.edit .frame-time {
+  left: calc((100% - 560px) / 2);
 }
 .frame-parts {
   cursor: pointer;

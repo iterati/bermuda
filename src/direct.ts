@@ -208,7 +208,10 @@ export async function exportVideo(job: ExportJob): Promise<{ file: Blob; video: 
     const shot = director(job.timeline, job.looks)
     // every program its frames draw on compiled and warmed before the first, so none draws on the fallback
     renderer.warm(shot.sets)
-    while (renderer.step()) await new Promise((go) => setTimeout(go))
+    while (renderer.step()) {
+      job.signal?.throwIfAborted()
+      await new Promise((go) => setTimeout(go))
+    }
     const total = Math.round((to - from) * fps)
     for (let n = 0; n < total; n++) {
       job.signal?.throwIfAborted()

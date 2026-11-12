@@ -298,14 +298,12 @@ export function App() {
   const directShot = useRef<(() => Shot) | null>(null)
   // what the picture may draw next, for its warm-up: the bank's entries and links, then the loaded timeline's keys
   // and edges
+  const timelineSets = useMemo(() => (timeline ? director(timeline, looks).sets : []), [timeline, looks])
+  const { scenes: entered, links } = bank
   const ahead = useMemo(() => {
     const at = (entry: string) => entryScene(looks, entry)!
-    return [
-      ...bank.scenes.map((e) => needs(at(e))),
-      ...bank.links.map(([a, b]) => needs(at(a), at(b))),
-      ...(timeline ? director(timeline, looks).sets : []),
-    ]
-  }, [bank, looks, timeline])
+    return [...entered.map((e) => needs(at(e))), ...links.map(([a, b]) => needs(at(a), at(b))), ...timelineSets]
+  }, [entered, links, looks, timelineSets])
   // a look gone from the library takes its entries out of the bank and its keys out of the timeline
   const prune = (next: Scene[]) => {
     const kept = pruneBank(bank, library(next))
