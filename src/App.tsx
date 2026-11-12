@@ -25,7 +25,7 @@ import {
   type Learning,
 } from './midi'
 import { morphSize } from './morph'
-import { applyPreset, capturePreset, newLive, setKnob, setMacro, update } from './motion'
+import { applyPreset, capturePreset, dice, newLive, setKnob, setMacro, update } from './motion'
 import { listen, type Heard, type Listening } from './music'
 import {
   bendOf,
@@ -42,6 +42,7 @@ import {
 } from './play'
 import {
   allLevels,
+  chipKnobs,
   CHIPS,
   clamp,
   depthOf,
@@ -68,7 +69,7 @@ import {
 import { Bank } from './ui/Bank'
 import { Chain } from './ui/Chain'
 import { Direct, type Video } from './ui/Direct'
-import { CtlContext, Section, type Ctl } from './ui/controls'
+import { CtlContext, Dice, Section, type Armed, type Ctl } from './ui/controls'
 import { Deck } from './ui/Deck'
 import { Fader } from './ui/Fader'
 import { wheelSteps } from './ui/Knob'
@@ -211,6 +212,8 @@ export function App() {
   const [midi, setMidi] = useState<MIDIAccess | null>(null)
   const [inputs, setInputs] = useState<string[]>([])
   const [learning, setLearning] = useState<Learning | null>(null)
+  // the macro learning by example, and the scene as it was armed
+  const [armed, setArmed] = useState<Armed | null>(null)
   const [controls, setControls] = useState(initialControls.value)
   const [positions, setPositions] = useState<ReadonlyMap<string, number>>(new Map())
   // the decks' preview canvases, while Decks shows them
@@ -500,6 +503,11 @@ export function App() {
       : 'macro' in learning && !scene.macros.some((m) => m.id === learning.macro))
       ? null
       : learning
+  // a macro armed on another look, or one an edit took away, is disarmed
+  const armedNow =
+    armed && armed.before.name === scene.name && scene.macros.some((m) => m.id === armed.id) ? armed : null
+  // a look saved in this browser is locked against the dice
+  const locked = saved.some((s) => s.name === scene.name)
 
   // the chips in chain order, for the arrow keys
   const chips = useMemo(
@@ -669,6 +677,9 @@ export function App() {
     learning: learningNow,
     learn: learnMidi,
     positions,
+    locked,
+    armed: armedNow,
+    arm: setArmed,
   }
 
   useEffect(() => {
@@ -719,6 +730,7 @@ export function App() {
       else if (e.key === 'Escape') {
         setFocus(null)
         setLearning(null)
+        setArmed(null)
       } else if (e.key === 'l') toggleLoop()
       else if (e.key === 'r') mutateShown()
       // the hand fader's keys are Stage's and Edit's: in Play every change rides a transition
@@ -727,6 +739,10 @@ export function App() {
       else if (e.key === ',' || e.key === '.')
         setFader((x) => Math.min(1, Math.max(0, x + (e.key === '.' ? 0.05 : -0.05))))
       else if (e.key === 'x') swap()
+      else if ((e.key === 'c' || e.key === 'C') && !locked) {
+        const at = (e.key === 'c' ? chipKnobs(scene, pickedChip) : knobsOf(scene)).map((k) => k.address)
+        edit((d) => dice(d, at, Math.random))
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -857,6 +873,7 @@ export function App() {
               value={scene.name}
               onChange={(e) => e.target.value && edit((d) => (d.name = e.target.value))}
             />
+            <Dice at={knobsOf(scene).map((k) => k.address)} what="the whole look" />
             <span className="seg">
               <button className={mode === 'stage' ? 'on' : ''} onClick={() => toMode('stage')}>
                 Stage
@@ -935,7 +952,7 @@ export function App() {
               <span className="dim keys">
                 Tab hides · E edit · D decks · T direct · Space pause · 1-0 looks · [ ] presets · ← → chips · ↑ ↓ knob ·
                 PgDn PgUp strip page · M MIDI learn · S save · P preset · A B side · , . fader · X swap · L loop · R
-                mutate · F play · O autopilot · N next
+                mutate · C roll chip · ⇧C roll look · F play · O autopilot · N next
               </span>
             )}
           </header>

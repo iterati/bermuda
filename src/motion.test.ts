@@ -2,7 +2,18 @@ import { describe, expect, it } from 'vitest'
 import { moveLevel, removeLevel } from './edit'
 import { level, LOOKS, mod, scene, star } from './looks'
 import { gcd } from './loop'
-import { advance, applyPreset, capturePreset, detunePeriods, newLive, setMacro, update, wave } from './motion'
+import {
+  advance,
+  applyPreset,
+  capturePreset,
+  detunePeriods,
+  dice,
+  learnMacro,
+  newLive,
+  setMacro,
+  update,
+  wave,
+} from './motion'
 import { FEATURES, hardRange, knobsOf, resolve, type Listen, type Modulator, type Scene } from './scene'
 import type { Heard } from './music'
 
@@ -88,6 +99,70 @@ describe('motion', () => {
     const p = capturePreset(s, 'p')
     const moved = update(s, (d) => (d.frame.zoom.value = 3))
     expect(applyPreset(moved, p)).toEqual(s)
+  })
+
+  describe('dice', () => {
+    const look = LOOKS.find((l) => l.name.startsWith('Tapestry 7 '))!
+    const all = knobsOf(look).map((k) => k.address)
+    const scale = 'levels[h1].affine.scale'
+    const m = 'levels[h1].variants[0].shape.m'
+
+    it('roll every knob with a play range inside it and leave the rest', () => {
+      const rolled = update(look, (d) => dice(d, all, Math.random))
+      for (const { address, knob } of knobsOf(rolled)) {
+        const was = resolve(look, address)!
+        if (was.play) expect(knob.value, address).toSatisfy((v: number) => v >= was.play![0] && v <= was.play![1])
+        else expect(knob.value, address).toBe(was.value)
+      }
+    })
+
+    it('land on the low end, the high end and the middle', () => {
+      const at = (r: number) => update(look, (d) => dice(d, [scale, m], () => r))
+      expect(resolve(at(0), scale)!.value).toBe(1.35)
+      expect(resolve(at(1), scale)!.value).toBe(1.75)
+      expect(resolve(at(0.5), scale)!.value).toBeCloseTo(1.55)
+      expect(resolve(at(0), m)!.value).toBe(1.01)
+      expect(resolve(at(1), m)!.value).toBe(6)
+      expect(resolve(at(0.5), m)!.value).toBeCloseTo(3.505)
+    })
+  })
+
+  describe('learnMacro', () => {
+    const armed = () => update(base(), (d) => d.macros.push({ id: 'x', name: 'X', value: 0, targets: [] }))
+
+    it('learns the knobs moved since it was armed, from before to after, at 1, and 0 puts them back', () => {
+      const before = armed()
+      const learned = update(before, (d) => {
+        d.levels[0].affine.scale.value = 2.4
+        d.frame.zoom.value = 3
+        learnMacro(d, 'x', before)
+      })
+      expect(learned.macros[0].value).toBe(1)
+      expect(learned.macros[0].targets).toEqual([
+        { knob: 'frame.zoom', from: before.frame.zoom.value, to: 3 },
+        { knob: 'levels[a].affine.scale', from: 2, to: 2.4 },
+      ])
+      const back = update(learned, (d) => setMacro(d, 'x', 0))
+      expect(back.frame.zoom.value).toBe(before.frame.zoom.value)
+      expect(back.levels[0].affine.scale.value).toBe(2)
+    })
+
+    it('keeps an earlier still target from, taking its value as to, and learns no knob moved back', () => {
+      const before = update(armed(), (d) => {
+        d.macros[0].targets.push({ knob: 'levels[a].weight', from: 0.2, to: 0.9 })
+        d.levels[0].weight.value = 0.6
+      })
+      const learned = update(before, (d) => {
+        d.frame.zoom.value = 3
+        d.frame.zoom.value = before.frame.zoom.value
+        d.levels[0].affine.scale.value = 1.8
+        learnMacro(d, 'x', before)
+      })
+      expect(learned.macros[0].targets).toEqual([
+        { knob: 'levels[a].weight', from: 0.2, to: 0.6 },
+        { knob: 'levels[a].affine.scale', from: 2, to: 1.8 },
+      ])
+    })
   })
 })
 

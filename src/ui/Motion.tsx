@@ -1,9 +1,9 @@
 // The modulators and macros. A modulator is one line, its chip to drag onto any knob, its editor opened under it
 // by a click on the line; a macro's slider moves all its knobs at once. Either can listen to the music: a modulator
-// to its beats or a feature, a macro to a feature.
+// to its beats or a feature, a macro to a feature. A macro learns by example: arm it, move knobs, press learn again.
 import { useState } from 'react'
 import { prune } from '../edit'
-import { detunePeriods, setMacro, wave } from '../motion'
+import { detunePeriods, learnMacro, setMacro, wave } from '../motion'
 import { blend } from '../music'
 import { clamp, FEATURES, hardRange, LISTENS, resolve, WAVES, type Modulator } from '../scene'
 import { Choice, Num, useCtl } from './controls'
@@ -227,7 +227,7 @@ export function Modulators() {
 }
 
 export function Macros() {
-  const { scene, live, edit, focus, setFocus } = useCtl()
+  const { scene, live, edit, focus, setFocus, armed, arm } = useCtl()
   const pairs = scene.presets.flatMap((_, i) => scene.presets.flatMap((_, j) => (i === j ? [] : [[i, j]])))
   return (
     <div className="panel-block">
@@ -268,8 +268,8 @@ export function Macros() {
         </span>
       </div>
       {scene.macros.map((m) => (
-        <div className="mod" key={m.id}>
-          <div className="mod-head">
+        <div className={`mod${armed?.id === m.id ? ' armed' : ''}`} key={m.id}>
+          <div className="mod-head macro-head">
             <input
               className="macro-name"
               value={m.name}
@@ -292,6 +292,17 @@ export function Macros() {
             />
             <MidiLearn target={{ macro: m.id }} />
             <button
+              className={`mini${armed?.id === m.id ? ' armed' : ''}`}
+              disabled={!!armed && armed.id !== m.id}
+              title="move the knobs this macro should drive, then press learn again"
+              onClick={() => {
+                if (armed) edit((d) => learnMacro(d, armed.id, armed.before))
+                arm(armed ? null : { id: m.id, before: scene })
+              }}
+            >
+              learn
+            </button>
+            <button
               className="mini"
               onClick={() =>
                 edit((d) => {
@@ -303,6 +314,7 @@ export function Macros() {
               ×
             </button>
           </div>
+          {armed?.id === m.id && <div className="armed-note">move knobs, by hand or MIDI, then press learn</div>}
           <input
             className="macro-slider"
             type="range"

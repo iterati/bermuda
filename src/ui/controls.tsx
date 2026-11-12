@@ -14,9 +14,11 @@ import {
   setLattice,
   unlink,
 } from '../edit'
+import { dice } from '../motion'
 import {
   BACKGROUNDS,
   CELLS,
+  chipKnobs,
   clamp,
   folded,
   hardRange,
@@ -55,7 +57,11 @@ export type Ctl = {
   learning: Learning | null // what the next MIDI control or button maps to
   learn: (target: Learning | null) => void
   positions: ReadonlyMap<string, number> // each MIDI control's last position, 0 to 1, by midi.ts keyOf
+  locked: boolean // a look saved in this browser, which the dice leave alone
+  armed: Armed | null // the macro learning by example, and the scene as it was armed
+  arm: (armed: Armed | null) => void
 }
+export type Armed = { id: string; before: Scene }
 export const CtlContext = createContext<Ctl | null>(null)
 export const useCtl = () => useContext(CtlContext)!
 
@@ -164,18 +170,56 @@ function Extra({ label, at, has, set }: { label: string; at: Address; has: boole
   )
 }
 
-const Group = ({ title, children, actions }: { title: string; children: ReactNode; actions?: ReactNode }) => (
-  <div className="group">
-    <div className="group-title">
-      <span>{title}</span>
-      {actions}
+// A roll of the knobs at these addresses, each to anywhere inside its play range; a look saved in this browser is
+// locked against it.
+export function Dice({ at, what }: { at: Address[]; what: string }) {
+  const { scene, edit, locked } = useCtl()
+  const ranged = at.some((a) => resolve(scene, a)!.play)
+  return (
+    <button
+      className="mini dice"
+      disabled={locked || !ranged}
+      title={
+        locked
+          ? 'a saved look is locked: rename it to roll'
+          : ranged
+            ? `roll ${what}: each knob with a play range to anywhere inside it`
+            : 'no play ranges here: give a knob one with + play range'
+      }
+      onClick={() => edit((d) => dice(d, at, Math.random))}
+    >
+      ⚄
+    </button>
+  )
+}
+
+const Group = ({
+  title,
+  chip,
+  children,
+  actions,
+}: {
+  title: string
+  chip: string
+  children: ReactNode
+  actions?: ReactNode
+}) => {
+  const { scene } = useCtl()
+  return (
+    <div className="group">
+      <div className="group-title">
+        <span>{title}</span>
+        <Dice at={chipKnobs(scene, chip).map((k) => k.address)} what="this chip" />
+        {actions}
+      </div>
+      <div className="group-body">{children}</div>
     </div>
-    <div className="group-body">{children}</div>
-  </div>
-)
+  )
+}
 
 // A row: its title, its menus, pad and buttons (children), then its knobs; the knobs that fold (dead, or at rest
-// and untouched) go into a +N at its end, which opens the row to show them. A focused knob never folds.
+// and untouched) go into a +N at its end, which opens the row to show them. A focused knob never folds. A row with a
+// play range ends in its dice, which roll its knobs, folded ones too.
 function Row({ title, knobs, children }: { title?: string; knobs: [string, Address][]; children?: ReactNode }) {
   const { scene, focus } = useCtl()
   const [open, setOpen] = useState(false)
@@ -207,6 +251,7 @@ function Row({ title, knobs, children }: { title?: string; knobs: [string, Addre
           {open ? '−' : `+${hidden.length}`}
         </button>
       )}
+      {knobs.some(([, at]) => resolve(scene, at)!.play) && <Dice at={knobs.map(([, at]) => at)} what="this row" />}
     </div>
   )
 }
@@ -217,7 +262,7 @@ export function Section({ chip }: { chip: string }) {
       return <BackgroundSection />
     case 'frame':
       return (
-        <Group title="Frame">
+        <Group title="Frame" chip="frame">
           <Row
             knobs={[
               ['origin x', 'frame.origin[0]'],
@@ -230,7 +275,7 @@ export function Section({ chip }: { chip: string }) {
       )
     case 'contour':
       return (
-        <Group title="Contour">
+        <Group title="Contour" chip="contour">
           <Row
             knobs={[
               ['rings', 'contour.rings'],
@@ -255,7 +300,7 @@ function BackgroundSection() {
   const { scene, edit } = useCtl()
   const kind = scene.background?.kind ?? 'none'
   return (
-    <Group title="Background">
+    <Group title="Background" chip="background">
       <Choice
         label="kind"
         value={kind}
@@ -303,7 +348,7 @@ function BackgroundSection() {
 function LineSection() {
   const { scene, edit } = useCtl()
   return (
-    <Group title="Line">
+    <Group title="Line" chip="line">
       <Row
         knobs={[
           ['width', 'line.width'],
@@ -343,7 +388,7 @@ function LineSection() {
 function PostSection() {
   const { scene, edit } = useCtl()
   return (
-    <Group title="Composite and post">
+    <Group title="Composite and post" chip="post">
       <Row knobs={[['gamma', 'post.gamma']]}>
         <Choice
           label="composite"
@@ -368,6 +413,7 @@ function PaletteSection() {
   return (
     <Group
       title="Palette"
+      chip="palette"
       actions={
         <select
           className="mini"
@@ -550,7 +596,7 @@ function LevelSection({ id }: { id: string }) {
   )
   if (level.link)
     return (
-      <Group title={`Level ${id}`} actions={actions}>
+      <Group title={`Level ${id}`} chip={id} actions={actions}>
         <p className="note">
           Linked to {level.link}: it shares {level.link}'s knobs, each with its spread across the group. Pick{' '}
           <button className="link" onClick={() => pick(level.link!)}>
@@ -561,7 +607,7 @@ function LevelSection({ id }: { id: string }) {
       </Group>
     )
   return (
-    <Group title={`Level ${id}`} actions={actions}>
+    <Group title={`Level ${id}`} chip={id} actions={actions}>
       <Row
         knobs={[
           ['weight', `${at}.weight`],

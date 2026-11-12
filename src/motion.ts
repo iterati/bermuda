@@ -150,6 +150,31 @@ export function setMacro(draft: Scene, id: string, v: number) {
   }
 }
 
+// A macro learns by example (on a draft): every knob moved since before (the scene as the macro was armed) becomes
+// its target, from where it was to where it is, and an earlier target left still keeps its from and takes where it
+// is as its to. At 1 the macro is the scene as the player left it, so nothing jumps.
+export function learnMacro(draft: Scene, id: string, before: Scene) {
+  const macro = draft.macros.find((m) => m.id === id)!
+  for (const t of macro.targets) t.to = resolve(draft, t.knob)!.value
+  for (const { address, knob } of knobsOf(draft)) {
+    const was = resolve(before, address)?.value
+    if (was === undefined || Math.abs(knob.value - was) <= 1e-9) continue
+    const target = { knob: address, from: was, to: knob.value }
+    const i = macro.targets.findIndex((t) => t.knob === address)
+    if (i < 0) macro.targets.push(target)
+    else macro.targets[i] = target
+  }
+  macro.value = 1
+}
+
+// Roll the knobs at these addresses that have a play range, each anywhere inside it (on a draft).
+export function dice(draft: Scene, addresses: Address[], random: () => number) {
+  for (const address of addresses) {
+    const knob = resolve(draft, address)!
+    if (knob.play) knob.value = knob.play[0] + (knob.play[1] - knob.play[0]) * random()
+  }
+}
+
 // Detune the modulators' periods of a clock unit or more to whole clock units, each the nearest to its own
 // that is coprime with every shorter one's, so the piece rarely repeats, as the Tapestries' periods were
 // picked (on a draft). Shorter periods keep theirs, and so do the modulators that listen to the music.

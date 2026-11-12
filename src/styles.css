@@ -606,6 +606,22 @@ button {
 .knob .live {
   fill: #fff;
 }
+.knob svg .glide {
+  stroke: rgba(0, 0, 0, 0.75);
+  stroke-width: 2;
+  stroke-dasharray: 0 3.2;
+}
+.knob svg .swing {
+  stroke: var(--mod);
+  stroke-width: 2;
+}
+.knob svg .spread {
+  stroke: var(--text);
+  stroke-width: 1.5;
+}
+.knob .tick {
+  fill: var(--accent);
+}
 .knob-value {
   font-variant-numeric: tabular-nums;
   font-size: 11px;
@@ -776,6 +792,19 @@ button {
   padding: 5px 6px;
   margin-bottom: 5px;
 }
+.mod.armed {
+  border-color: #ffc878;
+  background: rgba(255, 200, 120, 0.08);
+}
+.mini.armed {
+  background: rgba(255, 200, 120, 0.25);
+  border-color: #ffc878;
+}
+.armed-note {
+  color: #ffc878;
+  font-size: 11px;
+  margin-top: 3px;
+}
 .mod-head {
   display: flex;
   align-items: center;
@@ -842,7 +871,11 @@ button {
 }
 .macro-name {
   flex: 1;
-  min-width: 0;
+  min-width: 80px;
+}
+.macro-head {
+  flex-wrap: wrap;
+  row-gap: 4px;
 }
 .macro-slider {
   width: 100%;

@@ -1,25 +1,42 @@
 // An on-screen knob: drag up and down (shift for fine), or the wheel over it; its title says what it does. Its arc
 // shows the value inside the kind's hard range (a macro's 0 to 1), the brighter band its play range, the dot its
-// live value; drop a modulator chip on it to modulate it. Its corner names the MIDI control that drives it, dimmed
-// while a fader waits to pick it up.
+// live value; drop a modulator chip on it to modulate it. Its face shows what else moves it: ticks outside the arc
+// where its spread puts the other levels of its link group (or a thin arc to where it runs at the deepest level, on
+// the knobs the shader spreads over depth), a dotted tail for its glide, longer the slower, and an inner arc as far
+// as its modulators swing it. Its corner names the MIDI control that drives it, dimmed while a fader waits to pick
+// it up.
 import { useEffect, useRef } from 'react'
 import { label as midiLabel, mappingOf, positionOf, same, waiting } from '../midi'
 import { setMacro } from '../motion'
-import { clamp, knobKind, resolve, type Address, type MidiTarget } from '../scene'
+import { allLevels, clamp, knobKind, playRange, resolve, type Address, type MidiTarget } from '../scene'
 import { useCtl } from './controls'
 
 export const MOD_DRAG = 'application/x-bermuda-modulator'
 
 const SWEEP = 270
 const R = 17
+// the spread's marks just outside the arc, the modulators' inside it
+const OUT = 20.5
+const IN = 13
+// the knobs whose spread the shader runs over depth, deepest last (render.ts)
+const DEPTH = [
+  'contour.rings',
+  'contour.radialWeight',
+  'line.width',
+  'line.falloff',
+  'line.dots.count',
+  'line.dots.size',
+]
 
-function arc(from: number, to: number) {
-  const point = (f: number) => {
-    const a = ((-135 + SWEEP * f) * Math.PI) / 180
-    return `${22 + R * Math.sin(a)} ${22 - R * Math.cos(a)}`
-  }
+// a place round the sweep (0 to 1) at radius r
+const point = (f: number, r: number) => {
+  const a = ((-135 + SWEEP * f) * Math.PI) / 180
+  return [22 + r * Math.sin(a), 22 - r * Math.cos(a)]
+}
+
+function arc(from: number, to: number, r = R) {
   if (to - from < 1e-4) return ''
-  return `M ${point(from)} A ${R} ${R} 0 ${(to - from) * SWEEP > 180 ? 1 : 0} 1 ${point(to)}`
+  return `M ${point(from, r).join(' ')} A ${r} ${r} 0 ${(to - from) * SWEEP > 180 ? 1 : 0} 1 ${point(to, r).join(' ')}`
 }
 
 export const format = (address: Address, v: number) => {
@@ -82,7 +99,31 @@ export function Knob(props: { label: string } & ({ at: Address } | { macro: stri
     return () => knob.removeEventListener('wheel', onWheel)
   }, [id, isMacro, nudge])
   const a = (live ?? value) !== value ? f(live!) : undefined
-  const dot = a === undefined ? undefined : ((-135 + SWEEP * a) * Math.PI) / 180
+  // the levels following this knob's level, which play it with its spread (motion.ts advance)
+  const own = /(?:^levels|\.below)\[([^\]]+)\](?!.*\.below\[)/.exec(id)?.[1]
+  const followers =
+    knob?.spread && own
+      ? allLevels(scene.levels)
+          .find(({ level }) => level.id === own)!
+          .list.filter((l) => l.link === own).length
+      : 0
+  const ticks = Array.from({ length: followers }, (_, i) => f(value + (knob!.spread! * (i + 1)) / (followers + 1)))
+  const depth = knob?.spread && DEPTH.includes(id) ? [value, value + knob.spread].map(f).sort((x, y) => x - y) : []
+  const glide = knob?.glide ? 0.04 + 0.21 * Math.sqrt(knob.glide / 60) : 0
+  // how far down and up the modulators swing it: a wave either side, a feature up from where it rests by its depth
+  const swing = scene.modulators.flatMap((m) =>
+    m.targets
+      .filter((t) => t.knob === id)
+      .map((t) =>
+        m.listen && m.listen !== 'beats'
+          ? [Math.max(0, -t.depth), Math.max(0, t.depth)]
+          : [Math.abs(t.depth), Math.abs(t.depth)],
+      ),
+  )
+  const [plo, phi] = knob ? playRange(id, knob) : [lo, hi]
+  const reach = (v: number) => f(clamp(v, [Math.min(plo, value), Math.max(phi, value)]))
+  const down = reach(value - swing.reduce((s, [d]) => s + d, 0))
+  const up = reach(value + swing.reduce((s, [, u]) => s + u, 0))
   return (
     <div
       ref={el}
@@ -90,7 +131,7 @@ export function Knob(props: { label: string } & ({ at: Address } | { macro: stri
       title={
         macro
           ? `macro ${macro.name}: moves ${macro.targets.length} knob${macro.targets.length === 1 ? '' : 's'}\ndrag or wheel; shift for fine`
-          : `${kind!.label}: ${kind!.help}\n${id} · drag or wheel; shift for fine`
+          : `${kind!.label}: ${kind!.help}\n${id}${knob!.glide ? ` · glide ${knob!.glide} s` : ''} · drag or wheel; shift for fine`
       }
       onPointerDown={(e) => {
         if (!macro) setFocus(id)
@@ -121,7 +162,14 @@ export function Knob(props: { label: string } & ({ at: Address } | { macro: stri
         <path className="track" d={arc(0, 1)} />
         {knob?.play && <path className="play" d={arc(f(knob.play[0]), f(knob.play[1]))} />}
         <path className="value" d={arc(0, f(value))} />
-        {dot !== undefined && <circle className="live" cx={22 + R * Math.sin(dot)} cy={22 - R * Math.cos(dot)} r="3" />}
+        {glide > 0 && <path className="glide" d={arc(Math.max(0, f(value) - glide), f(value))} />}
+        {swing.length > 0 && <path className="swing" d={arc(down, up, IN)} />}
+        {depth.length > 0 && <path className="spread" d={arc(depth[0], depth[1], OUT)} />}
+        {ticks.map((t, i) => {
+          const [x, y] = point(t, OUT)
+          return <circle key={i} className="tick" cx={x} cy={y} r="1.5" />
+        })}
+        {a !== undefined && <circle className="live" cx={point(a, R)[0]} cy={point(a, R)[1]} r="3" />}
       </svg>
       {midi && (
         <span
