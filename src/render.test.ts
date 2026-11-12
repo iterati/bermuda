@@ -119,10 +119,10 @@ const preset = (name: string, p: string) =>
     look(name).presets.find((x) => x.name === p)!,
   )
 
-// both scenes on their own clocks t seconds in, and the morph between them at fader x
+// both scenes t seconds in at 60 bpm, the clock t beats on, and the morph between them at fader x
 function morphAt(a: Scene, b: Scene, x: number, edge: Edge, t: number) {
   const [la, lb] = [newLive(), newLive()]
-  const [sa, sb] = [advance(a, la, t, 60), advance(b, lb, t, 60)]
+  const [sa, sb] = [advance(a, la, t, t), advance(b, lb, t, t)]
   return { sa, sb, la, lb, ...morph(sa, sb, x, edge, lb) }
 }
 
@@ -142,7 +142,7 @@ describe('the one shader', { timeout: 30_000 }, () => {
   it.each(cases)('renders $name finite and not blank', async ({ scene }) => {
     for (const t of [0, 7.3, 41]) {
       const live = newLive()
-      const frame = advance(scene, live, t, 60)
+      const frame = advance(scene, live, t, t)
       const { finite, mean, spread } = await shoot(frame, live)
       expect(finite, `at ${t} s`).toBe(true)
       expect(mean, `mean at ${t} s`).toBeGreaterThan(0.01)
@@ -166,7 +166,7 @@ describe('the one shader', { timeout: 30_000 }, () => {
   it.each(kinds)('renders a $kind lattice by $by finite and not blank', async ({ scene }) => {
     for (const t of [0, 7.3]) {
       const live = newLive()
-      const { finite, mean, spread } = await shoot(advance(scene, live, t, 60), live)
+      const { finite, mean, spread } = await shoot(advance(scene, live, t, t), live)
       expect(finite, `at ${t} s`).toBe(true)
       expect(mean, `mean at ${t} s`).toBeGreaterThan(0.01)
       expect(spread, `spread at ${t} s`).toBeGreaterThan(0.01)
@@ -275,7 +275,7 @@ describe('the morph', () => {
   ])('%s: a level at weight 0 draws as if it were gone (%s)', async (name, id) => {
     const at = (s: Scene) => {
       const live = newLive()
-      return { scene: advance(s, live, 7.3, 60), live }
+      return { scene: advance(s, live, 7.3, 7.3), live }
     }
     const collapsed = at(update(look(name), (d) => (findLevel(d, id).level.weight.value = 0)))
     const gone = at(update(look(name), (d) => removeLevel(d, id)))
@@ -287,7 +287,7 @@ describe('the morph', () => {
 describe('a background', () => {
   const drawn = async (s: Scene) => {
     const live = newLive()
-    return pixels(advance(s, live, 7.3, 60), live)
+    return pixels(advance(s, live, 7.3, 7.3), live)
   }
 
   it.each(BACKGROUNDS)('draws Tapestry 1 over a %s finite, not blank and not as without it', async (kind) => {
@@ -314,7 +314,7 @@ describe('a background', () => {
 
 describe('the shapes and lines', () => {
   const still = { drift: 0, colour: 0, crawl: 0 }
-  const drawn = (s: Scene, phases: Phases = still) => pixels(advance(s, newLive(), 0, 60), phases)
+  const drawn = (s: Scene, phases: Phases = still) => pixels(advance(s, newLive(), 0, 0), phases)
   const of = (kind: ShapeKind, r: number) => (kind === 'star' ? star(5, 2.5, r) : shape(kind, r, 0.5, { n: 5 }))
 
   it.each(SHAPES)('a %s draws finite and not blank, alone and joined into a star', async (kind) => {
@@ -402,10 +402,11 @@ describe('a loop', () => {
   it.each(['Tapestry 1', 'Spirograph'])('%s draws its frame a loop on as its first', async (name) => {
     const s = snapLoop({ ...look(name), loop: { seconds: 10 } }, 97)
     const live = newLive()
-    const first = advance(s, live, 0.1, 97)
+    const at = (i: number) => (i * 0.1 * 97) / 60
+    const first = advance(s, live, at(1), 0.1)
     const want = await pixels(first, live)
-    for (let i = 1; i < 100; i++) advance(s, live, 0.1, 97)
-    const last = advance(s, live, 0.1, 97)
+    for (let i = 2; i <= 100; i++) advance(s, live, at(i), 0.1)
+    const last = advance(s, live, at(101), 0.1)
     expect(furthest(await pixels(last, live), want)).toBeLessThan(1e-4)
   })
 })
@@ -429,7 +430,7 @@ describe("Play's transitions", () => {
     const curve = bendOf(from.scene, to.scene, tangent(vb, vt), tangent(vf, va))
     for (const t of [0.25, 0.5, 0.75]) {
       const [la, lb] = [newLive(), newLive()]
-      const [a, b] = [advance(from.scene, la, 7.3 + 2 * t, 60), advance(to.scene, lb, 2 * t, 60)]
+      const [a, b] = [advance(from.scene, la, 7.3 + 2 * t, 7.3 + 2 * t), advance(to.scene, lb, 7.3 + 2 * t, 2 * t)]
       const { scene, toward } = morph(a, b, smooth(0, 1, t), BANK.autopilot.edge, lb)
       bend(scene, curve, t)
       const { finite, mean, spread } = await shoot(scene, la, toward)
@@ -467,7 +468,7 @@ describe('the Decks view', () => {
 
 describe('the cells, colour and variations', () => {
   const still = { drift: 0, colour: 0, crawl: 0 }
-  const drawn = (s: Scene) => pixels(advance(s, newLive(), 0, 60), still)
+  const drawn = (s: Scene) => pixels(advance(s, newLive(), 0, 0), still)
 
   // the variations after milestone 1's eight
   it.each(VARIATIONS.slice(8))('a %s warp draws finite and not blank', async (kind) => {

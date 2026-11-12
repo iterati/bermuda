@@ -1,4 +1,4 @@
-// Motion: the clock, modulators with running phases, glide, links with their spread, macros and presets.
+// Motion: the clock, modulators on it, glide, links with their spread, macros and presets.
 // advance() turns a scene into the scene to draw this frame, every knob at its live value.
 import { asLinked } from './edit'
 import { gcd } from './loop'
@@ -18,16 +18,32 @@ import {
   type Scene,
 } from './scene'
 
-export type Live = {
-  phases: Map<string, number> // each modulator's running phase, in cycles
-  smooth: Map<string, number> // glided knob bases by address, glided modulator outputs by target
-  drift: number // the contour's ring phase, in radians
-  colour: number // the palette's running index
-  crawl: number // the dots' running crawl, in dots
-  felt?: number // while music plays, the felt beat the clock last ran to
+// The app's one clock, its time: beats since it started, which never go back, and while music plays the felt beat
+// it last ran to. Every look plays at its time, so a look coming in comes in where the clock is.
+export type Time = { beats: number; felt?: number }
+
+export const newTime = (): Time => ({ beats: 0 })
+
+// The clock run on dt seconds at the given tempo; while music is heard it runs on its felt beat instead once its
+// tempo is found, at its rate, so each beat's move comes as the snap has it.
+export function keepTime(time: Time, dt: number, bpm: number, heard?: Heard) {
+  const beat = heard?.locked ? heard : undefined
+  time.beats += beat ? beat.rate * Math.max(0, beat.felt - (time.felt ?? beat.felt)) : (dt * bpm) / 60
+  time.felt = beat?.felt
 }
 
-export const newLive = (): Live => ({ phases: new Map(), smooth: new Map(), drift: 0, colour: 0, crawl: 0 })
+// What a side keeps from frame to frame of the look it plays, afresh when a new look comes in.
+export type Live = {
+  smooth: Map<string, number> // glided knob bases by address, glided modulator outputs by target
+  runs: Map<string, { rate: number; by: number }> // running phases by modulator id or knob address (see running)
+  drift: number // the contour's ring phase this frame, in radians
+  colour: number // the palette's index this frame
+  crawl: number // the dots' crawl this frame, in dots
+}
+
+export const newLive = (): Live => ({ smooth: new Map(), runs: new Map(), drift: 0, colour: 0, crawl: 0 })
+
+export const copyLive = (live: Live): Live => ({ ...live, smooth: new Map(live.smooth), runs: new Map(live.runs) })
 
 // A wave's value at phase p (cycles), 0 to 1; cos and tri start at 1 as the Tapestries' sinT and sawT did.
 export function wave(m: Modulator, p: number): number {
@@ -50,16 +66,24 @@ export function wave(m: Modulator, p: number): number {
   }
 }
 
+// A running phase at the clock's time, round turn: its rate times the time, plus by, which a move of the rate (a turn
+// of its knob, a new period or tempo) carries on from where it was so it never jumps; a new look's by is 0.
+function running(live: Live, key: string, rate: number, at: number, turn: number) {
+  const was = live.runs.get(key)
+  const by = was ? (was.by + (was.rate - rate) * at) % turn : 0
+  live.runs.set(key, { rate, by })
+  return (rate * at + by) % turn
+}
+
 const follow = (from: number | undefined, to: number, glide: number, dt: number) =>
   from === undefined || glide <= 0 ? to : to + (from - to) * Math.exp(-dt / glide)
 
-// The scene to draw after dt seconds at the given tempo: each knob is its glided base, plus its link
-// group's spread, plus its modulators, kept to its play range (widened to the base when a hand put it outside);
-// a knob that comes round (PERIOD) with no play range wraps round its hard range instead. While music is heard the
-// clock runs on its felt beat instead once its tempo is found, at its rate, so each beat's move comes as the snap
-// has it; the macros that listen take their features' values, and the modulators that listen play the felt beats
-// or their features.
-export function advance(scene: Scene, live: Live, dt: number, bpm: number, heard?: Heard): Scene {
+// The scene to draw at the clock's time at (beats), dt seconds after the frame before: each knob is its glided base,
+// plus its link group's spread, plus its modulators, each running once round each period, plus its phase, kept to
+// its play range (widened to the base when a hand put it outside); a knob that comes round (PERIOD) with no play
+// range wraps round its hard range instead. While music is heard the macros that listen take their features' values,
+// and the modulators that listen play the felt beats or their features.
+export function advance(scene: Scene, live: Live, at: number, dt: number, heard?: Heard): Scene {
   if (heard && scene.macros.some((m) => m.listen))
     scene = update(scene, (d) => {
       for (const m of d.macros) if (m.listen) setMacro(d, m.id, heard.features[m.listen])
@@ -71,13 +95,12 @@ export function advance(scene: Scene, live: Live, dt: number, bpm: number, heard
         level,
         list.find((l) => l.id === level.link)!,
       )
-  // the beat, once the music's tempo is found: before, the clock runs at the hand's tempo
+  // the beat, once the music's tempo is found
   const beat = heard?.locked ? heard : undefined
-  const beats = beat ? beat.rate * Math.max(0, beat.felt - (live.felt ?? beat.felt)) : (dt * bpm) / 60
-  live.felt = beat?.felt
   const mods = new Map<Address, { m: Modulator; t: Modulator['targets'][number]; key: string }[]>()
+  const phases = new Map<string, number>()
   for (const m of scene.modulators) {
-    live.phases.set(m.id, ((live.phases.get(m.id) ?? 0) + beats / m.period) % 1)
+    phases.set(m.id, running(live, m.id, 1 / m.period, at, 1))
     m.targets.forEach((t, i) => mods.set(t.knob, [...(mods.get(t.knob) ?? []), { m, t, key: `${m.id}|${i}` }]))
   }
   const bases = new Map<Address, number>()
@@ -110,7 +133,7 @@ export function advance(scene: Scene, live: Live, dt: number, bpm: number, heard
       const raw = feature
         ? (heard?.features[feature] ?? 0)
         : m.listen !== 'beats'
-          ? wave(m, live.phases.get(m.id)! + m.phase + spread)
+          ? wave(m, phases.get(m.id)! + m.phase + spread)
           : beat
             ? wave(m, beat.felt / m.period + m.phase + spread)
             : 0.5
@@ -127,9 +150,9 @@ export function advance(scene: Scene, live: Live, dt: number, bpm: number, heard
           ? lo + ((((v - lo) % (hi - lo)) + (hi - lo)) % (hi - lo))
           : clamp(v, [Math.min(lo, base), Math.max(hi, base)])
   }
-  live.drift = (live.drift + out.contour.drift.value * beats) % (2 * Math.PI)
-  live.colour = (live.colour + out.palette.time.value * beats) % 1
-  live.crawl = (live.crawl + (out.line.dots?.crawl.value ?? 0) * beats) % 1
+  live.drift = running(live, 'contour.drift', out.contour.drift.value, at, 2 * Math.PI)
+  live.colour = running(live, 'palette.time', out.palette.time.value, at, 1)
+  live.crawl = running(live, 'line.dots.crawl', out.line.dots?.crawl.value ?? 0, at, 1)
   return out
 }
 

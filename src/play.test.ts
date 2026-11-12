@@ -180,7 +180,7 @@ describe('the curve a transition runs on', () => {
   const drawn =
     (m1 = tangent(valuesOf(k0), valuesOf(k2)), m2 = tangent(valuesOf(k1), valuesOf(k3))) =>
     (t: number) => {
-      const [a, b] = [advance(k1, newLive(), 0, 60), advance(k2, newLive(), 0, 60)]
+      const [a, b] = [advance(k1, newLive(), 0, 0), advance(k2, newLive(), 0, 0)]
       const { scene } = morph(a, b, smooth(0, 1, t), edge, newLive())
       bend(scene, bendOf(k1, k2, m1, m2), t)
       return scene.levels[0].affine.scale.value

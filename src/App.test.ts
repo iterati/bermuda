@@ -1,12 +1,13 @@
 // The app as built, in headless Chrome: Stage, Edit and Decks each show a picture that is not blank, Decks its
-// two decks and the mix between them, and a look cued onto B changes B's deck and nothing A shows. A song of
-// clicks at 120 bpm, chosen as a file, plays and sets the clock's tempo to its own, until it is stopped.
+// two decks and the mix between them, and a look cued onto B changes B's deck and nothing A shows. A look loaded or
+// changed into in Play comes in where the clock is, so one played on, left and come back to shows as it did. A
+// song of clicks at 120 bpm, chosen as a file, plays and sets the clock's tempo to its own, until it is stopped.
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import puppeteer, { type Browser, type Page } from 'puppeteer-core'
+import puppeteer, { type Browser, type KeyInput, type Page } from 'puppeteer-core'
 import { build, type Rollup } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
@@ -123,6 +124,62 @@ describe('the views', { timeout: 30_000 }, () => {
     expect(furthest(after.a.px, before.a.px)).toBe(0)
     expect(furthest(after.mix.px, before.mix.px)).toBe(0)
     expect(furthest(after.b.px, before.b.px)).toBeGreaterThan(0.1)
+  })
+})
+
+describe('the clock', { timeout: 60_000 }, () => {
+  const picture = async () => (await canvases('canvas.picture'))[0].px
+  // the clock run for a while, then stopped again; from Stage's button, or in Play by its key
+  const run = async (ms: number, toggle: () => Promise<unknown>) => {
+    await toggle()
+    await new Promise((r) => setTimeout(r, ms))
+    await toggle()
+    await frames()
+  }
+  const key = async (k: KeyInput) => {
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    await page.keyboard.press(k)
+    await frames()
+  }
+
+  it('a look loaded comes in where the clock is, not at its opening', async () => {
+    await view('Stage')
+    // Tapestry 4, its spin a long period, on A
+    await key('a')
+    await key('3')
+    const opening = await picture()
+    await run(1500, () => page.click('.bar button[title="space"]'))
+    const along = await picture()
+    expect(furthest(along, opening)).toBeGreaterThan(0.1)
+    // another look loaded, then Tapestry 4 again
+    await key('2')
+    await key('3')
+    expect(furthest(await picture(), along)).toBeLessThan(1e-3)
+  })
+
+  it('a look Play changes into comes in where the clock is, and back again', async () => {
+    await key('f')
+    // the autopilot off, and each change landing at once, so it lands with the clock stopped
+    const autopilot = await page.$eval('label[title^="the autopilot walks"] input', (i) => i.checked)
+    if (autopilot) await key('o')
+    const length = 'label[title="seconds each change of Play takes"] input'
+    const seconds = await page.$eval(length, (i) => i.valueAsNumber)
+    await page.focus(length)
+    await page.keyboard.press('Home')
+    await key('3')
+    const before = await picture()
+    await run(1500, () => key(' '))
+    const along = await picture()
+    expect(furthest(along, before)).toBeGreaterThan(0.1)
+    await key('2')
+    expect(furthest(await picture(), along)).toBeGreaterThan(0.1)
+    await key('3')
+    expect(furthest(await picture(), along)).toBeLessThan(1e-3)
+    // the bank as it was
+    await page.focus(length)
+    for (let i = 0; i < Math.round(seconds * 10); i++) await page.keyboard.press('ArrowRight')
+    if (autopilot) await key('o')
+    await key('Escape')
   })
 })
 

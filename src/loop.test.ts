@@ -1,27 +1,29 @@
 import { describe, expect, it } from 'vitest'
 import { snapLoop } from './loop'
 import { LOOKS, mod } from './looks'
-import { advance, newLive, update } from './motion'
+import { advance, newLive, update, type Live } from './motion'
 import { knobsOf, type Scene } from './scene'
 
 const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a)
 
-// the first frame and the frame a loop on (after warm frames first): every knob's value and the running phases
+// what a frame shows: every knob's value and the running phases
+const shot = (frame: Scene, live: Live) => ({
+  values: knobsOf(frame).map((k) => k.knob.value),
+  drift: live.drift,
+  colour: live.colour,
+  crawl: live.crawl,
+})
+
+// the first frame and the frame a loop on (after warm frames first), from the clock's start
 function frames(look: Scene, bpm: number, seconds: number, warm = 0) {
   const dt = 0.1
   const steps = Math.round(seconds / dt)
   const s = snapLoop(look, bpm)
   const live = newLive()
-  const shots: { values: number[]; drift: number; colour: number; crawl: number }[] = []
+  const shots: ReturnType<typeof shot>[] = []
   for (let i = 1; i <= warm + steps + 1; i++) {
-    const frame = advance(s, live, dt, bpm)
-    if (i === warm + 1 || i === warm + steps + 1)
-      shots.push({
-        values: knobsOf(frame).map((k) => k.knob.value),
-        drift: live.drift,
-        colour: live.colour,
-        crawl: live.crawl,
-      })
+    const frame = advance(s, live, (i * dt * bpm) / 60, dt)
+    if (i === warm + 1 || i === warm + steps + 1) shots.push(shot(frame, live))
   }
   return shots
 }
@@ -52,6 +54,33 @@ describe('a loop', () => {
     '%s at %i bpm, glided: its frame a loop on matches the one a loop before, from its second loop',
     (_, bpm, look) => matches(frames({ ...look, loop: { seconds: 30 } }, bpm, 30, 300)),
   )
+
+  it.each(plays(LOOKS))(
+    '%s at %i bpm, entered at a clock time T: draws as it does at T modulo its loop',
+    (_, bpm, look) => {
+      const s = snapLoop({ ...look, loop: { seconds: 30 } }, bpm)
+      const length = (30 * bpm) / 60
+      const at = (beats: number) => {
+        const live = newLive()
+        return shot(advance(s, live, beats, 0), live)
+      }
+      matches([at(3.3), at(7 * length + 3.3)])
+    },
+  )
+
+  it('carries its phases on through a change of tempo, which snaps its periods afresh', () => {
+    const look = { ...LOOKS[0], loop: { seconds: 30 } }
+    const live = newLive()
+    const rates = ['contour.drift', 'palette.time', 'line.dots.crawl']
+    const at = (bpm: number, dt: number) => {
+      const frame = advance(snapLoop(look, bpm), live, 47.3, dt)
+      return {
+        ...shot(frame, live),
+        values: knobsOf(frame).flatMap((k) => (rates.includes(k.address) ? [] : [k.knob.value])),
+      }
+    }
+    matches([at(60, 0.1), at(120, 0)])
+  })
 
   it('wraps a ramp on a stop hue round the hue wheel, so it loops from its first frame', () => {
     const look = update(LOOKS[0], (d) => {

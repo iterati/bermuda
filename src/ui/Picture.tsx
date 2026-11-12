@@ -1,16 +1,16 @@
-// The picture: one canvas and the renderer, drawing every animation frame. Scenes A and B each run on their own
-// clock; between the fader's ends it draws the morph. A transition runs the fader itself, on the clock, bent on its
-// curve, and says when it lands. It hands the edited side's live scene up a few times a second so the knobs can
-// show it. In Decks it draws A and B into their decks too, each at its deck's size in the canvas's corner and
-// copied out, before the mix goes over the whole canvas: one shader, each clock run once a frame. While music is
-// heard both clocks run on its beat, a transition sets off on a beat and lands on one a whole number of beats on,
-// and what is heard goes up with the live scene, paused or not. In Direct it draws the timeline's frame instead, at
-// the export's aspect.
+// The picture: one canvas and the renderer, drawing every animation frame. It runs the app's one clock, and scenes A
+// and B each play at its time; between the fader's ends it draws the morph. A transition runs the fader itself, on
+// the clock, bent on its curve, and says when it lands. It hands the edited side's live scene up a few times a second
+// so the knobs can show it. In Decks it draws A and B into their decks too, each at its deck's size in the canvas's
+// corner and copied out, before the mix goes over the whole canvas: one shader, each side run once a frame. While
+// music is heard the clock runs on its beat, a transition sets off on a beat and lands on one a whole number of beats
+// on, and what is heard goes up with the live scene, paused or not. In Direct it draws the timeline's frame instead,
+// at the export's aspect.
 import { useEffect, useMemo, useRef } from 'react'
 import type { Shot } from '../direct'
 import { snapLoop } from '../loop'
 import { morph, smooth } from '../morph'
-import { advance, type Live } from '../motion'
+import { advance, keepTime, newTime, type Live } from '../motion'
 import { heardAt, type Heard, type Listening } from '../music'
 import { bend, onBeat, type Bend } from '../play'
 import { createRenderer } from '../render'
@@ -56,6 +56,7 @@ export function Picture(props: Props) {
     })
     fit.observe(el)
     let frame = 0
+    const time = newTime()
     let last = performance.now()
     // the transition running, how far through it is (0 to 1), and whether it has said it landed
     let run: Transition | null = null
@@ -83,7 +84,7 @@ export function Picture(props: Props) {
       // running from its beat as many whole beats on
       if (running && paused && heard && held?.locked) {
         if (begin !== undefined) begin += Math.round(heard.beat - held.beat)
-        lives.a.felt = lives.b.felt = undefined
+        time.felt = undefined
       }
       paused = !running
       held = heard
@@ -95,8 +96,9 @@ export function Picture(props: Props) {
         through = Math.max(through, at.through)
       } else if (run) through = run.seconds > 0 ? Math.min(1, through + dt / run.seconds) : 1
       const x = run ? run.from + ((run.to === 'b' ? 1 : 0) - run.from) * smooth(0, 1, through) : fader
-      const a = advance(snapped.a, lives.a, dt, bpm, heard)
-      const b = advance(snapped.b, lives.b, dt, bpm, heard)
+      keepTime(time, dt, bpm, heard)
+      const a = advance(snapped.a, lives.a, time.beats, dt, heard)
+      const b = advance(snapped.b, lives.b, time.beats, dt, heard)
       if (decks)
         for (const [s, scene] of [
           ['a', a],

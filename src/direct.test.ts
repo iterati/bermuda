@@ -1,6 +1,6 @@
 // Direct: a timeline round-trips as JSON and its parse refuses what is off its shape; the frame at a key is that
-// key's scene on its own clock; an edge morphs into its key and a key of the same look carries the clock on; curves
-// set their knob over their own span; a frame is the same however it is reached. And in headless Chrome, an export
+// key's scene at the playhead's time; an edge morphs into its key and a key of the same look carries its glides on;
+// curves set their knob over their own span; a frame is the same however it is reached. And in headless Chrome, an export
 // of a few seconds of a test tone is a file of that duration holding one video and one audio track.
 import { execFileSync } from 'node:child_process'
 import { createServer, type Server } from 'node:http'
@@ -10,7 +10,7 @@ import { ALL_FORMATS, BufferSource, Input } from 'mediabunny'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import { build, type Rollup } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { curved, director, missingKeys, pruneTimeline, STEP, type Format } from './direct'
+import { curved, director, missingKeys, pruneTimeline, STEP, type Format, type Shot } from './direct'
 import { snapLoop } from './loop'
 import { LOOKS } from './looks'
 import { advance, newLive } from './motion'
@@ -47,13 +47,13 @@ const timeline: Timeline = {
   ],
 }
 
-// the key's scene played alone from its start for elapsed seconds, frame by frame on the clock's grid
-function alone(entry: string, bpm: number, elapsed: number) {
+// the key's scene played alone from its start to the playhead's t, frame by frame on the clock's grid
+function alone(entry: string, bpm: number, start: number, t: number) {
   const scene = snapLoop(entryScene(LOOKS, entry)!, bpm)
   const live = newLive()
-  const n = Math.floor(elapsed / STEP + 1e-9)
-  for (let i = 0; i < n; i++) advance(scene, live, STEP, bpm)
-  return { scene: advance(scene, live, elapsed - n * STEP, bpm), phases: live }
+  const n = Math.floor((t - start) / STEP + 1e-9)
+  for (let i = 1; i <= n; i++) advance(scene, live, ((start + i * STEP) * bpm) / 60, STEP)
+  return { scene: advance(scene, live, (t * bpm) / 60, t - start - n * STEP), phases: live }
 }
 
 describe('a timeline', () => {
@@ -90,22 +90,31 @@ describe('a timeline', () => {
 describe('the frame at a time', () => {
   const shot = director(timeline, LOOKS)
 
-  it('at a key is that key scene on its own clock, started as its edge started', () => {
-    expect(shot(4)).toEqual(alone(T4, 96, 2))
-    expect(shot(0)).toEqual(alone(T1, 96, 0))
+  it("at a key is that key scene at the playhead's time, its glides started as its edge started", () => {
+    expect(shot(4)).toEqual(alone(T4, 96, 2, 4))
+    expect(shot(0)).toEqual(alone(T1, 96, 0, 0))
     // the edge into T7 starts at 4 as T4 lands, its 3 seconds cut to the 3 since
-    expect(shot(7)).toEqual(alone(T7, 96, 3))
+    expect(shot(7)).toEqual(alone(T7, 96, 4, 7))
+  })
+
+  it("plays a key's modulators at the playhead's time, however late its edge started", () => {
+    // T4's spin: its edge started at 2, and alone it plays from 0
+    const only = director({ ...timeline, keys: [{ at: 0, scene: T4, edge: edge(0) }], curves: [] }, LOOKS)
+    const turn = (s: Shot) => resolve(s.scene, 'frame.turn')!.value
+    expect(turn(shot(4))).toBeCloseTo(turn(only(4)), 9)
+    // not as far as the 2 seconds since its edge started
+    expect(turn(shot(4))).not.toBeCloseTo(turn(only(2)), 1)
   })
 
   it('in an edge is the morph from the key before into its key', () => {
     expect(shot(3).scene.name).toBe(`${T1} → ${T4}`)
     expect(shot(3).toward?.at).toBeCloseTo(0.5)
-    expect(shot(1.9)).toEqual(alone(T1, 96, 1.9))
+    expect(shot(1.9)).toEqual(alone(T1, 96, 0, 1.9))
   })
 
-  it('carries a look clock on into a key of its preset', () => {
-    // T7's clock started at 4, and Ice plays it on
-    const ice = alone(`${T7} / Ice`, 96, 5)
+  it("carries a look's glides on into a key of its preset", () => {
+    // T7's glides started at 4, and Ice plays them on
+    const ice = alone(`${T7} / Ice`, 96, 4, 9)
     expect(shot(9)).toEqual(ice)
     expect(ice.scene.palette.stops).not.toEqual(shot(7.5).scene.palette.stops)
   })
@@ -121,8 +130,8 @@ describe('the frame at a time', () => {
     const ice = `${T7} / Ice`
     expect(resolve(shot(11).scene, 'frame.zoom')!.value).toBeCloseTo(2)
     expect(resolve(curved(entryScene(LOOKS, ice)!, timeline.curves, 11.5), 'frame.zoom')!.value).toBeCloseTo(2.5)
-    expect(shot(9.5)).toEqual(alone(ice, 96, 5.5))
-    expect(shot(13)).toEqual(alone(ice, 96, 9))
+    expect(shot(9.5)).toEqual(alone(ice, 96, 4, 9.5))
+    expect(shot(13)).toEqual(alone(ice, 96, 4, 13))
     const t4: Scene = entryScene(LOOKS, T4)!
     expect(curved(t4, [{ knob: 'levels[nope].weight', points: timeline.curves[0].points }], 11)).toBe(t4)
   })

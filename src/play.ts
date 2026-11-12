@@ -132,7 +132,7 @@ export function mutate(scene: Scene, random = Math.random): Scene {
 
 // Every knob's value as the scene plays it before its modulators: a linked level's from its leader, with the spread.
 export const valuesOf = (scene: Scene): Map<Address, number> =>
-  new Map(knobsOf(advance({ ...scene, modulators: [] }, newLive(), 0, 60)).map((k) => [k.address, k.knob.value]))
+  new Map(knobsOf(advance({ ...scene, modulators: [] }, newLive(), 0, 0)).map((k) => [k.address, k.knob.value]))
 
 // The Catmull-Rom tangent at a keyframe between the one before it and the one after, for the knobs all hold but
 // the stops and the rings, which the morph runs its own way (round the hue wheel the short way; in the shader).

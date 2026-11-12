@@ -25,7 +25,7 @@ import {
   type Learning,
 } from './midi'
 import { morphSize } from './morph'
-import { applyPreset, capturePreset, dice, newLive, setKnob, setMacro, update } from './motion'
+import { applyPreset, capturePreset, copyLive, dice, newLive, setKnob, setMacro, update } from './motion'
 import { listen, type Heard, type Listening } from './music'
 import {
   bendOf,
@@ -345,7 +345,7 @@ export function App() {
     ({ entry, scene: next }: Keyframe, presetIndex?: number, to: Side = side) => {
       const why = refusal({ ...pair, [to]: next })
       if (why) return setError(why)
-      // a new look starts its modulators and glides afresh
+      // a new look comes in where the clock is, its glides afresh
       Object.assign(lives[to], newLive())
       setPair((p) => ({ ...p, [to]: next }))
       setEntries((e) => ({ ...e, [to]: entry }))
@@ -362,9 +362,9 @@ export function App() {
     [put, keyframe],
   )
 
-  // Play's transition into next from the side showing, its fader at x: next goes on the other side and the fader
-  // runs over to it. A next of the same look carries on its clock. chained: it starts as the last one lands, setting
-  // off with its tangent if that aimed at next; after: the keyframe after next, if it is known now.
+  // Play's transition into next from the side showing, its fader at x: next goes on the other side, where the clock
+  // is, and the fader runs over to it. A next of the same look carries on its glides. chained: it starts as the last
+  // one lands, setting off with its tangent if that aimed at next; after: the keyframe after next, if it is known now.
   const start = (next: Keyframe, from: Side, x: number, chained: boolean, after?: Keyframe) => {
     const to = other(from)
     const { scene } = next
@@ -374,13 +374,7 @@ export function App() {
       setRefused((n) => n + 1)
       return setError(`${next.entry ?? scene.name}: ${why}`)
     }
-    const live = lives[from]
-    Object.assign(
-      lives[to],
-      scene.name === pair[from].name
-        ? { ...live, phases: new Map(live.phases), smooth: new Map(live.smooth) }
-        : newLive(),
-    )
+    Object.assign(lives[to], scene.name === pair[from].name ? copyLive(lives[from]) : newLive())
     setPair((p) => ({ ...p, [to]: scene }))
     setEntries((e) => ({ ...e, [to]: next.entry }))
     setPresets((p) => ({ ...p, [to]: next.preset ?? -1 }))
@@ -467,8 +461,7 @@ export function App() {
     const to = other(side)
     const why = refusal({ ...pair, [to]: scene })
     if (why) return setError(why)
-    const from = lives[side]
-    Object.assign(lives[to], { ...from, phases: new Map(from.phases), smooth: new Map(from.smooth) })
+    Object.assign(lives[to], copyLive(lives[side]))
     setPair((p) => ({ ...p, [to]: structuredClone(p[side]) }))
   }, [lives, pair, scene, side])
   // Mutate the look showing: at once, or in Play as a transition from the look coming in

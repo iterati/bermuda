@@ -1,4 +1,4 @@
-// The morph from scene A to scene B at fader x, made each frame from the two live scenes, each on its own clock.
+// The morph from scene A to scene B at fader x, made each frame from the two live scenes, both at the clock's time.
 // Every knob morphs; star n, the shape's kind and the other switches swap inside a dip where they show nothing, and a
 // knob one side lacks morphs from the value that draws as if it were not there. Levels pair by id
 // and depth; a level weight collapses what has no pair and grows what is new (padding at the deep end; a reorder
@@ -376,6 +376,6 @@ export function morph(
 // The levels and depth the morph of a into b draws, which the shader's limits hold to.
 export function morphSize(a: Scene, b: Scene): { levels: number; depth: number } {
   const edge: Edge = { seconds: 0, stagger: 0, deepFirst: false }
-  const { levels } = morph(advance(a, newLive(), 0, 60), advance(b, newLive(), 0, 60), 0.5, edge, newLive()).scene
+  const { levels } = morph(advance(a, newLive(), 0, 0), advance(b, newLive(), 0, 0), 0.5, edge, newLive()).scene
   return { levels: allLevels(levels).length, depth: depthOf(levels) }
 }

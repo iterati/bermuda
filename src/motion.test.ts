@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { moveLevel, removeLevel } from './edit'
 import { level, LOOKS, mod, scene, star } from './looks'
 import { gcd } from './loop'
+import { morph } from './morph'
 import {
   advance,
   applyPreset,
@@ -9,10 +10,13 @@ import {
   detunePeriods,
   dice,
   learnMacro,
+  keepTime,
   newLive,
+  newTime,
   setMacro,
   update,
   wave,
+  type Live,
 } from './motion'
 import { FEATURES, hardRange, knobsOf, resolve, type Listen, type Modulator, type Scene } from './scene'
 import type { Heard } from './music'
@@ -37,14 +41,14 @@ describe('motion', () => {
   })
 
   it('a linked level shares its leader knobs, with the spread across the group', () => {
-    const shown = advance(base(), newLive(), 0, 60)
+    const shown = advance(base(), newLive(), 0, 0)
     expect(shown.levels[0].affine.scale.value).toBe(2)
     expect(shown.levels[1].affine.scale.value).toBe(2.5)
   })
 
   it('a linked level plays its leader structure, and keeps what it showed when its leader goes', () => {
     const s = update(base(), (d) => (d.levels[0].variants[0].shape.n = 9))
-    expect(advance(s, newLive(), 0, 60).levels[1].variants[0].shape.n).toBe(9)
+    expect(advance(s, newLive(), 0, 0).levels[1].variants[0].shape.n).toBe(9)
     const gone = update(s, (d) => removeLevel(d, 'a'))
     expect(gone.levels[0].link).toBeUndefined()
     expect(gone.levels[0].variants[0].shape.n).toBe(9)
@@ -60,27 +64,86 @@ describe('motion', () => {
     expect(moved.levels[0].affine.scale.value).toBe(2.5)
   })
 
-  it('a modulator keeps to the play range, and its phase runs on when its period changes', () => {
+  it("a modulator keeps to the play range and plays at the clock's time over its period, running on as it changes", () => {
     const s = update(base(), (d) => d.modulators.push(mod('m', 'tri', 4, [['levels[a].affine.scale', 3]])))
+    expect(advance(s, newLive(), 0, 0).levels[0].affine.scale.value).toBe(2.5)
+    const gentle = update(s, (d) => (d.modulators[0].targets[0].depth = 0.4))
+    const scale = (s: Scene, live: Live, at: number) => advance(s, live, at, 0.1).levels[0].affine.scale.value
     const live = newLive()
-    expect(advance(s, live, 0, 60).levels[0].affine.scale.value).toBe(2.5)
-    advance(s, live, 1, 60)
-    expect(live.phases.get('m')).toBeCloseTo(0.25)
-    const slower = update(s, (d) => (d.modulators[0].period = 8))
-    advance(slower, live, 1, 60)
-    expect(live.phases.get('m')).toBeCloseTo(0.375)
-    expect(advance(slower, live, 0, 120).levels[0].affine.scale.value).toBeGreaterThanOrEqual(1.5)
+    // a quarter round, the tri at 0.5
+    expect(scale(gentle, live, 1)).toBeCloseTo(2)
+    const slower = update(gentle, (d) => (d.modulators[0].period = 8))
+    expect(scale(slower, live, 1)).toBeCloseTo(2)
+    // an eighth on, the tri at 0.25
+    expect(scale(slower, live, 2)).toBeCloseTo(1.8)
+    // a look coming in afresh: 2 beats over 8
+    expect(scale(slower, newLive(), 2)).toBeCloseTo(2)
+  })
+
+  // a look on side a since the clock started, run frame by frame to at
+  const played = (s: Scene, at: number) => {
+    const live = newLive()
+    for (let t = 0; t < at; t += 0.1) advance(s, live, t, 0.1)
+    return { scene: advance(s, live, at, 0.1), live }
+  }
+  const turning = (name: string, period: number) =>
+    update(scene({ name, levels: [level('a', { shape: star(6, 2, 0.4) })] }), (d) => {
+      d.modulators.push(mod('m', 'cos', period, [['frame.turn', 40]]))
+      d.contour.drift.value = 0.3
+    })
+
+  it('a look loaded at the clock time T plays its modulators at T over their periods, not from their start', () => {
+    const s = turning('loaded', 8)
+    const fresh = advance(s, newLive(), 13, 0)
+    // 13 beats over 8: 5/8 round the cos from where it starts
+    expect(fresh.frame.turn.value).toBeCloseTo(40 * (2 * (0.5 + 0.5 * Math.cos(2 * Math.PI * (13 / 8))) - 1))
+    expect(fresh.frame.turn.value).not.toBeCloseTo(advance(s, newLive(), 0, 0).frame.turn.value)
+  })
+
+  it('a look coming in at the clock time T shows as one that played all along to T', () => {
+    const s = turning('incoming', 8)
+    const along = played(s, 13)
+    const live = newLive()
+    const incoming = advance(s, live, 13, 0)
+    expect(incoming.frame.turn.value).toBeCloseTo(along.scene.frame.turn.value, 9)
+    expect(live.drift).toBeCloseTo(along.live.drift, 9)
+  })
+
+  it('two looks sharing a period are in phase across the fader mid-transition', () => {
+    const [a, b] = [turning('a', 8), update(turning('b', 8), (d) => (d.frame.turn.value = 30))]
+    const showing = played(a, 13)
+    const incoming = advance(b, newLive(), 13, 0)
+    const swing = showing.scene.frame.turn.value - a.frame.turn.value
+    expect(Math.abs(swing)).toBeGreaterThan(1)
+    expect(incoming.frame.turn.value - b.frame.turn.value).toBeCloseTo(swing, 9)
+    const edge = { seconds: 2, stagger: 0, deepFirst: false }
+    expect(morph(showing.scene, incoming, 0.5, edge, newLive()).scene.frame.turn.value).toBeCloseTo(15 + swing, 9)
+  })
+
+  it("a turn of a running rate moves its phase on from where it is, and a new look's starts at the clock's", () => {
+    const s = turning('drift', 8)
+    const live = newLive()
+    advance(s, live, 10, 0)
+    expect(live.drift).toBeCloseTo(3)
+    const faster = update(s, (d) => (d.contour.drift.value = 0.5))
+    advance(faster, live, 10, 0)
+    expect(live.drift).toBeCloseTo(3)
+    advance(faster, live, 12, 0.1)
+    expect(live.drift).toBeCloseTo(4)
+    const fresh = newLive()
+    advance(faster, fresh, 12, 0)
+    expect(fresh.drift).toBeCloseTo(6)
   })
 
   it('a glide eases a knob toward a new value', () => {
     const s = update(base(), (d) => (d.levels[0].weight.glide = 1))
     const live = newLive()
-    advance(s, live, 0.1, 60)
+    advance(s, live, 0.1, 0.1)
     const half = advance(
       update(s, (d) => (d.levels[0].weight.value = 0)),
       live,
+      0.1 + Math.LN2,
       Math.LN2,
-      60,
     )
     expect(half.levels[0].weight.value).toBeCloseTo(0.5)
   })
@@ -189,42 +252,43 @@ describe('music', () => {
     )
 
   it('runs the clock on the felt beat at its rate while music plays, not on the seconds', () => {
-    const s = update(base(), (d) => d.modulators.push(mod('m', 'ramp', 4, [])))
-    const live = newLive()
+    const time = newTime()
     // the seconds until the music's tempo is found
-    advance(s, live, 1, 60, heard(9, { locked: false }))
-    expect(live.phases.get('m')).toBeCloseTo(0.25)
-    live.phases.set('m', 0)
-    advance(s, live, 1, 60, heard(10))
-    expect(live.phases.get('m')).toBe(0)
-    advance(s, live, 1, 60, heard(11, { rate: 0.5 }))
-    expect(live.phases.get('m')).toBeCloseTo(0.125)
-    advance(s, live, 1, 60, heard(11.5, { felt: 11.9 }))
-    expect(live.phases.get('m')).toBeCloseTo(0.35)
+    keepTime(time, 1, 60, heard(9, { locked: false }))
+    expect(time.beats).toBeCloseTo(1)
+    keepTime(time, 1, 60, heard(10))
+    expect(time.beats).toBeCloseTo(1)
+    keepTime(time, 1, 60, heard(11, { rate: 0.5 }))
+    expect(time.beats).toBeCloseTo(1.5)
+    keepTime(time, 1, 60, heard(11.5, { felt: 11.9 }))
+    expect(time.beats).toBeCloseTo(2.4)
+    // never back, though the felt beat moves back
+    keepTime(time, 1, 60, heard(11.8))
+    expect(time.beats).toBeCloseTo(2.4)
     // the seconds again once the music stops
-    advance(s, live, 1, 60)
-    expect(live.phases.get('m')).toBeCloseTo(0.6)
+    keepTime(time, 1, 60)
+    expect(time.beats).toBeCloseTo(3.4)
   })
 
   it('a modulator on the beats plays its wave at the felt beat, a step a beat, and rests with no music', () => {
     const s = listening('beats', 0.5)
-    expect(scale(advance(s, newLive(), 0, 60, heard(4.5)))).toBe(1.5)
-    expect(scale(advance(s, newLive(), 0, 60, heard(5.2)))).toBe(2.5)
-    expect(scale(advance(s, newLive(), 0, 60, heard(5.9, { felt: 6.1 })))).toBe(1.5)
-    expect(scale(advance(s, newLive(), 0, 60))).toBe(2)
-    expect(scale(advance(s, newLive(), 0, 60, heard(5.2, { locked: false })))).toBe(2)
+    expect(scale(advance(s, newLive(), 0, 0, heard(4.5)))).toBe(1.5)
+    expect(scale(advance(s, newLive(), 0, 0, heard(5.2)))).toBe(2.5)
+    expect(scale(advance(s, newLive(), 0, 0, heard(5.9, { felt: 6.1 })))).toBe(1.5)
+    expect(scale(advance(s, newLive(), 0, 0))).toBe(2)
+    expect(scale(advance(s, newLive(), 0, 0, heard(5.2, { locked: false })))).toBe(2)
   })
 
   it('a modulator on a feature pushes its knobs up by depth at 1, and falls back with no music', () => {
     const s = listening('bass', 0.4)
-    expect(scale(advance(s, newLive(), 0, 60, heard(0, { features: { bass: 1 } as Heard['features'] })))).toBe(2.4)
-    expect(scale(advance(s, newLive(), 0, 60, heard(0, { features: { bass: 0.5 } as Heard['features'] })))).toBeCloseTo(
+    expect(scale(advance(s, newLive(), 0, 0, heard(0, { features: { bass: 1 } as Heard['features'] })))).toBe(2.4)
+    expect(scale(advance(s, newLive(), 0, 0, heard(0, { features: { bass: 0.5 } as Heard['features'] })))).toBeCloseTo(
       2.2,
     )
     const glided = listening('bass', 0.4, { glide: 1 })
     const live = newLive()
-    advance(glided, live, 0, 60, heard(0, { features: { bass: 1 } as Heard['features'] }))
-    expect(scale(advance(glided, live, Math.LN2, 60))).toBeCloseTo(2.2)
+    advance(glided, live, 0, 0, heard(0, { features: { bass: 1 } as Heard['features'] }))
+    expect(scale(advance(glided, live, Math.LN2, Math.LN2))).toBeCloseTo(2.2)
   })
 
   it("a macro on a feature takes its value while music plays, inside the play ranges, and is the hand's without", () => {
@@ -237,11 +301,11 @@ describe('music', () => {
         targets: [{ knob: 'levels[a].affine.scale', from: 1.5, to: 3.5 }],
       }),
     )
-    const shown = advance(s, newLive(), 0, 60, heard(0, { features: { tone: 0.25 } as Heard['features'] }))
+    const shown = advance(s, newLive(), 0, 0, heard(0, { features: { tone: 0.25 } as Heard['features'] }))
     expect(scale(shown)).toBe(2)
     expect(shown.macros[0].value).toBe(0.25)
-    expect(scale(advance(s, newLive(), 0, 60, heard(0, { features: { tone: 1 } as Heard['features'] })))).toBe(2.5)
-    expect(scale(advance(s, newLive(), 0, 60))).toBe(2)
+    expect(scale(advance(s, newLive(), 0, 0, heard(0, { features: { tone: 1 } as Heard['features'] })))).toBe(2.5)
+    expect(scale(advance(s, newLive(), 0, 0))).toBe(2)
     expect(s.macros[0].value).toBe(0)
   })
 })

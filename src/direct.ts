@@ -1,8 +1,8 @@
-// Direct: a timeline's frame at any time of its song, and its export. Each key's scene plays on its own clock,
-// started as its edge starts (a key of the same look as the one before plays from where that one's clock started),
-// stepped on a fixed grid so a frame is the same however it is reached: played, scrubbed or exported. An edge morphs
-// the key before into its key, landing on it at its at; keys passed through back to back bend on a Catmull-Rom
-// curve, as Play's transitions do. A curve sets its knob over its own span, under the knob's modulators.
+// Direct: a timeline's frame at any time of its song, and its export. Each key's scene plays at the playhead's time,
+// its glides started as its edge starts (a key of the same look as the one before carries that one's on), stepped on
+// a fixed grid so a frame is the same however it is reached: played, scrubbed or exported. An edge morphs the key
+// before into its key, landing on it at its at; keys passed through back to back bend on a Catmull-Rom curve, as
+// Play's transitions do. A curve sets its knob over its own span, under the knob's modulators.
 import {
   AudioBufferSource,
   BufferTarget,
@@ -18,7 +18,7 @@ import {
 } from 'mediabunny'
 import { snapLoop } from './loop'
 import { morph, smooth } from './morph'
-import { advance, newLive, update, type Live } from './motion'
+import { advance, copyLive, newLive, update, type Live } from './motion'
 import { bend, bendOf, entryScene, tangent, valuesOf, type Bend } from './play'
 import { createRenderer, type Toward } from './render'
 import { clamp, hardRange, resolve, type Scene, type Timeline } from './scene'
@@ -62,10 +62,8 @@ export function curved(scene: Scene, curves: Timeline['curves'], t: number): Sce
   })
 }
 
-const copyLive = (live: Live): Live => ({ ...live, phases: new Map(live.phases), smooth: new Map(live.smooth) })
-
-// A scene's clock from origin (song seconds): the scene to draw at t and its live state, stepped from the last grid
-// step it reached, or back from the checkpoint at or before t's.
+// A scene's clock from origin (song seconds): the scene to draw at t, at the playhead's time in beats, and its live
+// state, stepped from the last grid step it reached, or back from the checkpoint at or before t's.
 export type Clock = (t: number) => { scene: Scene; live: Live }
 function clock(scene: Scene, origin: number, curves: Timeline['curves'], bpm: number): Clock {
   const marks = [newLive()]
@@ -77,11 +75,12 @@ function clock(scene: Scene, origin: number, curves: Timeline['curves'], bpm: nu
     if (n < head.n || m * MARK > head.n) head = { n: m * MARK, live: copyLive(marks[m]) }
     while (head.n < n) {
       head.n++
-      advance(curved(scene, curves, origin + head.n * STEP), head.live, STEP, bpm)
+      const at = origin + head.n * STEP
+      advance(curved(scene, curves, at), head.live, (at * bpm) / 60, STEP)
       if (head.n % MARK === 0 && marks.length === head.n / MARK) marks.push(copyLive(head.live))
     }
     const live = copyLive(head.live)
-    return { scene: advance(curved(scene, curves, t), live, e - n * STEP, bpm), live }
+    return { scene: advance(curved(scene, curves, t), live, (t * bpm) / 60, e - n * STEP), live }
   }
 }
 
