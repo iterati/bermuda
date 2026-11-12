@@ -135,8 +135,8 @@ function morphAt(a: Scene, b: Scene, x: number, edge: Edge, t: number) {
 
 // the first draw compiles the shader's software code, slow while another browser test runs beside it
 describe('the one shader', { timeout: 30_000 }, () => {
-  // createRenderer compiles and links all three programs, and the first draw of each builds its software code: 40 s
-  // the three, metal's the longest
+  // the first draw of each of the everything program's three compiles and links it and builds its software code:
+  // 40 s the three, metal's the longest
   it('compiles and links', { timeout: 90_000 }, async () => {
     const ok = await page.evaluate(
       () => !!(window.renderer ??= window.Bermuda.createRenderer(document.querySelector('canvas')!)),

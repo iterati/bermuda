@@ -1,8 +1,11 @@
-// The renderer: compiles the shader's programs once, the app's three unless given parts (every part but fills and
-// metal, every part but metal, and every part), each frame picking the one the live scene's fills need, or else the
-// one program of the parts given, which draws every scene. It packs the scene into the program's uniforms (setting
-// one the program leaves out does nothing) and level rows, and draws one full-screen triangle into whatever
-// framebuffer is bound, over the whole canvas or a smaller picture in its bottom-left corner.
+// The renderer: a cache of the shader's programs, each keyed by its sorted parts, compiled on first use or warmed
+// between frames (a few at a time where the browser compiles in parallel), and ready once it has drawn once into a
+// 1x1 target. A draw is given the parts its scene needs and draws on their program once it is ready; until then on
+// main's everything program, the one of its three (every part but fills and metal, every part but metal, and every
+// part) the live scene's fills need, where that is ready, else on the parts' program compiled then. It packs the
+// scene into the program's uniforms (setting one the program leaves out does nothing) and level rows, and draws one
+// full-screen triangle into whatever framebuffer is bound, over the whole canvas or a smaller picture in its
+// bottom-left corner.
 import {
   allLevels,
   BACKGROUNDS,
@@ -121,69 +124,81 @@ export function packLevels(
   return data
 }
 
+// main's everything program, the fallback: plain, fills, and fills with metal, as the frame's fills need
+export const EVERYTHING: readonly (readonly Part[])[] = [
+  PARTS.filter((p) => p !== 'fill' && p !== 'metal'),
+  PARTS.filter((p) => p !== 'metal'),
+  PARTS,
+]
+// at most this many programs compile at once where the browser compiles in parallel
+const IN_FLIGHT = 3
+
+// What a draw drew on: its program's key (its sorted parts), whether that was the everything program standing in for
+// the parts given, and the program's compile time in milliseconds, from its compile's start to its warm-up draw's end.
+export type Drew = { parts: readonly Part[]; fallback: boolean; ms: number }
+
 export type Renderer = {
   gl: WebGL2RenderingContext
-  draw: (scene: Scene, live: Pick<Live, 'drift' | 'colour' | 'crawl'>, toward?: Toward, size?: [number, number]) => void
+  parallel: boolean // whether the context compiles in parallel (KHR_parallel_shader_compile)
+  draw: (
+    scene: Scene,
+    live: Pick<Live, 'drift' | 'colour' | 'crawl'>,
+    toward?: Toward,
+    size?: [number, number],
+    parts?: Iterable<Part>,
+  ) => Drew
+  warm: (sets: Iterable<Part>[]) => void
+  step: () => boolean
 }
 
-export function createRenderer(canvas: HTMLCanvasElement, parts?: readonly Part[]): Renderer {
+// a program's uniforms, each null where the program leaves it out
+const locate = (gl: WebGL2RenderingContext, program: WebGLProgram) => {
+  const u = (name: string) => gl.getUniformLocation(program, name)
+  return {
+    res: u('uRes'),
+    frame: u('uFrame'),
+    levels: u('uLevels'),
+    depth: u('uDepth'),
+    contour: u('uContour'),
+    radial: u('uRadial'),
+    line: u('uLine'),
+    falloff: u('uFalloff'),
+    dots: u('uDots'),
+    crawl: u('uCrawl'),
+    stopCount: u('uStopCount'),
+    stops: u('uStops'),
+    stopMix: u('uStopMix'),
+    palette: u('uPalette'),
+    trap: u('uTrap'),
+    composite: u('uComposite'),
+    bg: u('uBg'),
+    bgSoak: u('uBgSoak'),
+    aa: u('uAA'),
+    gamma: u('uGamma'),
+    toward: u('uToward'),
+    towardRings: u('uTowardRings'),
+    towardMix: u('uTowardMix'),
+    field: u('uField'),
+    fieldC: u('uFieldC'),
+    cross: u('uCross'),
+  }
+}
+
+// a program of the cache: compiling until it has its uniforms, and ready once it has its compile time too
+type Program = {
+  parts: Part[]
+  program: WebGLProgram
+  shaders: WebGLShader[]
+  start: number
+  loc?: ReturnType<typeof locate>
+  ms?: number
+}
+
+export function createRenderer(canvas: HTMLCanvasElement): Renderer {
   const gl = canvas.getContext('webgl2', { antialias: false, preserveDrawingBuffer: true })
   if (!gl) throw new Error('WebGL2 is not available')
-  const compile = (type: number, source: string) => {
-    const s = gl.createShader(type)!
-    gl.shaderSource(s, source)
-    gl.compileShader(s)
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) ?? 'shader failed')
-    return s
-  }
-  const vertex = compile(
-    gl.VERTEX_SHADER,
-    '#version 300 es\nvoid main() { gl_Position = vec4(vec2(gl_VertexID & 1, gl_VertexID >> 1) * 4. - 1., 0, 1); }',
-  )
-  // plain, fills, and fills with metal, or the parts given, each with its own uniforms
-  const sets = parts
-    ? [parts]
-    : [PARTS.filter((p) => p !== 'fill' && p !== 'metal'), PARTS.filter((p) => p !== 'metal'), PARTS]
-  const programs = sets.map((set) => {
-    const program = gl.createProgram()
-    gl.attachShader(program, vertex)
-    gl.attachShader(program, compile(gl.FRAGMENT_SHADER, generateShader(set)))
-    gl.linkProgram(program)
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS))
-      throw new Error(gl.getProgramInfoLog(program) ?? 'link failed')
-    const u = (name: string) => gl.getUniformLocation(program, name)
-    const loc = {
-      res: u('uRes'),
-      frame: u('uFrame'),
-      levels: u('uLevels'),
-      depth: u('uDepth'),
-      contour: u('uContour'),
-      radial: u('uRadial'),
-      line: u('uLine'),
-      falloff: u('uFalloff'),
-      dots: u('uDots'),
-      crawl: u('uCrawl'),
-      stopCount: u('uStopCount'),
-      stops: u('uStops'),
-      stopMix: u('uStopMix'),
-      palette: u('uPalette'),
-      trap: u('uTrap'),
-      composite: u('uComposite'),
-      bg: u('uBg'),
-      bgSoak: u('uBgSoak'),
-      aa: u('uAA'),
-      gamma: u('uGamma'),
-      toward: u('uToward'),
-      towardRings: u('uTowardRings'),
-      towardMix: u('uTowardMix'),
-      field: u('uField'),
-      fieldC: u('uFieldC'),
-      cross: u('uCross'),
-    }
-    gl.useProgram(program)
-    gl.uniform1i(loc.levels, 0)
-    return { program, loc }
-  })
+  const khr = gl.getExtension('KHR_parallel_shader_compile')
+  // the level rows, which every program reads
   const texture = gl.createTexture()
   gl.activeTexture(gl.TEXTURE0)
   gl.bindTexture(gl.TEXTURE_2D, texture)
@@ -191,8 +206,117 @@ export function createRenderer(canvas: HTMLCanvasElement, parts?: readonly Part[
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, ROW_TEXELS, MAX_LEVELS, 0, gl.RGBA, gl.FLOAT, null)
   gl.bindVertexArray(gl.createVertexArray())
+  // a shader's compile and a program's link are started without reading their status, which would wait for them
+  const compile = (type: number, source: string) => {
+    const s = gl.createShader(type)!
+    gl.shaderSource(s, source)
+    gl.compileShader(s)
+    return s
+  }
+  let vertex: WebGLShader | undefined
+  // the programs by key, their sorted parts, each compiled on first use or warmed, and ready once it has drawn its
+  // warm-up
+  const programs = new Map<string, Program>()
+  const sortedOf = (parts: Iterable<Part>) => [...new Set(parts)].sort()
+  const done = (parts: Part[]) => programs.get(parts.join(' '))?.ms !== undefined
+  const begin = (parts: Part[]) => {
+    const start = performance.now()
+    vertex ??= compile(
+      gl.VERTEX_SHADER,
+      '#version 300 es\nvoid main() { gl_Position = vec4(vec2(gl_VertexID & 1, gl_VertexID >> 1) * 4. - 1., 0, 1); }',
+    )
+    const program = gl.createProgram()
+    const shaders = [vertex, compile(gl.FRAGMENT_SHADER, generateShader(parts))]
+    for (const s of shaders) gl.attachShader(program, s)
+    gl.linkProgram(program)
+    const entry: Program = { parts, program, shaders, start }
+    programs.set(parts.join(' '), entry)
+    return entry
+  }
+  // the 1x1 targets of the warm-up draws: a driver may build a program's code for each target it draws into, so a
+  // warm-up draws into one shaped as the framebuffer bound is, the canvas's (bytes, and the 24-bit depth and 8-bit
+  // stencil Chrome gives a canvas with depth) or one of floats
+  const targets = new Map<boolean, WebGLFramebuffer>()
+  // A program's statuses checked, its uniforms found, and its warm-up draw into a 1x1 target read back, so a driver
+  // that does its real work at the first draw has done it.
+  const finish = (entry: Program) => {
+    const { program, shaders } = entry
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      for (const s of shaders)
+        if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) ?? 'shader failed')
+      throw new Error(gl.getProgramInfoLog(program) ?? 'link failed')
+    }
+    const loc = locate(gl, program)
+    gl.useProgram(program)
+    gl.uniform1i(loc.levels, 0)
+    const bound: WebGLFramebuffer | null = gl.getParameter(gl.FRAMEBUFFER_BINDING)
+    const viewport: Int32Array = gl.getParameter(gl.VIEWPORT)
+    const float =
+      !!bound &&
+      gl.getFramebufferAttachmentParameter(
+        gl.FRAMEBUFFER,
+        gl.COLOR_ATTACHMENT0,
+        gl.FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE,
+      ) === gl.FLOAT
+    const [format, type] = float ? [gl.RGBA32F, gl.FLOAT] : [gl.RGBA8, gl.UNSIGNED_BYTE]
+    let target = targets.get(float)
+    if (!target) {
+      target = gl.createFramebuffer()
+      targets.set(float, target)
+      const t = gl.createTexture()
+      gl.bindFramebuffer(gl.FRAMEBUFFER, target)
+      gl.bindTexture(gl.TEXTURE_2D, t)
+      gl.texImage2D(gl.TEXTURE_2D, 0, format, 1, 1, 0, gl.RGBA, type, null)
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0)
+      const { depth, stencil } = gl.getContextAttributes()!
+      if (!float && (depth || stencil)) {
+        const rb = gl.createRenderbuffer()
+        gl.bindRenderbuffer(gl.RENDERBUFFER, rb)
+        gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH24_STENCIL8, 1, 1)
+        gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, gl.RENDERBUFFER, rb)
+      }
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target)
+    gl.bindTexture(gl.TEXTURE_2D, texture)
+    gl.viewport(0, 0, 1, 1)
+    gl.drawArrays(gl.TRIANGLES, 0, 3)
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, type, float ? new Float32Array(4) : new Uint8Array(4))
+    gl.bindFramebuffer(gl.FRAMEBUFFER, bound)
+    gl.viewport(viewport[0], viewport[1], viewport[2], viewport[3])
+    entry.loc = loc
+    entry.ms = performance.now() - entry.start
+  }
+  // the program of these sorted parts, compiled and warmed now if it is not ready
+  const ready = (parts: Part[]) => {
+    const entry = programs.get(parts.join(' ')) ?? begin(parts)
+    if (entry.ms === undefined) finish(entry)
+    return entry
+  }
+  // what to compile next, each its sorted parts: the programs a draw found not ready, then the warm-up's list
+  const wanted: Part[][] = []
+  let queue: Part[][] = []
+  const warm: Renderer['warm'] = (sets) => {
+    queue = [...new Map(sets.map(sortedOf).map((parts) => [parts.join(' '), parts])).values()]
+  }
+  // One slice of the work, between frames: where the context compiles in parallel, the programs whose compile has
+  // completed finished and the next ones started, a few at a time; else the next one compiled and warmed. Whether
+  // work is left.
+  const step: Renderer['step'] = () => {
+    const flying = () => [...programs.values()].filter((p) => p.ms === undefined)
+    if (khr) for (const p of flying()) if (gl.getProgramParameter(p.program, khr.COMPLETION_STATUS_KHR)) finish(p)
+    for (const list of [wanted, queue]) while (list.length && done(list[0])) list.shift()
+    if (!khr) {
+      const next = wanted.shift() ?? queue.shift()
+      if (next) ready(next)
+    } else {
+      const next = () => [...wanted, ...queue].find((parts) => !programs.has(parts.join(' ')))
+      for (let parts = next(); parts && flying().length < IN_FLIGHT; parts = next()) begin(parts)
+    }
+    return flying().length > 0 || [...wanted, ...queue].some((parts) => !done(parts))
+  }
+  const everything = EVERYTHING.map(sortedOf)
 
-  const draw: Renderer['draw'] = (scene, live, toward, [width, height] = [canvas.width, canvas.height]) => {
+  const draw: Renderer['draw'] = (scene, live, toward, [width, height] = [canvas.width, canvas.height], parts) => {
     const { frame, contour, line, palette, post } = scene
     // a scene drawn alone is its own far end
     const far = toward ?? {
@@ -208,12 +332,20 @@ export function createRenderer(canvas: HTMLCanvasElement, parts?: readonly Part[
       at: 0,
     }
     const mixed = (a: boolean, b: boolean) => Number(a) * (1 - far.at) + Number(b) * far.at
-    // the program the fills need: metal where a level paints metal, fills where one paints at all, else plain (a
-    // morph's scene holds both ends' fills); the parts' one program draws every scene
+    // the everything program the fills need: metal where a level paints metal, fills where one paints at all, else
+    // plain (a morph's scene holds both ends' fills)
     const fills = allLevels(scene.levels).flatMap(({ level }) =>
       level.fill && level.fill.amount.value > 0 ? [level.fill] : [],
     )
-    const { program, loc } = programs[parts ? 0 : fills.some((f) => f.metal.value > 0) ? 2 : fills.length ? 1 : 0]
+    const all = everything[fills.some((f) => f.metal.value > 0) ? 2 : fills.length ? 1 : 0]
+    // the parts' own program once ready; until then the everything program where it is ready, the parts' program
+    // compiled between frames, else the parts' program compiled now
+    const own = parts && sortedOf(parts)
+    const stand = !!own && !done(own) && done(all)
+    if (stand && !wanted.some((w) => w.join(' ') === own.join(' '))) wanted.push(own)
+    const entry = ready(stand || !own ? all : own)
+    const { program } = entry
+    const loc = entry.loc!
     gl.useProgram(program)
     gl.viewport(0, 0, width, height)
     gl.uniform2f(loc.res, width, height)
@@ -285,6 +417,7 @@ export function createRenderer(canvas: HTMLCanvasElement, parts?: readonly Part[
     gl.uniform1i(loc.aa, post.aa)
     gl.uniform1f(loc.gamma, post.gamma.value)
     gl.drawArrays(gl.TRIANGLES, 0, 3)
+    return { parts: entry.parts, fallback: stand, ms: entry.ms! }
   }
-  return { gl, draw }
+  return { gl, parallel: !!khr, draw, warm, step }
 }

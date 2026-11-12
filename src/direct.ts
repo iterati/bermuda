@@ -22,6 +22,7 @@ import { advance, copyLive, newLive, update, type Live } from './motion'
 import { bend, bendOf, entryScene, tangent, valuesOf, type Bend } from './play'
 import { createRenderer, type Toward } from './render'
 import { clamp, hardRange, resolve, type Scene, type Timeline } from './scene'
+import { needs, type Part } from './shader'
 
 // the clock's grid, in seconds, and how many steps of it lie between the checkpoints a scrub starts from. A step
 // is exact where its targets hold still (glides follow exponentially, phases and running rates are linear), and a
@@ -29,8 +30,14 @@ import { clamp, hardRange, resolve, type Scene, type Timeline } from './scene'
 export const STEP = 0.1
 const MARK = 50
 
-// what the picture draws at a time: the scene, its running phases and, in an edge, the far end the morph runs to
-export type Shot = { scene: Scene; phases: Pick<Live, 'drift' | 'colour' | 'crawl'>; toward?: Toward }
+// what the picture draws at a time: the scene, its running phases, in an edge the far end the morph runs to, and the
+// parts it draws with
+export type Shot = {
+  scene: Scene
+  phases: Pick<Live, 'drift' | 'colour' | 'crawl'>
+  toward?: Toward
+  parts: Set<Part>
+}
 
 // The keys that name no look or preset among the looks.
 export const missingKeys = (timeline: Timeline, looks: Scene[]) =>
@@ -84,10 +91,15 @@ function clock(scene: Scene, origin: number, curves: Timeline['curves'], bpm: nu
   }
 }
 
-// The timeline's frame at any time t of its song, over the looks its keys name. clocks: an earlier build's, by what
+// The timeline's frame at any time t of its song, over the looks its keys name, and sets: the parts its frames draw
+// with, each key's alone and before it its edge's, both ends' and the morph's. clocks: an earlier build's, by what
 // each plays, so an edit that leaves a key's scene, start, tempo and curves as they were keeps its clock's steps;
 // it is left holding this build's.
-export function director(timeline: Timeline, looks: Scene[], clocks = new Map<string, Clock>()): (t: number) => Shot {
+export function director(
+  timeline: Timeline,
+  looks: Scene[],
+  clocks = new Map<string, Clock>(),
+): ((t: number) => Shot) & { sets: Set<Part>[] } {
   const { keys, curves, bpm } = timeline
   const scenes = keys.map((k) => {
     const scene = entryScene(looks, k.scene)
@@ -119,22 +131,25 @@ export function director(timeline: Timeline, looks: Scene[], clocks = new Map<st
       ? bendOf(scenes[j - 1], s, tangentAt(j - 1, length(j)), tangentAt(j, length(j)))
       : { from: none, to: none, range: new Map() },
   )
-  return (t) => {
+  const alone = scenes.map((s) => needs(s))
+  const edges = scenes.map((s, j) => (j ? needs(scenes[j - 1], s) : undefined))
+  const shot = (t: number): Shot => {
     const i = Math.max(
       0,
       keys.findLastIndex((k) => k.at <= t),
     )
     const j = i + 1
     const a = own[i](t)
-    if (j >= keys.length || t < starts[j]) return { scene: a.scene, phases: a.live }
+    if (j >= keys.length || t < starts[j]) return { scene: a.scene, phases: a.live, parts: alone[i] }
     const run = (t - starts[j]) / (keys[j].at - starts[j])
     const x = smooth(0, 1, run)
-    if (x <= 0) return { scene: a.scene, phases: a.live }
+    if (x <= 0) return { scene: a.scene, phases: a.live, parts: alone[i] }
     const b = own[j](t)
     const { scene, toward } = morph(a.scene, b.scene, x, keys[j].edge, b.live)
     bend(scene, bends[j], run)
-    return { scene, phases: a.live, toward }
+    return { scene, phases: a.live, toward, parts: edges[j]! }
   }
+  return Object.assign(shot, { sets: alone.flatMap((parts, j) => [...(edges[j] ? [edges[j]] : []), parts]) })
 }
 
 // A song file decoded whole at 48 kHz, the rate the export's audio codecs all take.
@@ -191,11 +206,14 @@ export async function exportVideo(job: ExportJob): Promise<{ file: Blob; video: 
     for (let c = 0; c < channels; c++) span.copyToChannel(song.getChannelData(c).subarray(s0, s1), c)
     await sound.add(span)
     const shot = director(job.timeline, job.looks)
+    // every program its frames draw on compiled and warmed before the first, so none draws on the fallback
+    renderer.warm(shot.sets)
+    while (renderer.step()) await new Promise((go) => setTimeout(go))
     const total = Math.round((to - from) * fps)
     for (let n = 0; n < total; n++) {
       job.signal?.throwIfAborted()
-      const { scene, phases, toward } = shot(from + n / fps)
-      renderer.draw(scene, phases, toward)
+      const { scene, phases, toward, parts } = shot(from + n / fps)
+      renderer.draw(scene, phases, toward, undefined, parts)
       await frames.add(n / fps, 1 / fps)
       job.onFrame?.(n + 1, total)
     }

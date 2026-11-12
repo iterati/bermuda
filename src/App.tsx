@@ -4,9 +4,10 @@
 // A or B; every change is instant, and so is MIDI, which plays the side being edited and the fader. Play is the
 // picture alone with the bank over it: every change there rides a timed transition, the fader run from the side
 // showing to the other with the change loaded on it, and the autopilot walks the bank. A song or the microphone,
-// once heard, sets the clock's tempo and lands Play's transitions on its beats.
+// once heard, sets the clock's tempo and lands Play's transitions on its beats. Key I shows the frame-time readout
+// over the picture in every view.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { missingKeys, pruneTimeline, type Shot } from './direct'
+import { director, missingKeys, pruneTimeline, type Shot } from './direct'
 import { BANK, LOOKS } from './looks'
 import {
   attach,
@@ -66,12 +67,14 @@ import {
   type Timeline,
   type View,
 } from './scene'
+import { needs } from './shader'
 import { Bank } from './ui/Bank'
 import { Chain } from './ui/Chain'
 import { Direct, type Video } from './ui/Direct'
 import { CtlContext, Dice, Section, type Armed, type Ctl } from './ui/controls'
 import { Deck } from './ui/Deck'
 import { Fader } from './ui/Fader'
+import { FrameTime, type Frames } from './ui/FrameTime'
 import { wheelSteps } from './ui/Knob'
 import { KnobDetail } from './ui/KnobDetail'
 import { Looks } from './ui/Looks'
@@ -190,6 +193,9 @@ export function App() {
   const [shown, setShown] = useState(scene)
   const [mode, setMode] = useState<View | 'play' | 'direct'>('stage')
   const [hidden, setHidden] = useState(false)
+  // the frame-time readout, off at load, and its numbers while it is on
+  const [readout, setReadout] = useState(false)
+  const [frames, setFrames] = useState<Frames>()
   const [picked, setPicked] = useState<string>(LOOKS[0].levels[0].id)
   const [focus, setFocus] = useState<Address | null>(null)
   // the Stage's bottom panel: the Perform strip, or every knob of the picked chip; and its right column's tab
@@ -290,6 +296,16 @@ export function App() {
   }
   const [video, setVideo] = useState<Video>({ width: 1920, height: 1080, fps: 30, format: 'mp4' })
   const directShot = useRef<(() => Shot) | null>(null)
+  // what the picture may draw next, for its warm-up: the bank's entries and links, then the loaded timeline's keys
+  // and edges
+  const ahead = useMemo(() => {
+    const at = (entry: string) => entryScene(looks, entry)!
+    return [
+      ...bank.scenes.map((e) => needs(at(e))),
+      ...bank.links.map(([a, b]) => needs(at(a), at(b))),
+      ...(timeline ? director(timeline, looks).sets : []),
+    ]
+  }, [bank, looks, timeline])
   // a look gone from the library takes its entries out of the bank and its keys out of the timeline
   const prune = (next: Scene[]) => {
     const kept = pruneBank(bank, library(next))
@@ -687,7 +703,10 @@ export function App() {
         // Direct takes the song's keys itself
         if (e.key === 't' || e.key === 'Escape') toMode('stage')
       } else if (e.key === 't') toMode('direct')
-      else if (e.key === 'e' || e.key === 'E') toMode(mode === 'edit' ? 'stage' : 'edit')
+      else if (e.key === 'i') {
+        setReadout((r) => !r)
+        setFrames(undefined)
+      } else if (e.key === 'e' || e.key === 'E') toMode(mode === 'edit' ? 'stage' : 'edit')
       else if (e.key === 'd' || e.key === 'D') toMode(mode === 'decks' ? 'stage' : 'decks')
       else if (e.key === 'f') toMode(mode === 'play' ? 'stage' : 'play')
       else if (e.key === 'o') changeBank({ ...bank, autopilot: { ...auto, on: !auto.on } })
@@ -859,7 +878,10 @@ export function App() {
           onLand={land}
           shot={mode === 'direct' ? () => directShot.current?.() : undefined}
           aspect={mode === 'direct' ? video.width / video.height : undefined}
+          ahead={ahead}
+          onFrames={readout ? setFrames : undefined}
         />
+        {readout && frames && <FrameTime {...frames} />}
         {mode !== 'play' && (
           <header className="bar panel">
             <span className="brand">bermuda</span>
@@ -947,7 +969,7 @@ export function App() {
               <span className="dim keys">
                 Tab hides · E edit · D decks · T direct · Space pause · 1-0 looks · [ ] presets · ← → chips · ↑ ↓ knob ·
                 PgDn PgUp strip page · M MIDI learn · S save · P preset · A B side · , . fader · X swap · L loop · R
-                mutate · C roll chip · ⇧C roll look · F play · O autopilot · N next
+                mutate · C roll chip · ⇧C roll look · F play · O autopilot · N next · I readout
               </span>
             )}
           </header>

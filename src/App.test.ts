@@ -1,5 +1,6 @@
 // The app as built, in headless Chrome: Stage, Edit and Decks each show a picture that is not blank, Decks its
-// two decks and the mix between them, and a look cued onto B changes B's deck and nothing A shows. A look loaded or
+// two decks and the mix between them, and a look cued onto B changes B's deck and nothing A shows. Key I shows the
+// frame-time readout, the program's parts a click opens into their list, and hides it again. A look loaded or
 // changed into in Play comes in where the clock is, so one played on, left and come back to shows as it did. A
 // song of clicks at 120 bpm, chosen as a file, plays and sets the clock's tempo to its own, until it is stopped.
 import { execFileSync } from 'node:child_process'
@@ -10,6 +11,8 @@ import { fileURLToPath } from 'node:url'
 import puppeteer, { type Browser, type KeyInput, type Page } from 'puppeteer-core'
 import { build, type Rollup } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { LOOKS } from './looks'
+import { needs } from './shader'
 
 // localhost, nothing listening there: the build is served from memory, and the page is a secure context, as the
 // music's worklet needs
@@ -124,6 +127,33 @@ describe('the views', { timeout: 30_000 }, () => {
     expect(furthest(after.a.px, before.a.px)).toBe(0)
     expect(furthest(after.mix.px, before.mix.px)).toBe(0)
     expect(furthest(after.b.px, before.b.px)).toBeGreaterThan(0.1)
+  })
+
+  it("the readout key shows frames a second, the program's parts and its compile time, and hides it again", async () => {
+    await view('Stage')
+    const picture = async () => (await canvases('canvas.picture'))[0].px
+    const before = await picture()
+    const press = async () => {
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+      await page.keyboard.press('i')
+    }
+    await press()
+    await page.waitForSelector('.frame-time')
+    const lines = () => page.$eval('.frame-time', (el) => [...el.children].map((c) => c.textContent))
+    // A on its own program, compiled on its first draw
+    const parts = [...needs(LOOKS[0])].sort()
+    const [fps, count, compiled] = await lines()
+    expect(fps).toMatch(/^\d+ fps$/)
+    expect(count).toBe(`${parts.length} parts`)
+    expect(compiled).toMatch(/^compiled in \d+ ms$/)
+    await page.click('.frame-parts')
+    expect(await page.$eval('.frame-parts .dim', (el) => el.textContent)).toBe(parts.join(' '))
+    await page.click('.frame-parts')
+    expect(await page.$$('.frame-parts .dim')).toHaveLength(0)
+    await press()
+    await frames()
+    expect(await page.$$('.frame-time')).toHaveLength(0)
+    expect(furthest(await picture(), before)).toBe(0)
   })
 })
 

@@ -5,7 +5,9 @@
 // corner and copied out, before the mix goes over the whole canvas: one shader, each side run once a frame. While
 // music is heard the clock runs on its beat, a transition sets off on a beat and lands on one a whole number of beats
 // on, and what is heard goes up with the live scene, paused or not. In Direct it draws the timeline's frame instead,
-// at the export's aspect.
+// at the export's aspect. Each draw is given the parts it needs, a side's alone and the pair's for the morph between
+// them, and the renderer warms what may draw next between frames; while the readout is on, the frames a second and
+// what the picture drew on go up a few times a second.
 import { useEffect, useMemo, useRef } from 'react'
 import type { Shot } from '../direct'
 import { snapLoop } from '../loop'
@@ -13,8 +15,10 @@ import { morph, smooth } from '../morph'
 import { advance, keepTime, newTime, type Live } from '../motion'
 import { heardAt, type Heard, type Listening } from '../music'
 import { bend, onBeat, type Bend } from '../play'
-import { createRenderer } from '../render'
+import { createRenderer, EVERYTHING, type Drew } from '../render'
 import type { Edge, Scene } from '../scene'
+import { needs, type Part } from '../shader'
+import type { Frames } from './FrameTime'
 
 export type Side = 'a' | 'b'
 // the fader run from where it was (from) to the end of the side it goes to, over seconds, on its curve
@@ -34,6 +38,8 @@ type Props = {
   onLand: () => void
   shot?: () => Shot | undefined // Direct's frame, when it has a timeline
   aspect?: number // width over height, else the picture fills the screen
+  ahead?: Set<Part>[] // the parts sets the app may draw next, in order, for the warm-up after the pair's
+  onFrames?: (frames: Frames) => void // the readout's numbers, while it is on
 }
 
 const density = () => Math.min(window.devicePixelRatio, 1.5)
@@ -43,9 +49,18 @@ export function Picture(props: Props) {
   const { pair, bpm, lives } = props
   // each side as it plays, snapped to its loop
   const snapped = useMemo(() => ({ a: snapLoop(pair.a, bpm), b: snapLoop(pair.b, bpm) }), [pair, bpm])
-  const latest = useRef({ ...props, snapped })
+  // the parts each side draws with alone, and the morph between them: the same at every preset, dice and frame
+  const parts = useMemo(() => ({ a: needs(pair.a), b: needs(pair.b), ab: needs(pair.a, pair.b) }), [pair])
+  // what to warm, in order: the showing side's, the everything programs, the other side's, the morph's, then ahead
+  const showing: Side = props.fader > 0.5 ? 'b' : 'a'
+  const { ahead } = props
+  const warming = useMemo(
+    () => [parts[showing], ...EVERYTHING, parts[showing === 'a' ? 'b' : 'a'], parts.ab, ...(ahead ?? [])],
+    [parts, showing, ahead],
+  )
+  const latest = useRef({ ...props, snapped, parts, warming })
   useEffect(() => {
-    latest.current = { ...props, snapped }
+    latest.current = { ...props, snapped, parts, warming }
   })
   useEffect(() => {
     const el = canvas.current!
@@ -66,14 +81,51 @@ export function Picture(props: Props) {
     let begin: number | undefined
     let held: Heard | undefined
     let paused = false
+    // the warm-up list last given; the frames' times over about the last second, and when the readout was last told
+    let warmed: Iterable<Part>[] | undefined
+    const times: number[] = []
+    let told = 0
+    // after the frame's draws: a slice of the warm-up, and the readout's numbers a few times a second while it is on
+    const drawn = (now: number, drew: Drew) => {
+      renderer.step()
+      const { onFrames } = latest.current
+      if (!onFrames) {
+        times.length = 0
+        return
+      }
+      times.push(now)
+      while (now - times[0] > 1000) times.shift()
+      if (now - told < 250) return
+      told = now
+      onFrames({ fps: times.length > 1 ? ((times.length - 1) * 1000) / (now - times[0]) : 0, drew })
+    }
     let raf = requestAnimationFrame(function tick(now) {
-      const { snapped, side, fader, edge, bpm, running, transition, decks, music, onLive, onLand, shot } =
-        latest.current
+      const {
+        snapped,
+        parts,
+        warming,
+        side,
+        fader,
+        edge,
+        bpm,
+        running,
+        transition,
+        decks,
+        music,
+        onLive,
+        onLand,
+        shot,
+      } = latest.current
+      if (warming !== warmed) {
+        warmed = warming
+        // where the browser cannot compile in parallel, a program compiles on first use alone
+        if (renderer.parallel) renderer.warm(warming)
+      }
       const dt = running ? Math.min(0.1, (now - last) / 1000) : 0
       last = now
       const direct = shot?.()
       if (direct) {
-        renderer.draw(direct.scene, direct.phases, direct.toward)
+        drawn(now, renderer.draw(direct.scene, direct.phases, direct.toward, undefined, direct.parts))
         raf = requestAnimationFrame(tick)
         return
       }
@@ -111,16 +163,18 @@ export function Picture(props: Props) {
           // a deck larger than the canvas draws smaller and is stretched up to fill
           const k = Math.min(1, el.width / w, el.height / h)
           const [dw, dh] = [Math.round(w * k), Math.round(h * k)]
-          renderer.draw(scene, lives[s], undefined, [dw, dh])
+          renderer.draw(scene, lives[s], undefined, [dw, dh], parts[s])
           deck.getContext('2d')!.drawImage(el, 0, el.height - dh, dw, dh, 0, 0, w, h)
         }
-      if (x <= 0) renderer.draw(a, lives.a)
-      else if (x >= 1) renderer.draw(b, lives.b)
+      let drew: Drew
+      if (x <= 0) drew = renderer.draw(a, lives.a, undefined, undefined, parts.a)
+      else if (x >= 1) drew = renderer.draw(b, lives.b, undefined, undefined, parts.b)
       else {
         const { scene, toward } = morph(a, b, x, edge, lives.b)
         if (run) bend(scene, run.bend, through)
-        renderer.draw(scene, lives.a, toward)
+        drew = renderer.draw(scene, lives.a, toward, undefined, parts.ab)
       }
+      drawn(now, drew)
       if (run && through >= 1 && !landed) {
         landed = true
         onLand()

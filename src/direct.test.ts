@@ -1,6 +1,7 @@
 // Direct: a timeline round-trips as JSON and its parse refuses what is off its shape; the frame at a key is that
 // key's scene at the playhead's time; an edge morphs into its key and a key of the same look carries its glides on;
-// curves set their knob over their own span; a frame is the same however it is reached. And in headless Chrome, an export
+// curves set their knob over their own span; a frame is the same however it is reached; each frame carries the parts
+// it draws with, a key's alone and an edge's both ends' and the morph's. And in headless Chrome, an export
 // of a few seconds of a test tone is a file of that duration holding one video and one audio track.
 import { execFileSync } from 'node:child_process'
 import { createServer, type Server } from 'node:http'
@@ -16,6 +17,7 @@ import { LOOKS } from './looks'
 import { advance, newLive } from './motion'
 import { entryScene } from './play'
 import { parseTimeline, resolve, type Edge, type Scene, type Timeline } from './scene'
+import { needs } from './shader'
 
 declare global {
   interface Window {
@@ -53,7 +55,7 @@ function alone(entry: string, bpm: number, start: number, t: number) {
   const live = newLive()
   const n = Math.floor((t - start) / STEP + 1e-9)
   for (let i = 1; i <= n; i++) advance(scene, live, ((start + i * STEP) * bpm) / 60, STEP)
-  return { scene: advance(scene, live, (t * bpm) / 60, t - start - n * STEP), phases: live }
+  return { scene: advance(scene, live, (t * bpm) / 60, t - start - n * STEP), phases: live, parts: needs(scene) }
 }
 
 describe('a timeline', () => {
@@ -124,6 +126,26 @@ describe('the frame at a time', () => {
     for (const t of [11, 1, 6.5, 2.2]) scrubbed(t)
     expect(scrubbed(5.3)).toEqual(director(timeline, LOOKS)(5.3))
     expect(scrubbed(5.3)).toEqual(shot(5.3))
+  })
+
+  it("carries each key's parts, and in an edge both ends' and the morph's", () => {
+    const at = (entry: string) => needs(entryScene(LOOKS, entry)!)
+    expect(shot(0).parts).toEqual(at(T1))
+    expect(shot(3).parts).toEqual(needs(entryScene(LOOKS, T1)!, entryScene(LOOKS, T4)!))
+    expect(shot(3).parts.has('morph')).toBe(true)
+    expect(shot(4).parts).toEqual(at(T4))
+    expect(shot(9.5).parts).toEqual(at(`${T7} / Ice`))
+    // the sets the app warms while the timeline is loaded: each key's, its edge's before it
+    const [s1, s4, s7, ice] = [T1, T4, T7, `${T7} / Ice`].map((e) => entryScene(LOOKS, e)!)
+    expect(shot.sets).toEqual([
+      needs(s1),
+      needs(s1, s4),
+      needs(s4),
+      needs(s4, s7),
+      needs(s7),
+      needs(s7, ice),
+      needs(ice),
+    ])
   })
 
   it('takes each curve over its own span, straight between its points', () => {

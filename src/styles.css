@@ -245,6 +245,26 @@ button {
   right: 320px;
   padding: 6px 10px;
 }
+/* the frame-time readout (I): a small panel centred over the picture, under the Stage's fader */
+.frame-time {
+  position: absolute;
+  top: 140px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 360px;
+  padding: 4px 10px;
+  font:
+    11px ui-monospace,
+    monospace;
+  text-align: center;
+  z-index: 3;
+}
+.frame-parts {
+  cursor: pointer;
+}
+.frame-parts .dim {
+  overflow-wrap: anywhere;
+}
 .fader-panel {
   display: flex;
   flex-direction: column;
