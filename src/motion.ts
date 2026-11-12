@@ -2,6 +2,7 @@
 // advance() turns a scene into the scene to draw this frame, every knob at its live value.
 import { asLinked } from './edit'
 import { gcd } from './loop'
+import type { Heard } from './music'
 import {
   allLevels,
   clamp,
@@ -23,6 +24,7 @@ export type Live = {
   drift: number // the contour's ring phase, in radians
   colour: number // the palette's running index
   crawl: number // the dots' running crawl, in dots
+  felt?: number // while music plays, the felt beat the clock last ran to
 }
 
 export const newLive = (): Live => ({ phases: new Map(), smooth: new Map(), drift: 0, colour: 0, crawl: 0 })
@@ -53,8 +55,15 @@ const follow = (from: number | undefined, to: number, glide: number, dt: number)
 
 // The scene to draw after dt seconds at the given tempo: each knob is its glided base, plus its link
 // group's spread, plus its modulators, kept to its play range (widened to the base when a hand put it outside);
-// a knob that comes round (PERIOD) with no play range wraps round its hard range instead.
-export function advance(scene: Scene, live: Live, dt: number, bpm: number): Scene {
+// a knob that comes round (PERIOD) with no play range wraps round its hard range instead. While music is heard the
+// clock runs on its felt beat instead once its tempo is found, at its rate, so each beat's move comes as the snap
+// has it; the macros that listen take their features' values, and the modulators that listen play the felt beats
+// or their features.
+export function advance(scene: Scene, live: Live, dt: number, bpm: number, heard?: Heard): Scene {
+  if (heard && scene.macros.some((m) => m.listen))
+    scene = update(scene, (d) => {
+      for (const m of d.macros) if (m.listen) setMacro(d, m.id, heard.features[m.listen])
+    })
   const out = structuredClone(scene)
   for (const { level, list } of allLevels(out.levels))
     if (level.link)
@@ -62,7 +71,10 @@ export function advance(scene: Scene, live: Live, dt: number, bpm: number): Scen
         level,
         list.find((l) => l.id === level.link)!,
       )
-  const beats = (dt * bpm) / 60
+  // the beat, once the music's tempo is found: before, the clock runs at the hand's tempo
+  const beat = heard?.locked ? heard : undefined
+  const beats = beat ? beat.rate * Math.max(0, beat.felt - (live.felt ?? beat.felt)) : (dt * bpm) / 60
+  live.felt = beat?.felt
   const mods = new Map<Address, { m: Modulator; t: Modulator['targets'][number]; key: string }[]>()
   for (const m of scene.modulators) {
     live.phases.set(m.id, ((live.phases.get(m.id) ?? 0) + beats / m.period) % 1)
@@ -92,10 +104,19 @@ export function advance(scene: Scene, live: Live, dt: number, bpm: number): Scen
     let v = base + (size > 1 && level ? ((own.spread ?? 0) * member) / size : 0)
     for (const { m, t, key } of moves) {
       const k = `${key}|${member}`
-      const raw = wave(m, live.phases.get(m.id)! + m.phase + ((t.phaseSpread ?? 0) * member) / size)
+      const spread = ((t.phaseSpread ?? 0) * member) / size
+      // a feature pushes its knobs up from where they rest; a wave swings them either side
+      const feature = m.listen && m.listen !== 'beats' ? m.listen : undefined
+      const raw = feature
+        ? (heard?.features[feature] ?? 0)
+        : m.listen !== 'beats'
+          ? wave(m, live.phases.get(m.id)! + m.phase + spread)
+          : beat
+            ? wave(m, beat.felt / m.period + m.phase + spread)
+            : 0.5
       const w = follow(live.smooth.get(k), raw, m.glide, dt)
       live.smooth.set(k, w)
-      v += t.depth * (2 * w - 1)
+      v += feature ? t.depth * w : t.depth * (2 * w - 1)
     }
     const [lo, hi] = playRange(src, own)
     const wraps = !own.play && PERIOD[kindOf(src)]
@@ -131,10 +152,10 @@ export function setMacro(draft: Scene, id: string, v: number) {
 
 // Detune the modulators' periods of a clock unit or more to whole clock units, each the nearest to its own
 // that is coprime with every shorter one's, so the piece rarely repeats, as the Tapestries' periods were
-// picked (on a draft). Shorter periods keep theirs.
+// picked (on a draft). Shorter periods keep theirs, and so do the modulators that listen to the music.
 export function detunePeriods(draft: Scene) {
   const taken: number[] = []
-  for (const m of [...draft.modulators].filter((m) => m.period >= 1).sort((a, b) => a.period - b.period)) {
+  for (const m of [...draft.modulators].filter((m) => m.period >= 1 && !m.listen).sort((a, b) => a.period - b.period)) {
     const base = Math.round(m.period)
     // base, then one toward the period, one away, two toward, two away and so on: nearest first
     const toward = m.period < base ? -1 : 1

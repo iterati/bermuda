@@ -4,11 +4,13 @@ import { capturePreset } from './motion'
 import {
   BACKGROUNDS,
   CELLS,
+  FEATURES,
   FORMLESS,
   KINDS,
   kindOf,
   knobsOf,
   LINES,
+  LISTENS,
   parseBank,
   parseFader,
   parseScene,
@@ -37,6 +39,23 @@ describe('a scene as JSON', () => {
     look.presets.push(capturePreset(look, 'all of it'))
     look.loop = { seconds: 60 }
     expect(parseScene(JSON.stringify(look))).toEqual(look)
+  })
+
+  it('round-trips driven by music: a modulator on the beats and one on each feature, a macro on each', () => {
+    const look = structuredClone(LOOKS[2])
+    look.modulators = LISTENS.map((listen, i) =>
+      mod(`m${i}`, 'steps', 4, [['frame.zoom', 0.1]], { steps: [0, 1], listen }),
+    )
+    look.macros = FEATURES.map((listen, i) => ({
+      id: `x${i}`,
+      name: listen,
+      value: 0.5,
+      listen,
+      targets: [{ knob: 'palette.hue', from: -20, to: 20 }],
+    }))
+    const back = parseScene(JSON.stringify(look))
+    expect(back).toEqual(look)
+    expect(back.modulators.map((m) => m.listen)).toEqual([...LISTENS])
   })
 
   // every shape kind, alone and joined into a star, with corner, onion and spill, under a dotted line
@@ -434,6 +453,16 @@ describe('the parse refuses a broken scene, naming its field', () => {
       'a steps wave without steps',
       broken((s) => (s.modulators[0].wave = 'steps')),
       /^modulators\[0\]\.steps: is missing/,
+    ],
+    [
+      'a modulator listening to what is not heard',
+      broken((s) => ((s.modulators[0] as { listen?: string }).listen = 'treble')),
+      /^modulators\[0\]\.listen: must be one of beats, level, tone, drive, sub/,
+    ],
+    [
+      'a macro listening to the beats',
+      broken((s) => (s.macros = [{ id: 'x', name: 'x', value: 0, listen: 'beats' as 'tone', targets: [] }])),
+      /^macros\[0\]\.listen: must be one of level, tone, drive, sub/,
     ],
     [
       'a beat wave without harmonics',

@@ -70,7 +70,11 @@ describe('a loop', () => {
   it('snaps periods to its length over whole ks, coprime between periods, one k for each period', () => {
     const atoms = LOOKS.find((l) => l.name === 'Atoms')!
     const s = snapLoop({ ...atoms, loop: { seconds: 60 } }, 60)
-    const ks = new Map(s.modulators.map((m, i) => [atoms.modulators[i].period, 60 / m.period]))
+    // those that listen to the music keep to it
+    expect(s.modulators.filter((m) => m.listen)).toEqual(atoms.modulators.filter((m) => m.listen))
+    const ks = new Map(
+      s.modulators.flatMap((m, i) => (m.listen ? [] : [[atoms.modulators[i].period, 60 / m.period] as const])),
+    )
     for (const k of ks.values()) expect(k).toBeCloseTo(Math.round(k), 9)
     const whole = [...ks.values()].map(Math.round)
     whole.forEach((k, i) => whole.slice(i + 1).forEach((k2) => expect(gcd(k, k2)).toBe(1)))

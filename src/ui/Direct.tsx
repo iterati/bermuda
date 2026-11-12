@@ -4,6 +4,7 @@
 // span) frame by frame and saves the video with the song muxed in; the timeline saves in the browser and as a file.
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { decodeSong, director, exportVideo, FORMATS, missingKeys, type Clock, type Format, type Shot } from '../direct'
+import type { Listening } from '../music'
 import { entryScene } from '../play'
 import { clamp, hardRange, knobsOf, parseTimeline, type Edge, type Scene, type Timeline } from '../scene'
 import { download } from './Looks'
@@ -24,7 +25,7 @@ const W = 1000 // the tracks' drawing width
 const PEAKS = 4000 // the song's loudness at this many points, for its waveform
 
 type Stroke = { knob: string; erase: boolean; points: [number, number][] }
-type Song = { name: string; url: string; duration: number; buffer: AudioBuffer; peaks: Float32Array }
+type Song = { name: string; duration: number; buffer: AudioBuffer; peaks: Float32Array }
 type Props = {
   timeline: Timeline | null
   looks: Scene[]
@@ -34,6 +35,8 @@ type Props = {
   active: boolean
   video: Video
   shot: RefObject<(() => Shot) | null> // the picture's frame while Direct is on
+  music: Listening | null // the app's one song (or the microphone), which the timeline runs over and the music hears
+  onSong: (file: File) => void
   onVideo: (video: Video) => void
   onTimeline: (timeline: Timeline) => void
   onError: (message: string) => void
@@ -43,9 +46,10 @@ type Props = {
 const clock = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(2).padStart(5, '0')}`
 
 export function Direct(props: Props) {
-  const { timeline, looks, entries, current, active, video, shot, onTimeline, onError } = props
+  const { timeline, looks, entries, current, active, video, shot, music, onSong, onTimeline, onError } = props
+  // the song as the tracks and the export take it: decoded whole, and its loudness for the waveform
   const [song, setSong] = useState<Song | null>(null)
-  const audio = useRef<HTMLAudioElement>(null)
+  const audio = useRef<HTMLAudioElement>(undefined)
   const [playing, setPlaying] = useState(false)
   // the song's time while it is still, and the same as state for what shows it
   const at = useRef(0)
@@ -171,25 +175,51 @@ export function Direct(props: Props) {
     change((d) => d.keys.splice(i < 0 ? keys.length : i, 0, { at: t, scene: current, edge: { ...EDGE } }))
     setPicked(i < 0 ? keys.length : i)
   }
-  const pickSong = async (file: File) => {
-    try {
-      const buffer = await decodeSong(await file.arrayBuffer())
-      const data = buffer.getChannelData(0)
-      const peaks = new Float32Array(PEAKS)
-      const per = Math.ceil(data.length / PEAKS)
-      for (let i = 0; i < data.length; i++)
-        peaks[Math.floor(i / per)] = Math.max(peaks[Math.floor(i / per)], Math.abs(data[i]))
-      if (song) URL.revokeObjectURL(song.url)
-      setSong({ name: file.name, url: URL.createObjectURL(file), duration: buffer.duration, buffer, peaks })
-      setView(null)
-      onTimeline(
-        timeline
-          ? { ...timeline, song: file.name }
-          : { song: file.name, bpm: props.bpm, keys: [{ at: 0, scene: current, edge: { ...EDGE } }], curves: [] },
-      )
-    } catch (err) {
-      onError(`${file.name}: ${(err as Error).message}`)
+  // the song the app plays, picked here or in the Music block: its player, followed as it plays and pauses, and
+  // its file decoded
+  useEffect(() => {
+    const a = music?.song
+    const file = music?.file
+    audio.current = a
+    if (!a || !file) return setSong(null)
+    let gone = false
+    const onPlay = () => setPlaying(true)
+    const onPause = () => {
+      hold(a.currentTime)
+      setPlaying(false)
     }
+    a.addEventListener('play', onPlay)
+    a.addEventListener('pause', onPause)
+    setPlaying(!a.paused)
+    file
+      .arrayBuffer()
+      .then(decodeSong)
+      .then(
+        (buffer) => {
+          if (gone) return
+          const data = buffer.getChannelData(0)
+          const peaks = new Float32Array(PEAKS)
+          const per = Math.ceil(data.length / PEAKS)
+          for (let i = 0; i < data.length; i++)
+            peaks[Math.floor(i / per)] = Math.max(peaks[Math.floor(i / per)], Math.abs(data[i]))
+          setSong({ name: file.name, duration: buffer.duration, buffer, peaks })
+          setView(null)
+        },
+        (err: Error) => onError(`${file.name}: ${err.message}`),
+      )
+    return () => {
+      gone = true
+      a.removeEventListener('play', onPlay)
+      a.removeEventListener('pause', onPause)
+    }
+  }, [music, onError])
+  const pickSong = (file: File) => {
+    onSong(file)
+    onTimeline(
+      timeline
+        ? { ...timeline, song: file.name }
+        : { song: file.name, bpm: props.bpm, keys: [{ at: 0, scene: current, edge: { ...EDGE } }], curves: [] },
+    )
   }
   const save = async () => {
     if (!song || !timeline || !draw) return
@@ -246,17 +276,6 @@ export function Direct(props: Props) {
 
   return (
     <section className="panel direct-panel" style={active ? undefined : { display: 'none' }}>
-      <audio
-        ref={audio}
-        src={song?.url}
-        onPlay={() => setPlaying(true)}
-        onPause={(e) => {
-          hold(e.currentTarget.currentTime)
-          setPlaying(false)
-        }}
-        // the song rewinds at its end
-        onEnded={() => seek(0)}
-      />
       <div className="direct-row">
         <label className="mini file" title="the song the timeline runs over, from disk">
           {song ? 'song…' : 'pick song…'}
@@ -266,7 +285,7 @@ export function Direct(props: Props) {
             onChange={(e) => {
               const file = e.target.files?.[0]
               e.target.value = ''
-              if (file) void pickSong(file)
+              if (file) pickSong(file)
             }}
           />
         </label>

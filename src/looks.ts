@@ -1,6 +1,9 @@
 // The built-in looks: four Tapestries made through the level chain, the bank's twenty remixing them, then older remixes.
-// Periods are in clock units, one a second at the default 60 bpm; angles are in degrees.
+// Periods are in clock units, one a second at the default 60 bpm; angles are in degrees. Each is wired to the music
+// (music.ts wire) but the one made for it, wired its own way.
 import { stopsFromCosine } from './colour'
+import { update } from './motion'
+import { blend, wire } from './music'
 import { FORMLESS } from './scene'
 import type {
   Address,
@@ -10,6 +13,7 @@ import type {
   Knob,
   LatticeKind,
   Level,
+  Listen,
   Macro,
   Modulator,
   Preset,
@@ -119,7 +123,7 @@ export const mod = (
   wave: Modulator['wave'],
   period: number,
   targets: [Address, number, number?][],
-  o: { phase?: number; glide?: number; harmonics?: [number, number]; steps?: number[] } = {},
+  o: { phase?: number; glide?: number; harmonics?: [number, number]; steps?: number[]; listen?: Listen } = {},
 ): Modulator => ({
   id,
   wave,
@@ -128,6 +132,7 @@ export const mod = (
   glide: o.glide ?? 0,
   ...(o.harmonics ? { harmonics: o.harmonics } : {}),
   ...(o.steps ? { steps: o.steps } : {}),
+  ...(o.listen ? { listen: o.listen } : {}),
   targets: targets.map(([knob, depth, phaseSpread]) => ({
     knob,
     depth,
@@ -2281,7 +2286,47 @@ export const LOOKS: Scene[] = [
       },
     ],
   }),
-]
+  update(
+    scene({
+      name: 'Music - On the beat',
+      zoom: 1.5,
+      // made for a song: the floor's cells step a turn on each beat, the lights flash and fall back, the bands
+      // move the small things and the tone blends the night palette into the day one; with no music it drifts
+      levels: [
+        level('floor', {
+          scale: 1.6,
+          e2: HEX,
+          by: 'parity',
+          cellTurn: { value: 0, play: [-60, 60] },
+          shape: star(6, { value: 2.5, play: [1.5, 5] }, 0.48, { round: 0.15 }),
+          at: 0,
+          speed: 0.4,
+        }),
+        level('lights', {
+          scale: 2,
+          shape: star(4, 2, { value: 0.42, play: [0.3, 0.5] }, { twist: 45 }),
+          at: 0.5,
+          speed: 0.3,
+          cellSpread: 0.2,
+        }),
+      ],
+      rings: 2,
+      drift: 0.4,
+      width: 0.004,
+      radius: 0.3,
+      modulators: [
+        mod('step', 'steps', 4, [['levels[floor].cell.turn', 45]], { steps: [0, 0.33, 0.67, 1], listen: 'beats' }),
+        mod('flash', 'ramp', 1, [['levels[lights].variants[0].shape.r', -0.06]], { listen: 'beats' }),
+        mod('bass', 'cos', 1, [['line.width', 0.004]], { glide: 0.05, listen: 'bass' }),
+        mod('mids', 'cos', 1, [['contour.drift', 0.8]], { glide: 0.1, listen: 'mid' }),
+        mod('wobble', 'cos', 1, [['levels[floor].variants[0].shape.m', 0.6]], { glide: 0.08, listen: 'highmid' }),
+        mod('sway', 'cos', 32, [['frame.turn', 10]]),
+      ],
+      presets: [palettePreset('Night', 'dusk'), palettePreset('Day', 'ice')],
+    }),
+    (d) => blend(d, 0, 1),
+  ),
+].map((look) => (look.modulators.some((m) => m.listen) ? look : update(look, wire)))
 
 // The built-in bank: the four Tapestries and the twenty round the ring, each next to the ones it morphs into
 // best, and linked to the two or three of those.

@@ -1,6 +1,7 @@
 // Play: the bank's entries, the autopilot's walk of the bank as a graph, and the curve a timed transition runs on. A transition is the fader run from one end to the other with the next keyframe loaded on the far side;
 // back to back, transitions pass through their keyframes on a Catmull-Rom curve.
 import { advance, applyPreset, newLive, setMacro, update } from './motion'
+import type { Heard } from './music'
 import {
   clamp,
   knobsOf,
@@ -47,9 +48,12 @@ export function toggleLink(bank: Bank, a: string, b: string): Bank {
 }
 
 // What the autopilot may move inside a look: the knobs with play ranges (a linked level's are its leader's) and
-// the macros, which keep their knobs to their play ranges.
+// the macros, which keep their knobs to their play ranges, but those that listen to the music, which is theirs.
 export function playable(scene: Scene): { knobs: KnobAt[]; macros: Macro[] } {
-  return { knobs: knobsOf(scene).filter((k) => k.knob.play && !k.level?.level.link), macros: scene.macros }
+  return {
+    knobs: knobsOf(scene).filter((k) => k.knob.play && !k.level?.level.link),
+    macros: scene.macros.filter((m) => !m.listen),
+  }
 }
 
 // The autopilot's next keyframe from where it is, or undefined when it has nowhere to go. Change is the chance it
@@ -170,4 +174,12 @@ export function bend(scene: Scene, b: Bend, t: number) {
     if (!range) continue
     knob.value = clamp(knob.value + (b.from.get(address) ?? 0) * h10 + (b.to.get(address) ?? 0) * h11, range)
   }
+}
+
+// A transition while music is heard sets off on a beat, the next or the one just gone if under a tenth of a beat
+// ago, and lands on one, the whole number of beats nearest its seconds on, moving as the beat is felt: the beat it
+// set off on, and how far through it is, 0 to 1.
+export function onBeat(heard: Heard, seconds: number, begin = Math.ceil(heard.beat - 0.1)) {
+  const beats = Math.max(1, Math.round((seconds * heard.bpm) / 60))
+  return { begin, through: clamp((heard.felt - begin) / beats, [0, 1]) }
 }

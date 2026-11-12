@@ -14,10 +14,12 @@ import {
   step,
   tangent,
   toggleLink,
+  onBeat,
   valuesOf,
   type Keyframe,
 } from './play'
-import { knobsOf, playRange, resolve, type Bank, type Edge, type Scene } from './scene'
+import { felt, type Heard } from './music'
+import { FEATURES, knobsOf, playRange, resolve, type Bank, type Edge, type Scene } from './scene'
 
 // a seeded random, so a walk is the same each run
 function seeded(seed: number) {
@@ -66,6 +68,15 @@ describe('the bank', () => {
 })
 
 describe('the autopilot', () => {
+  it('leaves the macros that listen to the music to it', () => {
+    const look = LOOKS.find((l) => l.name === 'Music - On the beat')!
+    expect(look.macros.map((m) => m.listen)).toEqual(['tone'])
+    expect(playable(look).macros).toEqual([])
+    const plain = structuredClone(look)
+    delete plain.macros[0].listen
+    expect(playable(plain).macros).toEqual(plain.macros)
+  })
+
   it('every look has something it may move', () => {
     for (const look of LOOKS) {
       const { knobs, macros } = playable(look)
@@ -204,5 +215,42 @@ describe('the curve a transition runs on', () => {
     expect(bendOf(k1, free, m, m).range.get('levels[a].affine.scale')).toEqual([1, 3])
     expect(bendOf(free, key(2.5), m, m).range.get('levels[a].affine.scale')).toEqual([1, 3])
     expect(bendOf(free, free, m, m).range.get('levels[a].affine.scale')).toEqual([2, 2])
+  })
+})
+
+describe('Play on the beat', () => {
+  const heard = (beat: number, felt = beat): Heard => ({
+    bpm: 120,
+    locked: true,
+    beat,
+    felt,
+    snap: 0,
+    rate: 1,
+    features: Object.fromEntries(FEATURES.map((f) => [f, 0])) as Heard['features'],
+  })
+
+  it('sets a transition off on the next beat and lands it on a beat, the whole beats nearest its seconds on', () => {
+    // 2 s at 120 bpm is 4 beats
+    const { begin } = onBeat(heard(10.5), 2)
+    expect(begin).toBe(11)
+    expect(onBeat(heard(10.7), 2, begin).through).toBe(0)
+    expect(onBeat(heard(13), 2, begin).through).toBe(0.5)
+    expect(onBeat(heard(14.9), 2, begin).through).toBeLessThan(1)
+    expect(onBeat(heard(15), 2, begin).through).toBe(1)
+    expect(onBeat(heard(15.4), 2, begin).through).toBe(1)
+    // 2.3 s is 4.6 beats: 5 of them; under one beat is one
+    expect(onBeat(heard(16), 2.3, 16).through).toBe(0)
+    expect(onBeat(heard(21), 2.3, 16).through).toBe(1)
+    expect(onBeat(heard(16.5), 0.1, 16).through).toBe(0.5)
+  })
+
+  it('takes the beat just gone when it went under a tenth of a beat ago, as a change landing on it does', () => {
+    expect(onBeat(heard(12.05), 2).begin).toBe(12)
+    expect(onBeat(heard(12.15), 2).begin).toBe(13)
+  })
+
+  it("moves as the beat is felt: a snapped beat makes each beat's share at its start", () => {
+    expect(onBeat(heard(11.5, felt(11.5, 1)), 2, 11).through).toBeGreaterThan(0.24)
+    expect(onBeat(heard(11.5, felt(11.5, 0)), 2, 11).through).toBe(0.125)
   })
 })

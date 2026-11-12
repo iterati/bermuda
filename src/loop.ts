@@ -1,6 +1,7 @@
 // Loops: a scene with a loop plays with every modulator period snapped to the loop's length over a whole k, the ks
 // of different periods kept coprime, its ramps on knobs that come round made whole periods, and its running ring
-// phase, palette index and dots' crawl made whole over the loop, so its last frame runs into its first.
+// phase, palette index and dots' crawl made whole over the loop, so its last frame runs into its first. The
+// modulators that listen to the music keep to it.
 import { hardRange, kindOf, PERIOD, type Scene } from './scene'
 
 export const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a)
@@ -12,6 +13,8 @@ export function snapLoop(scene: Scene, bpm: number): Scene {
   const out = structuredClone(scene)
   const ks = new Map<number, number>() // each period as written and its k
   for (const m of out.modulators) {
+    // what listens to the music keeps to its beats
+    if (m.listen) continue
     let k = ks.get(m.period)
     if (k === undefined) {
       // the k nearest the period that shares no factor with another period's

@@ -83,8 +83,15 @@ export type Modulator = {
   steps?: number[]
   glide: number
   targets: { knob: Address; depth: number; phaseSpread?: number }[]
+  listen?: Listen // music's, milestone 5: absent, it runs on the clock
 }
-export type Macro = { id: string; name: string; value: number; targets: { knob: Address; from: number; to: number }[] }
+export type Macro = {
+  id: string
+  name: string
+  value: number
+  targets: { knob: Address; from: number; to: number }[]
+  listen?: Feature // music's, milestone 5: while music plays, the feature sets its value
+}
 // A controller's control change (CC) number on its channel (1 to 16), driving one knob or one macro; a fader's
 // takes pickup: it drives only once it passes the value it drives.
 export type MidiTarget = { knob: Address } | { macro: string }
@@ -218,6 +225,15 @@ export const LINES = ['glow', 'smooth', 'hard', 'band', 'dots'] as const
 // soak: Helen Frankenthaler's soak-stain pools of thinned paint on raw canvas
 export const BACKGROUNDS = ['flat', 'gradient', 'soak'] as const
 export const WAVES = ['cos', 'tri', 'beat', 'ramp', 'steps'] as const
+// What the app hears in the music (music.ts), each 0 to 1: the loudness, the tone (dark to light), the drive (a
+// sensual groove to a beat to speed to) and eight bands, low to high.
+export const BANDS = ['sub', 'bass', 'low', 'lowmid', 'mid', 'highmid', 'presence', 'air'] as const
+export const FEATURES = ['level', 'tone', 'drive', ...BANDS] as const
+export type Feature = (typeof FEATURES)[number]
+// A modulator listens to the beats, its wave run on the music's beats instead of the clock, or to a feature, which
+// it plays instead of its wave, pushing its knobs up by depth at 1; with no music it rests, moving nothing.
+export const LISTENS = ['beats', ...FEATURES] as const
+export type Listen = (typeof LISTENS)[number]
 export const MIXES = ['straight', 'short', 'long'] as const
 // the views a MIDI button can pick
 export const VIEWS = ['stage', 'edit', 'decks'] as const
@@ -1007,7 +1023,7 @@ export function parseScene(input: unknown): Scene {
   const modIds = new Set<string>()
   scene.modulators = list(o.modulators, 'modulators', 0, 64).map((item, i) => {
     const at = `modulators[${i}]`
-    const x = obj(item, at, ['id', 'wave', 'period', 'phase', 'glide', 'targets'], ['harmonics', 'steps'])
+    const x = obj(item, at, ['id', 'wave', 'period', 'phase', 'glide', 'targets'], ['harmonics', 'steps', 'listen'])
     const id = str(x.id, `${at}.id`)
     if (modIds.has(id)) fail(`${at}.id`, `${id} is used twice`)
     modIds.add(id)
@@ -1030,6 +1046,7 @@ export function parseScene(input: unknown): Scene {
     if (x.harmonics !== undefined) m.harmonics = pair(x.harmonics, `${at}.harmonics`, (h, p) => num(h, p, [0, 64]))
     if (x.steps !== undefined)
       m.steps = list(x.steps, `${at}.steps`, 1, 64).map((s, j) => num(s, `${at}.steps[${j}]`, [0, 1]))
+    if (x.listen !== undefined) m.listen = oneOf(x.listen, `${at}.listen`, LISTENS)
     if (m.wave === 'steps' && !m.steps) fail(`${at}.steps`, 'is missing for a steps wave')
     if (m.wave === 'beat' && !m.harmonics) fail(`${at}.harmonics`, 'is missing for a beat wave')
     return m
@@ -1071,11 +1088,11 @@ function macros(v: unknown, path: string, address: (v: unknown, path: string) =>
   const ids = new Set<string>()
   return list(v, path, 0, 64).map((item, i) => {
     const at = `${path}[${i}]`
-    const x = obj(item, at, ['id', 'name', 'value', 'targets'])
+    const x = obj(item, at, ['id', 'name', 'value', 'targets'], ['listen'])
     const id = str(x.id, `${at}.id`)
     if (ids.has(id)) fail(`${at}.id`, `${id} is used twice`)
     ids.add(id)
-    return {
+    const macro: Macro = {
       id,
       name: str(x.name, `${at}.name`),
       value: num(x.value, `${at}.value`, [0, 1]),
@@ -1090,6 +1107,8 @@ function macros(v: unknown, path: string, address: (v: unknown, path: string) =>
         }
       }),
     }
+    if (x.listen !== undefined) macro.listen = oneOf(x.listen, `${at}.listen`, FEATURES)
+    return macro
   })
 }
 

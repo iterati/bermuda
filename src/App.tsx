@@ -3,13 +3,15 @@
 // own previews either side of the mix, like a DJ mixer, so B can be cued while A plays. The controls edit one side,
 // A or B; every change is instant, and so is MIDI, which plays the side being edited and the fader. Play is the
 // picture alone with the bank over it: every change there rides a timed transition, the fader run from the side
-// showing to the other with the change loaded on it, and the autopilot walks the bank.
+// showing to the other with the change loaded on it, and the autopilot walks the bank. A song or the microphone,
+// once heard, sets the clock's tempo and lands Play's transitions on its beats.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { missingKeys, pruneTimeline, type Shot } from './direct'
 import { BANK, LOOKS } from './looks'
 import { attach, drive, echoes, HAS_MIDI, keyOf, learn, learnTrigger, takes, waiting, type Learning } from './midi'
 import { morphSize } from './morph'
 import { applyPreset, capturePreset, newLive, setKnob, update } from './motion'
+import { listen, type Heard, type Listening } from './music'
 import {
   bendOf,
   entryName,
@@ -55,6 +57,7 @@ import { KnobDetail } from './ui/KnobDetail'
 import { Looks } from './ui/Looks'
 import { Midi } from './ui/Midi'
 import { Macros, Modulators } from './ui/Motion'
+import { Music } from './ui/Music'
 import { Picture, type Side, type Transition } from './ui/Picture'
 
 const STORE = 'bermuda.looks'
@@ -166,6 +169,15 @@ export function App() {
   const [picked, setPicked] = useState<string>(LOOKS[0].levels[0].id)
   const [focus, setFocus] = useState<Address | null>(null)
   const [bpm, setBpm] = useState(60)
+  // the song or microphone being heard, and what it heard as the picture last drew
+  const [music, setMusic] = useState<Listening | null>(null)
+  const [heard, setHeard] = useState<Heard>()
+  // the clock's tempo: the music's once it has found the beat, in whole bpm moved only when the music's moves a
+  // whole bpm off it, so a tempo between two holds the autopilot's timer still
+  const [heardBpm, setHeardBpm] = useState<number>()
+  const tempo = heardBpm ?? bpm
+  // each ask for a song or the microphone: one answered after a later ask stops at once
+  const asked = useRef(0)
   const [running, setRunning] = useState(true)
   const [lives] = useState(() => ({ a: newLive(), b: newLive() }))
   // each side's preset in play, for [ and ]
@@ -195,6 +207,25 @@ export function App() {
       setLearning(target)
     },
     [midi, connect],
+  )
+  // a song or the microphone in place of what was heard before
+  const unhear = useCallback(() => {
+    asked.current++
+    music?.stop()
+    setMusic(null)
+    setHeard(undefined)
+    setHeardBpm(undefined)
+  }, [music])
+  const hear = useCallback(
+    (from: File | 'mic') => {
+      unhear()
+      const ask = asked.current
+      listen(from).then(
+        (l) => (ask === asked.current ? setMusic(l) : l.stop()),
+        (err: Error) => setError(`music: ${err.message}`),
+      )
+    },
+    [unhear],
   )
   const saveControls = useCallback((next: Controls) => {
     localStorage.setItem(CONTROLS, JSON.stringify(next))
@@ -243,7 +274,7 @@ export function App() {
   const auto = bank.autopilot
   // seconds from one autopilot change to the next, and each Play change's length: at or under it the autopilot
   // never rests, and its keyframes pass on a curve
-  const cycle = (auto.every * 60) / bpm
+  const cycle = (auto.every * 60) / tempo
   const seconds = auto.on ? Math.min(auto.edge.seconds, cycle) : auto.edge.seconds
   const flowing = auto.on && cycle <= auto.edge.seconds
   // a look, or one of its presets, and the bank entry it is if it is one
@@ -677,6 +708,8 @@ export function App() {
     />
   )
 
+  const musicBlock = <Music music={music} heard={heard} onListen={hear} onStop={unhear} />
+
   const midiBlock = (
     <Midi
       connected={!!midi}
@@ -697,12 +730,19 @@ export function App() {
           side={side}
           fader={fader}
           edge={edge}
-          bpm={bpm}
+          bpm={tempo}
           running={running}
           lives={lives}
           transition={run}
           decks={mode === 'decks' ? decks.current : undefined}
-          onLive={setShown}
+          music={music}
+          onLive={(live, now) => {
+            setShown(live)
+            setHeard(now)
+            setHeardBpm((t) =>
+              !now?.locked ? undefined : t !== undefined && Math.abs(now.bpm - t) < 1 ? t : Math.round(now.bpm),
+            )
+          }}
           onLand={land}
           shot={mode === 'direct' ? () => directShot.current?.() : undefined}
           aspect={mode === 'direct' ? video.width / video.height : undefined}
@@ -743,13 +783,14 @@ export function App() {
             <button className="mini" onClick={() => setRunning((r) => !r)} title="space">
               {running ? '❚❚' : '▶'}
             </button>
-            <label className="num">
-              <span>bpm</span>
+            <label className="num" title={heard?.locked ? "the music's tempo" : undefined}>
+              <span>{heard?.locked ? '♪ bpm' : 'bpm'}</span>
               <input
                 type="number"
                 min={10}
                 max={300}
-                value={bpm}
+                value={tempo}
+                disabled={heard?.locked}
                 onChange={(e) => e.target.valueAsNumber >= 10 && setBpm(Math.min(300, e.target.valueAsNumber))}
               />
             </label>
@@ -811,6 +852,8 @@ export function App() {
           active={mode === 'direct'}
           video={video}
           shot={directShot}
+          music={music}
+          onSong={hear}
           onVideo={setVideo}
           onTimeline={changeTimeline}
           onError={setError}
@@ -819,6 +862,12 @@ export function App() {
           <aside className="panel playbar">
             <div className="now">
               <b>{run ? pair[run.to].name : scene.name}</b>
+              {heard && (
+                <span className="dim music-tempo" title="the music's tempo; each change lands on its beat">
+                  {' '}
+                  ♪ {heard.locked ? tempo : '…'}
+                </span>
+              )}
               {next && (
                 <span className="dim">
                   {' '}
@@ -838,6 +887,7 @@ export function App() {
               <Chain picked={pickedChip} />
             </nav>
             <aside className="panel right">
+              {musicBlock}
               <Modulators />
               <Macros />
               {midiBlock}
@@ -882,6 +932,7 @@ export function App() {
                   </nav>
                 ) : (
                   <aside className="panel">
+                    {musicBlock}
                     <Modulators />
                     <Macros />
                     {midiBlock}
@@ -924,6 +975,7 @@ export function App() {
               </div>
             ))}
             <div className="panel">
+              {musicBlock}
               <Modulators />
               <Macros />
               {midiBlock}
