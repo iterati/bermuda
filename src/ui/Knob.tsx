@@ -111,7 +111,7 @@ export function Knob(props: { label: string } & ({ at: Address } | { macro: stri
   const depth = knob?.spread && DEPTH.includes(id) ? [value, value + knob.spread].map(f).sort((x, y) => x - y) : []
   const glide = knob?.glide ? 0.04 + 0.21 * Math.sqrt(knob.glide / 60) : 0
   // how far down and up the modulators swing it: a wave either side, a feature up from where it rests by its depth
-  const swing = scene.modulators.flatMap((m) =>
+  const swing = (macro ? [] : scene.modulators).flatMap((m) =>
     m.targets
       .filter((t) => t.knob === id)
       .map((t) =>

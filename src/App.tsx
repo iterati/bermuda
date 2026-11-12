@@ -212,8 +212,8 @@ export function App() {
   const [midi, setMidi] = useState<MIDIAccess | null>(null)
   const [inputs, setInputs] = useState<string[]>([])
   const [learning, setLearning] = useState<Learning | null>(null)
-  // the macro learning by example, and the scene as it was armed
-  const [armed, setArmed] = useState<Armed | null>(null)
+  // the macro learning by example, the scene as it was armed and its side
+  const [armed, setArmed] = useState<(Armed & { side: Side }) | null>(null)
   const [controls, setControls] = useState(initialControls.value)
   const [positions, setPositions] = useState<ReadonlyMap<string, number>>(new Map())
   // the decks' preview canvases, while Decks shows them
@@ -503,9 +503,11 @@ export function App() {
       : 'macro' in learning && !scene.macros.some((m) => m.id === learning.macro))
       ? null
       : learning
-  // a macro armed on another look, or one an edit took away, is disarmed
+  // a macro armed on the other side or another look, or one an edit took away, is disarmed
   const armedNow =
-    armed && armed.before.name === scene.name && scene.macros.some((m) => m.id === armed.id) ? armed : null
+    armed && armed.side === side && armed.before.name === scene.name && scene.macros.some((m) => m.id === armed.id)
+      ? armed
+      : null
   // a look saved in this browser is locked against the dice
   const locked = saved.some((s) => s.name === scene.name)
 
@@ -679,7 +681,7 @@ export function App() {
     positions,
     locked,
     armed: armedNow,
-    arm: setArmed,
+    arm: (a) => setArmed(a && { ...a, side }),
   }
 
   useEffect(() => {
@@ -739,7 +741,7 @@ export function App() {
       else if (e.key === ',' || e.key === '.')
         setFader((x) => Math.min(1, Math.max(0, x + (e.key === '.' ? 0.05 : -0.05))))
       else if (e.key === 'x') swap()
-      else if ((e.key === 'c' || e.key === 'C') && !locked) {
+      else if ((e.key === 'c' || e.key === 'C') && !e.metaKey && !e.ctrlKey && !locked) {
         const at = (e.key === 'c' ? chipKnobs(scene, pickedChip) : knobsOf(scene)).map((k) => k.address)
         edit((d) => dice(d, at, Math.random))
       }
