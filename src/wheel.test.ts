@@ -60,7 +60,7 @@ const knobs = () =>
         const d = el.querySelector('path.value')!.getAttribute('d')!
         const [x, y] = d.split(' ').slice(-2).map(Number)
         const f = d ? ((Math.atan2(x - 22, 22 - y) * 180) / Math.PI + 135) / 270 : 0
-        return [el.title.split('\n')[0], { x: r.x + r.width / 2, y: r.y + r.height / 2, f }]
+        return [el.title.split('\n')[1].split(' · ')[0], { x: r.x + r.width / 2, y: r.y + r.height / 2, f }]
       }),
     ),
   )
@@ -125,7 +125,9 @@ describe('the wheel on a knob', () => {
   it('takes every one of a burst of wheel events before a render', async () => {
     const { f } = (await knobs())[TURN]
     await page.evaluate((address) => {
-      const el = [...document.querySelectorAll<HTMLElement>('.knob')].find((k) => k.title.startsWith(`${address}\n`))!
+      const el = [...document.querySelectorAll<HTMLElement>('.knob')].find((k) =>
+        k.title.split('\n')[1].startsWith(`${address} · `),
+      )!
       for (let i = 0; i < 8; i++)
         el.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true, cancelable: true }))
     }, TURN)
