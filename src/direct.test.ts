@@ -25,14 +25,14 @@ declare global {
 
 const edge = (seconds: number): Edge => ({ seconds, stagger: 0.4, deepFirst: false })
 const T1 = 'Tapestry 1 - Rainbow hex rings'
-const T5 = 'Tapestry 5 - Spatial distortions'
+const T4 = 'Tapestry 4 - You spin me right round'
 const T7 = 'Tapestry 7 - Hexes'
 const timeline: Timeline = {
   song: 'tone.wav',
   bpm: 96,
   keys: [
     { at: 0, scene: T1, edge: edge(0) },
-    { at: 4, scene: T5, edge: edge(2) },
+    { at: 4, scene: T4, edge: edge(2) },
     { at: 7, scene: T7, edge: edge(3) },
     { at: 9, scene: `${T7} / Ice`, edge: edge(1) },
   ],
@@ -91,14 +91,14 @@ describe('the frame at a time', () => {
   const shot = director(timeline, LOOKS)
 
   it('at a key is that key scene on its own clock, started as its edge started', () => {
-    expect(shot(4)).toEqual(alone(T5, 96, 2))
+    expect(shot(4)).toEqual(alone(T4, 96, 2))
     expect(shot(0)).toEqual(alone(T1, 96, 0))
-    // the edge into T7 starts at 4 as T5 lands, its 3 seconds cut to the 3 since
+    // the edge into T7 starts at 4 as T4 lands, its 3 seconds cut to the 3 since
     expect(shot(7)).toEqual(alone(T7, 96, 3))
   })
 
   it('in an edge is the morph from the key before into its key', () => {
-    expect(shot(3).scene.name).toBe(`${T1} → ${T5}`)
+    expect(shot(3).scene.name).toBe(`${T1} → ${T4}`)
     expect(shot(3).toward?.at).toBeCloseTo(0.5)
     expect(shot(1.9)).toEqual(alone(T1, 96, 1.9))
   })
@@ -123,8 +123,8 @@ describe('the frame at a time', () => {
     expect(resolve(curved(entryScene(LOOKS, ice)!, timeline.curves, 11.5), 'frame.zoom')!.value).toBeCloseTo(2.5)
     expect(shot(9.5)).toEqual(alone(ice, 96, 5.5))
     expect(shot(13)).toEqual(alone(ice, 96, 9))
-    const t5: Scene = entryScene(LOOKS, T5)!
-    expect(curved(t5, [{ knob: 'levels[nope].weight', points: timeline.curves[0].points }], 11)).toBe(t5)
+    const t4: Scene = entryScene(LOOKS, T4)!
+    expect(curved(t4, [{ knob: 'levels[nope].weight', points: timeline.curves[0].points }], 11)).toBe(t4)
   })
 })
 
