@@ -22,10 +22,10 @@ import {
   type Scene,
   type Shape,
 } from './scene'
-import { FILL_TEXEL, generateShader, PARTS, ROW_TEXELS, VARIANT_TEXELS, VARY_TEXEL, type Part } from './shader'
+import { ENGINES, LAYOUT, ROW_TEXELS } from './engines'
+import { RAD, VARIANT_TEXELS } from './engines/engine'
+import { generateShader, PARTS, type Part } from './shader'
 import type { Live } from './motion'
-
-const RAD = Math.PI / 180
 
 // A level's hash seed from its id, so its cells keep their picks wherever the level sits in the chain.
 function seedOf(id: string): number {
@@ -66,7 +66,7 @@ export type Toward = {
 
 const shapeIndex = (shape: Shape) => SHAPES.indexOf(shape.kind ?? 'star')
 
-// The level rows as shader.ts lays them out: every level, sub-chains included, gets a row; a level's next
+// The level rows as shader.ts and its engines lay them out: every level, sub-chains included, gets a row; a level's next
 // row is the one after it in its own list, and a variant's sub-chain replaces the rest of the chain below it. A
 // second chain packs into the same data from its start row on.
 export function packLevels(
@@ -80,12 +80,11 @@ export function packLevels(
     const row = start + i
     const at = (texel: number, ...values: number[]) => data.set(values, (row * ROW_TEXELS + texel) * 4)
     const next = list[list.indexOf(level) + 1]
-    const { affine, lattice, cell, colour, variants, fill } = level
+    const { affine, lattice, cell, colour, variants } = level
     at(0, level.weight.value, affine.scale.value, affine.turn.value * RAD, next ? rows.get(next)! : -1)
     at(1, affine.offset[0].value, affine.offset[1].value, lattice.e2[0].value, lattice.e2[1].value)
     const weights = VARIATIONS.map((kind) => variationWeight(level, kind))
     at(2, ...weights.slice(0, 8))
-    at(VARY_TEXEL, ...weights.slice(8))
     at(4, CELLS.indexOf(cell.by), cell.turn.value * RAD, cell.phase.value * 2 * Math.PI, variants.length)
     at(
       5,
@@ -115,11 +114,8 @@ export function packLevels(
       at(base + 4, s.round.value, s.twist.value * RAD, s.form?.value ?? 0, s.corner?.value ?? 0)
       at(base + 5, join.offset[0].value, join.offset[1].value, join.blend.value, 0)
     })
-    // a level without a fill draws its line alone
-    at(FILL_TEXEL, fill?.amount.value ?? 0, fill?.line.value ?? 1, fill?.tone.value ?? 0, fill?.bands.value ?? 0)
-    if (!fill) return
-    at(FILL_TEXEL + 1, fill.step.value, fill.metal.value, fill.light.value * RAD, fill.shade.value)
-    at(FILL_TEXEL + 2, fill.ramp.value, fill.alternate.value, fill.front ? 1 : 0, 0)
+    // each engine's own texels, from its first
+    for (const engine of ENGINES) engine.pack?.(level, (texel, ...values) => at(LAYOUT[engine.name] + texel, ...values))
   })
   return data
 }

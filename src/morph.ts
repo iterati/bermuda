@@ -6,6 +6,9 @@
 // where it goes). Each depth runs its own window of the fader, staggered by the edge, and depth-indexed values stay
 // with the depth (the shader counts depth by weight).
 import { paletteAt } from './colour'
+import { mixFill } from './engines/deco'
+import { mixDots } from './engines/lines'
+import { mixJoin } from './engines/shapes'
 import { advance, newLive, type Live } from './motion'
 import type { Toward } from './render'
 import {
@@ -18,7 +21,6 @@ import {
   variationWeight,
   type Edge,
   type Field,
-  type Fill,
   type Knob,
   type Level,
   type Scene,
@@ -61,20 +63,6 @@ function vector(a: [Knob, Knob], b: [Knob, Knob], t: number): [Knob, Knob] {
 const either = (a: Knob | undefined, b: Knob | undefined, none: number, t: number) =>
   a || b ? knob(a ?? { value: none }, b ?? { value: none }, t) : undefined
 
-// A fill that is not there, beside one that is: fill 0 and line 1, which draw the line alone, with the fill's light
-// and shade.
-const unfilled = ({ light, shade }: Fill): Fill => ({
-  amount: { value: 0 },
-  line: { value: 1 },
-  tone: { value: 0 },
-  bands: { value: 0 },
-  step: { value: 0 },
-  metal: { value: 0 },
-  light,
-  shade,
-  ramp: { value: 0 },
-  alternate: { value: 0 },
-})
 // A colour field that is not there, beside one that is: radial round the plane's centre at depth 0, which the radius
 // reads as the distance from the centre and which shifts nothing, with the field's angle and scale.
 const unfielded = ({ angle, scale }: Field): Field => ({
@@ -156,7 +144,7 @@ function align(as: Level[], bs: Level[]): Slot[] {
 }
 
 // star n and the kind are whole: they swap inside a circle dip, where every n and kind draws the same circle; a
-// FORMLESS kind has no form, so it takes the other side's; a join one side lacks is there at weight 0
+// FORMLESS kind has no form, so it takes the other side's; the join morphs as Shapes has it
 function shape(a: Shape, b: Shape, t: number): Shape {
   const round = knob(a.round, b.round, t)
   if (a.n !== b.n || (a.kind ?? 'star') !== (b.kind ?? 'star')) round.value = mix(round.value, 1, dip(t, 0.1))
@@ -175,16 +163,13 @@ function shape(a: Shape, b: Shape, t: number): Shape {
   if (corner) out.corner = corner
   const onion = either(a.onion, b.onion, 0, t)
   if (onion) out.onion = onion
-  if (a.join || b.join) {
-    const ja = a.join ?? { ...b.join!, weight: { value: 0 } }
-    const jb = b.join ?? { ...a.join!, weight: { value: 0 } }
-    out.join = {
-      shape: shape(ja.shape, jb.shape, t),
-      offset: [knob(ja.offset[0], jb.offset[0], t), knob(ja.offset[1], jb.offset[1], t)],
-      blend: knob(ja.blend, jb.blend, t),
-      weight: knob(ja.weight, jb.weight, t),
-    }
-  }
+  const join = mixJoin(
+    a,
+    b,
+    (ka, kb) => knob(ka, kb, t),
+    (sa, sb) => shape(sa, sb, t),
+  )
+  if (join) out.join = join
   return out
 }
 
@@ -274,25 +259,8 @@ function mixLevels(
         cellSpread: scaled(k(a.colour.cellSpread, b.colour.cellSpread), a.id === b.id ? 1 : 1 - dip(t, 0.2)),
       },
     }
-    // a fill one side lacks morphs from one that draws as if it were not there; front order swaps at the middle,
-    // where spill dips to nothing (above)
-    if (a.fill || b.fill) {
-      const [fa, fb] = [a.fill ?? unfilled(b.fill!), b.fill ?? unfilled(a.fill!)]
-      const front = t < 0.5 ? fa.front : fb.front
-      level.fill = {
-        amount: k(fa.amount, fb.amount),
-        line: k(fa.line, fb.line),
-        tone: k(fa.tone, fb.tone),
-        bands: k(fa.bands, fb.bands),
-        step: k(fa.step, fb.step),
-        metal: k(fa.metal, fb.metal),
-        light: k(fa.light, fb.light),
-        shade: k(fa.shade, fb.shade),
-        ramp: k(fa.ramp, fb.ramp),
-        alternate: k(fa.alternate, fb.alternate),
-        ...(front ? { front } : {}),
-      }
-    }
+    const fill = mixFill(a.fill, b.fill, t, k)
+    if (fill) level.fill = fill
     if (a.id !== b.id) far.set(level, { id: b.id, at: t })
     // the far side's picture shares the level's knobs, so a bend of the scene bends both
     const c = smooth(0, 1, t)
@@ -411,12 +379,8 @@ export function morph(
       ...(side.atCells ? { atCells: side.atCells } : {}),
     }
   }
-  // dots one side lacks morph from the other side's, which that side does not draw
-  const dots = a.line.dots ?? b.line.dots
-  if (dots) {
-    const [da, db] = [a.line.dots ?? dots, b.line.dots ?? dots]
-    scene.line.dots = { count: k(da.count, db.count), size: k(da.size, db.size), crawl: k(da.crawl, db.crawl) }
-  }
+  const dots = mixDots(a.line, b.line, k)
+  if (dots) scene.line.dots = dots
   // a background one side lacks morphs from the other side's at amount 0; a change of kind swaps where the amount
   // dips to nothing
   if (a.background || b.background) {

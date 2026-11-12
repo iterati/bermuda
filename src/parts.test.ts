@@ -1,6 +1,7 @@
 // The shader's parts: needs gives a scene the variation, shape and lattice kinds and the features it holds, by
 // presence, the same at every preset, dice and frame, and a morph both ends' and the morph's; the generator leaves
-// out each part not given and, with every part on, gives the app's three programs. In WebGL2 (headless Chrome) the
+// out each part not given and, with every part on, gives the app's three programs; the engine registry gives every
+// part to one engine, in PARTS' order. In WebGL2 (headless Chrome) the
 // core alone and every part on compile and draw, and every look and preset, and every bank link's middle, draws on a
 // program of only its own parts exactly as on the everything program, both from the renderer's cache. The cache
 // draws a scene's first frame on its own program, compiled then, or on the everything program while its own is not
@@ -11,6 +12,7 @@ import { fileURLToPath } from 'node:url'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import { build, type Rollup } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { ENGINES } from './engines'
 import { background, BANK, fill, join, level, LOOKS, scene, shape, star } from './looks'
 import { morph } from './morph'
 import { advance, applyPreset, dice, newLive, update, type Live } from './motion'
@@ -195,6 +197,30 @@ describe('generateShader', () => {
       [],
     ])
       expect(calls(generateShader(parts)), `${parts.length} parts`).toEqual(once)
+  })
+})
+
+describe('the engine registry', () => {
+  it("gives every part to one engine, in PARTS' order", () => {
+    const parts = ENGINES.flatMap((e) => e.parts)
+    expect(parts).toEqual(PARTS)
+    // each family's kinds but its first, the core's, then the family's feature, then the features alone
+    const tail = (family: string, list: readonly string[]) => list.slice(1).map((kind) => `${family}.${kind}`)
+    expect(parts).toEqual([
+      ...tail('variation', VARIATIONS),
+      'stretch',
+      ...tail('shape', SHAPES),
+      'join',
+      ...tail('lattice', LATTICES),
+      'spill',
+      'dots',
+      'soak',
+      'morph',
+      'fill',
+      'metal',
+    ])
+    expect(new Set(parts).size).toBe(parts.length)
+    expect(ENGINES.map((e) => e.name)).toEqual(['fractal', 'shapes', 'tiling', 'lines', 'backgrounds', 'morph', 'deco'])
   })
 })
 
