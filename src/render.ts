@@ -42,7 +42,8 @@ function heaviest(levels: Level[]): number {
 // A morph's far end, which the scene's own knobs cannot carry: its line kind, units and composite, its rings
 // (value, spread: the shader morphs their count and fades each end's echo apart), its stops' mixes, for each drawn
 // level in allLevels order whose far end has another id that id and how far through its window it is, its running
-// phases (rings, palette, dots' crawl), and how far in it is (0 none, 1 all of it).
+// phases (rings, palette, dots' crawl), and how far in it is (0 none, 1 all of it). Where the scene's one drawn level
+// swaps a switch, cross is that level with the side's switches it does not draw, whose picture is mixed in by at.
 export type Toward = {
   line: Scene['line']['kind']
   rings: [number, number]
@@ -54,16 +55,23 @@ export type Toward = {
   colour: number
   crawl: number
   at: number
+  cross?: { levels: Level[]; at: number }
 }
 
 const shapeIndex = (shape: Shape) => SHAPES.indexOf(shape.kind ?? 'star')
 
 // The level rows as shader.ts lays them out: every level, sub-chains included, gets a row; a level's next
-// row is the one after it in its own list, and a variant's sub-chain replaces the rest of the chain below it.
-export function packLevels(levels: Level[], far: Toward['levels']): Float32Array {
-  const data = new Float32Array(MAX_LEVELS * ROW_TEXELS * 4)
-  const rows = new Map(allLevels(levels).map(({ level }, i) => [level, i]))
-  allLevels(levels).forEach(({ level, list }, row) => {
+// row is the one after it in its own list, and a variant's sub-chain replaces the rest of the chain below it. A
+// second chain packs into the same data from its start row on.
+export function packLevels(
+  levels: Level[],
+  far: Toward['levels'],
+  start = 0,
+  data = new Float32Array(MAX_LEVELS * ROW_TEXELS * 4),
+): Float32Array<ArrayBuffer> {
+  const rows = new Map(allLevels(levels).map(({ level }, i) => [level, start + i]))
+  allLevels(levels).forEach(({ level, list }, i) => {
+    const row = start + i
     const at = (texel: number, ...values: number[]) => data.set(values, (row * ROW_TEXELS + texel) * 4)
     const next = list[list.indexOf(level) + 1]
     const { affine, lattice, cell, colour, variants } = level
@@ -80,7 +88,7 @@ export function packLevels(levels: Level[], far: Toward['levels']): Float32Array
       colour.cellSpread.value,
       variants.reduce((s, v) => s + v.share.value, 0),
     )
-    const other = far[row]
+    const other = far[i]
     at(6, seedOf(level.id), seedOf(other?.id ?? level.id), other?.at ?? 0, cell.spill?.value ?? 0)
     at(
       7,
@@ -157,6 +165,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     toward: u('uToward'),
     towardRings: u('uTowardRings'),
     towardMix: u('uTowardMix'),
+    cross: u('uCross'),
   }
   const texture = gl.createTexture()
   gl.activeTexture(gl.TEXTURE0)
@@ -187,17 +196,12 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     gl.uniform2f(loc.res, width, height)
     gl.uniform4f(loc.frame, frame.origin[0].value, frame.origin[1].value, frame.zoom.value, frame.turn.value * RAD)
     gl.bindTexture(gl.TEXTURE_2D, texture)
-    gl.texSubImage2D(
-      gl.TEXTURE_2D,
-      0,
-      0,
-      0,
-      ROW_TEXELS,
-      MAX_LEVELS,
-      gl.RGBA,
-      gl.FLOAT,
-      packLevels(scene.levels, far.levels),
-    )
+    const rows = packLevels(scene.levels, far.levels)
+    // a lone level's swap: the level with its other switches in the rows after the scene's, a chain of its own
+    const start = allLevels(scene.levels).length
+    if (far.cross) packLevels(far.cross.levels, far.levels, start, rows)
+    gl.uniform2f(loc.cross, start, far.cross?.at ?? 0)
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, ROW_TEXELS, MAX_LEVELS, gl.RGBA, gl.FLOAT, rows)
     gl.uniform1f(loc.depth, Math.max(heaviest(scene.levels), 1e-6))
     gl.uniform4f(loc.contour, contour.rings.value, contour.rings.spread ?? 0, live.drift, 0)
     gl.uniform2f(loc.radial, contour.radialWeight.value, contour.radialWeight.spread ?? 0)

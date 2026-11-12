@@ -1,10 +1,10 @@
 // The one shader compiles in WebGL2 (headless Chrome), every look and preset renders finite and not blank, a morph
-// between two presets is finite and not blank at its middle and lands on each end exactly, and a collapsed level
-// draws as if it were gone, a swap draws what it swapped, a loop's first and last frames draw the same, and the
-// frames of Play's transitions along an autopilot walk are finite and not blank. Every shape draws alone and
-// joined, screen lines hold their width through a warp, spill draws only what reaches over, and dots fade from one
-// count to the next and crawl. The Decks' three pictures, each drawn at its own size in the canvas's corner, are
-// finite and not blank. A background of each kind draws under the lines, and at amount 0 draws as none. Every
+// between two presets, or of a lone level through a swap, is finite and not blank at its middle and lands on each
+// end exactly, and a collapsed level draws as if it were gone, a swap draws what it swapped, a loop's first and last
+// frames draw the same, and the frames of Play's transitions along an autopilot walk are finite and not blank. Every
+// shape draws alone and joined, screen lines hold their width through a warp, spill draws only what reaches over,
+// and dots fade from one count to the next and crawl. The Decks' three pictures, each drawn at its own size in the
+// canvas's corner, are finite and not blank. A background of each kind draws under the lines, and at amount 0 draws as none. Every
 // variation warps finite and not blank, ring and mirror draw as none where they have nothing to do, and the orbit
 // trap draws as none at weight 0.
 import { execFileSync } from 'node:child_process'
@@ -199,6 +199,18 @@ describe('the one shader', { timeout: 30_000 }, () => {
 
 describe('the morph', () => {
   const staggered: Edge = { seconds: 2, stagger: 0.4, deepFirst: false }
+  // a scene whose one level swaps its lattice kind, its sectors or a mirror, with nothing else drawn
+  const alone = (s: Parameters<typeof level>[1]) =>
+    scene({ name: 'alone', levels: [level('l', { turn: 20, cellTurn: 25, shape: star(6, 2.5, 0.4), ...s })], rings: 2 })
+  const lone: [string, Scene, Scene][] = [
+    ['A lone square level into triangles', alone({}), alone({ lattice: 'triangle' })],
+    [
+      'A lone polar level of 6 sectors into 9',
+      alone({ lattice: 'polar', sectors: 6 }),
+      alone({ lattice: 'polar', sectors: 9 }),
+    ],
+    ['A lone level into its mirror', alone({}), alone({ by: 'mirror' })],
+  ]
   const pairs: [string, Scene, Scene][] = [
     ['Square into Hex', preset('Remix - Square to hex', 'Square'), preset('Remix - Square to hex', 'Hex')],
     ['Ice into Dusk', preset('Tapestry 7 ', 'Ice'), preset('Tapestry 7 ', 'Dusk')],
@@ -214,6 +226,7 @@ describe('the morph', () => {
       entryScene(LOOKS, a)!,
       entryScene(LOOKS, b)!,
     ]),
+    ...lone,
   ]
 
   it.each(pairs)('%s is finite and not blank at its middle', async (_, a, b) => {
@@ -244,6 +257,7 @@ describe('the morph', () => {
     ['Mirror tiles into Ripples', look('Cells - Mirror tiles'), look('Cells - Ripples')],
     ['Orbit traps into Tapestry 7', look('Colour - Orbit traps'), look('Tapestry 7 ')],
     ['Hearts and discs into Julia set', look('flam3 - Hearts and discs'), look('flam3 - Julia set')],
+    ...lone,
   ]
   it.each(ends)('%s lands on A and B exactly at its ends', async (_, a, b) => {
     for (const [x, end] of [

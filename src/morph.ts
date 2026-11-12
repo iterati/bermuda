@@ -1,9 +1,10 @@
 // The morph from scene A to scene B at fader x, made each frame from the two live scenes, both at the clock's time.
-// Every knob morphs; star n, the shape's kind and the other switches swap inside a dip where they show nothing, and a
-// knob one side lacks morphs from the value that draws as if it were not there. Levels pair by id
-// and depth; a level weight collapses what has no pair and grows what is new (padding at the deep end; a reorder
-// collapses the level where it was, then grows it where it goes). Each depth runs its own window of the fader,
-// staggered by the edge, and depth-indexed values stay with the depth (the shader counts depth by weight).
+// Every knob morphs; star n, the shape's kind and the other switches swap inside a dip where they show nothing (but
+// the scene's one drawn level, whose lattice and mirror crossfade instead), and a knob one side lacks morphs from
+// the value that draws as if it were not there. Levels pair by id and depth; a level weight collapses what has no
+// pair and grows what is new (padding at the deep end; a reorder collapses the level where it was, then grows it
+// where it goes). Each depth runs its own window of the fader, staggered by the edge, and depth-indexed values stay
+// with the depth (the shader counts depth by weight).
 import { paletteAt } from './colour'
 import { advance, newLive, type Live } from './motion'
 import type { Toward } from './render'
@@ -169,6 +170,7 @@ function mixLevels(
   edge: Edge,
   n: number,
   far: Map<Level, { id: string; at: number }>,
+  crosses?: Map<Level, NonNullable<Toward['cross']>>,
 ): Level[] {
   // a move runs both halves on one window, both its depths' together, so it collapses before it grows
   const moves = new Map<string, [number, number]>()
@@ -189,24 +191,32 @@ function mixLevels(
     // oblique is voronoi at jitter 0, so the two morph as voronoi throughout; another change of kind or
     // sectors swaps where the level's weight dips to nothing, and where only its first variant is picked, so
     // every cell runs on down the same chain either side of the swap; so does a mirror coming or going, as no
-    // turn reaches a reflection
+    // turn reaches a reflection. The scene's one drawn level (crosses) has nothing else drawn to keep the
+    // picture while it weighs nothing, so its weight stays whole and the picture crossfades from the level with
+    // A's switches to it with B's (the shader draws both), with no dip and nothing swapped in sight.
     const kinds = new Set([a.lattice.kind, b.lattice.kind])
     const voronoi = kinds.has('voronoi') && (kinds.size === 1 || kinds.has('oblique'))
     const swaps =
       (!voronoi && (kinds.size > 1 || a.lattice.sectors !== b.lattice.sectors)) ||
       (a.cell.by === 'mirror') !== (b.cell.by === 'mirror')
-    const hidden = swaps ? 1 - dip(t, 0.05) : 1
+    const hidden = swaps && !crosses ? 1 - dip(t, 0.05) : 1
     const vectors = [...kinds].every((kind) => ['oblique', 'triangle', 'voronoi'].includes(kind))
-    const lattice: Level['lattice'] = {
-      kind: voronoi ? 'voronoi' : swap.lattice.kind,
-      e2: vectors
-        ? vector(a.lattice.e2, b.lattice.e2, t)
-        : [k(a.lattice.e2[0], b.lattice.e2[0]), k(a.lattice.e2[1], b.lattice.e2[1])],
+    const e2: Level['lattice']['e2'] = vectors
+      ? vector(a.lattice.e2, b.lattice.e2, t)
+      : [k(a.lattice.e2[0], b.lattice.e2[0]), k(a.lattice.e2[1], b.lattice.e2[1])]
+    const jitter = voronoi ? k(a.lattice.jitter ?? { value: 0 }, b.lattice.jitter ?? { value: 0 }) : undefined
+    const spill = either(a.cell.spill, b.cell.spill, 0, t)
+    const [turn, phase] = [scaled(k(a.cell.turn, b.cell.turn), by), scaled(k(a.cell.phase, b.cell.phase), by)]
+    // a side's switches on the morphed knobs: its lattice kind and sectors, and its cell step; spill only where
+    // the lattice can, so it drops where a swap's weight is nothing
+    const sided = (side: Level): Pick<Level, 'lattice' | 'cell'> => {
+      const lattice: Level['lattice'] = { kind: voronoi ? 'voronoi' : side.lattice.kind, e2 }
+      if (jitter) lattice.jitter = jitter
+      if (side.lattice.sectors !== undefined) lattice.sectors = side.lattice.sectors
+      // parity swaps where the cells neither turn nor shift their rings
+      const cell = { by: side.cell.by, turn, phase, ...(spill && SPILLS.includes(lattice.kind) ? { spill } : {}) }
+      return { lattice, cell }
     }
-    if (voronoi) lattice.jitter = k(a.lattice.jitter ?? { value: 0 }, b.lattice.jitter ?? { value: 0 })
-    if (swap.lattice.sectors !== undefined) lattice.sectors = swap.lattice.sectors
-    // spill only where the lattice can, so it drops where a swap's weight is nothing
-    const spill = SPILLS.includes(lattice.kind) ? either(a.cell.spill, b.cell.spill, 0, t) : undefined
     const level: Level = {
       id: a.id,
       weight: scaled(k(a.weight, b.weight), hidden),
@@ -218,14 +228,7 @@ function mixLevels(
       variations: VARIATIONS.filter((kind) => [a, b].some((l) => l.variations.some((v) => v.kind === kind))).map(
         (kind) => ({ kind, weight: { value: mix(variationWeight(a, kind), variationWeight(b, kind), t) } }),
       ),
-      lattice,
-      // parity swaps where the cells neither turn nor shift their rings
-      cell: {
-        by: swap.cell.by,
-        turn: scaled(k(a.cell.turn, b.cell.turn), by),
-        phase: scaled(k(a.cell.phase, b.cell.phase), by),
-        ...(spill ? { spill } : {}),
-      },
+      ...sided(swap),
       variants: variants.map(({ below }, v) => {
         // a variant that is not there has no share
         const va = a.variants[v] ?? { ...b.variants[v], share: { value: 0 } }
@@ -244,6 +247,10 @@ function mixLevels(
       },
     }
     if (a.id !== b.id) far.set(level, { id: b.id, at: t })
+    // the far side's picture shares the level's knobs, so a bend of the scene bends both
+    const c = smooth(0, 1, t)
+    if (crosses && swaps)
+      crosses.set(level, { levels: [{ ...level, ...sided(swap === a ? b : a) }], at: Math.min(c, 1 - c) })
     return level
   })
 }
@@ -289,6 +296,9 @@ export function morph(
 ): { scene: Scene; toward: Toward } {
   const slots = align(a.levels, b.levels)
   const far = new Map<Level, { id: string; at: number }>()
+  // the scene's one drawn level crossfades through a swap rather than dip (mixLevels)
+  const lone = slots.length === 1 && slots[0].variants.every((v) => !v.below)
+  const crosses = lone ? new Map<Level, NonNullable<Toward['cross']>>() : undefined
   const k = (ka: Knob, kb: Knob) => knob(ka, kb, x)
   const count = Math.max(a.palette.stops.length, b.palette.stops.length)
   const [sa, sb] = [padStops(a.palette.stops, count), padStops(b.palette.stops, count)]
@@ -299,7 +309,7 @@ export function morph(
       zoom: k(a.frame.zoom, b.frame.zoom),
       turn: k(a.frame.turn, b.frame.turn),
     },
-    levels: mixLevels(slots, 0, x, edge, depthOf(slots), far),
+    levels: mixLevels(slots, 0, x, edge, depthOf(slots), far, crosses),
     contour: {
       // the shader morphs the rings from a's to toward's
       rings: a.contour.rings,
@@ -370,6 +380,8 @@ export function morph(
     crawl: phases.crawl,
     at: x,
   }
+  const cross = crosses?.get(scene.levels[0])
+  if (cross) toward.cross = cross
   return { scene, toward }
 }
 

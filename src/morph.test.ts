@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { paletteAt } from './colour'
 import { background, join, level, LOOKS, scene, shape, star } from './looks'
-import { depthWindow, morph } from './morph'
+import { depthWindow, morph, smooth } from './morph'
 import type { Edge, Scene } from './scene'
 
 const together: Edge = { seconds: 2, stagger: 0, deepFirst: false }
@@ -116,12 +116,12 @@ describe('the morph', () => {
   })
 
   it('swaps a mirror where the level weighs nothing, and ring where its cells neither turn nor shift', () => {
-    const a = scene({ name: 'a', levels: [level('c', { cellTurn: 20 })] })
-    const mirror = scene({ name: 'b', levels: [level('c', { by: 'mirror', cellTurn: 20 })] })
+    const a = scene({ name: 'a', levels: [level('c', { cellTurn: 20 }), level('d')] })
+    const mirror = scene({ name: 'b', levels: [level('c', { by: 'mirror', cellTurn: 20 }), level('d')] })
     expect(at(a, mirror, 0.47).levels[0]).toMatchObject({ cell: { by: 'none' }, weight: { value: 0 } })
     expect(at(a, mirror, 0.53).levels[0]).toMatchObject({ cell: { by: 'mirror' }, weight: { value: 0 } })
     expect(at(a, mirror, 1).levels[0].weight.value).toBe(1)
-    const ring = scene({ name: 'b', levels: [level('c', { by: 'ring', cellTurn: 20, cellPhase: 0.2 })] })
+    const ring = scene({ name: 'b', levels: [level('c', { by: 'ring', cellTurn: 20, cellPhase: 0.2 }), level('d')] })
     expect(at(a, ring, 0.55).levels[0]).toMatchObject({
       cell: { by: 'ring', turn: { value: 0 } },
       weight: { value: 1 },
@@ -143,14 +143,39 @@ describe('the morph', () => {
     expect(at(square, organic, 0.5).levels[0].lattice).toMatchObject({ kind: 'voronoi', jitter: { value: 0.4 } })
     expect(at(square, organic, 0.5).levels[0].weight.value).toBe(1)
     expect(at(square, organic, 1).levels[0].lattice.jitter?.value).toBeCloseTo(0.8)
-    const polar = scene({ name: 'a', levels: [level('l', { lattice: 'polar', sectors: 8 })] })
-    const brick = scene({ name: 'b', levels: [level('l', { lattice: 'brick' })] })
+    const polar = scene({ name: 'a', levels: [level('l', { lattice: 'polar', sectors: 8 }), level('m')] })
+    const brick = scene({ name: 'b', levels: [level('l', { lattice: 'brick' }), level('m')] })
     const lattice = (x: number) => at(polar, brick, x).levels[0]
     expect(lattice(0)).toMatchObject({ lattice: { kind: 'polar', sectors: 8 }, weight: { value: 1 } })
     expect(lattice(0.47)).toMatchObject({ lattice: { kind: 'polar' }, weight: { value: 0 } })
     expect(lattice(0.53).lattice).toEqual({ kind: 'brick', e2: expect.anything() })
     expect(lattice(0.53).weight.value).toBe(0)
     expect(lattice(1).weight.value).toBe(1)
+  })
+
+  it("crossfades the scene's one drawn level through a swap from A's switches to B's, its weight whole", () => {
+    const square = scene({ name: 'a', levels: [level('l', { spill: 1 })] })
+    const polar = scene({ name: 'b', levels: [level('l', { lattice: 'polar', sectors: 6, by: 'mirror' })] })
+    const there = full(square, polar, 0.3)
+    const [near, far] = [there.scene.levels[0], there.toward.cross!.levels[0]]
+    expect(near).toMatchObject({ lattice: { kind: 'oblique' }, cell: { by: 'none' }, weight: { value: 1 } })
+    expect(near.cell.spill!.value).toBeCloseTo(0.7, 9)
+    expect(far).toMatchObject({ lattice: { kind: 'polar', sectors: 6 }, cell: { by: 'mirror' }, weight: { value: 1 } })
+    expect(far.cell.spill).toBeUndefined()
+    expect(there.toward.cross!.at).toBeCloseTo(smooth(0, 1, 0.3), 9)
+    // the far side's picture is the same knobs, so a bend of the scene bends it too
+    for (const key of ['weight', 'affine', 'variants', 'colour'] as const) expect(far[key]).toBe(near[key])
+    expect(far.lattice.e2).toBe(near.lattice.e2)
+    const back = full(square, polar, 0.7)
+    expect(back.scene.levels[0]).toMatchObject({ lattice: { kind: 'polar', sectors: 6 }, weight: { value: 1 } })
+    expect(back.toward.cross!.levels[0].lattice).toEqual({ kind: 'oblique', e2: expect.anything() })
+    expect(back.toward.cross!.at).toBeCloseTo(smooth(0, 1, 0.3), 9)
+    expect([0, 1].map((x) => full(square, polar, x).toward.cross!.at)).toEqual([0, 0])
+    // with another level drawn the swap dips as before, and nothing crossfades
+    const two = (s: Scene) => ({ ...s, levels: [...s.levels, level('m')] })
+    expect(full(two(square), two(polar), 0.5).toward.cross).toBeUndefined()
+    expect(full(two(square), two(polar), 0.5).scene.levels[0].weight.value).toBe(0)
+    expect(full(square, square, 0.5).toward.cross).toBeUndefined()
   })
 
   it('runs a square pad into a hex one along the rhombic arc', () => {

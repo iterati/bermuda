@@ -196,6 +196,7 @@ uniform vec2 uTrap;               // the orbit trap's weight, its circle's size
 uniform float uComposite;         // 0 add to 1 first hit
 uniform vec4 uToward;             // a morph's far end: its line kind, how far in (0 none), its ring phase, its index
 uniform vec2 uTowardRings;        // the far end's rings, their spread
+uniform vec2 uCross;              // a lone level's swap: the row its other switches' chain starts at, how far in
 uniform vec4 uBg;                 // kind (0 none, 1 flat, 2 gradient, 3 soak), amount, turn (radians), pool size
 uniform vec4 uBgSoak;             // at[0], at[1], edge, seep
 uniform int uAA;
@@ -671,8 +672,9 @@ mat2 stretch(vec2 q0, vec2 q, int j) {
   return mat2((vary(q0 + vec2(e, 0), j) - q) / e, (vary(q0 + vec2(0, e), j) - q) / e);
 }
 
-// one sample of the lines over the background bg: added to it, or over it where the first hit leaves it uncovered
-vec3 render(vec2 fc, vec3 bg) {
+// one sample of the lines over the background bg, from the chain at row start: added to it, or over it where the
+// first hit leaves it uncovered
+vec3 render(vec2 fc, vec3 bg, int start) {
   vec2 p = rot(uFrame.w) * ((fc * 2. - uRes) / uRes.y) / uFrame.z + uFrame.xy;
   float r0 = length(p);
   float ci = uPalette.z * r0;
@@ -682,7 +684,7 @@ vec3 render(vec2 fc, vec3 bg) {
   float trap = abs(r0 - uTrap.y);
   // how far the chain has stretched the screen at this pixel, for lines in screen units
   mat2 J = rot(uFrame.w) / uFrame.z;
-  int j = 0;
+  int j = start;
   for (int i = 0; i < MAX_DEPTH; i++) {
     if (j < 0) break;
     // a level is as deep as the weight above it, so a level collapsing or growing moves the depths below smoothly
@@ -760,7 +762,12 @@ vec3 render(vec2 fc, vec3 bg) {
 void main() {
   vec3 c = vec3(0), bg = background(gl_FragCoord.xy);
   for (int y = 0; y < 3; y++) for (int x = 0; x < 3; x++)
-    if (x < uAA && y < uAA) c += render(gl_FragCoord.xy + (vec2(x, y) + .5) / float(uAA) - .5, bg);
+    if (x < uAA && y < uAA)
+      // a lone level's swap crossfades: its other switches' picture mixed in by how far in it is
+      for (int k = 0; k < 2; k++) {
+        float w = k == 0 ? 1. - uCross.y : uCross.y;
+        if (w > 0.) c += w * render(gl_FragCoord.xy + (vec2(x, y) + .5) / float(uAA) - .5, bg, k * int(uCross.x));
+      }
   c /= float(uAA * uAA);
   outColor = vec4(pow(c, vec3(1. / uGamma)), 1.);
 }
