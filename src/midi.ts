@@ -1,23 +1,25 @@
 // MIDI learn: a controller's control changes (CC), each mapped to a knob or a macro of the look and saved in
 // its JSON (Scene.midi), or to the A/B fader, and its buttons (notes), each a trigger of the app (both kept as the
 // app's Controls). A knob takes the control's 0 to 127
-// over its play range, else its hard range; a macro over 0 to 1. The controller is kept showing the look: each
-// encoder gets its knob's value back on its own CC, so its ring shows it, and each button's LED is lit by its note.
+// over its play range, else its hard range; a macro over 0 to 1. The app's Controls also put up to 8 CCs on the
+// Perform strip's slots, on every look: each drives what its slot of the page showing holds. The controller is kept
+// showing the look: each encoder gets its knob's value back on its own CC, so its ring shows it, and each button's
+// LED is lit by its note.
 import { setMacro, update } from './motion'
 import {
   clamp,
   playRange,
   resolve,
   type Controls,
-  type Midi,
   type MidiTarget,
   type Scene,
   type Trigger,
   type TriggerTarget,
 } from './scene'
 
-// What the next control learns: a knob or macro of the look, the A/B fader, or a button's trigger.
-export type Learning = MidiTarget | { fader: true } | TriggerTarget
+// What the next control learns: a knob or macro of the look, the A/B fader, a button's trigger, or a slot of the
+// strip (learning the strip arms each slot in turn).
+export type Learning = MidiTarget | { fader: true } | TriggerTarget | { strip: number }
 export type Message = { kind: 'cc' | 'note'; channel: number; number: number; value: number } // value 0 to 1
 
 export const HAS_MIDI = 'requestMIDIAccess' in navigator
@@ -92,7 +94,11 @@ const targetKey = (t: Learning) =>
         ? 'fader'
         : 'slot' in t
           ? `slot ${t.slot}`
-          : `mode ${t.mode}`
+          : 'strip' in t
+            ? `strip ${t.strip}`
+            : 'page' in t
+              ? `page ${t.page}`
+              : `mode ${t.mode}`
 
 export const same = (a: Learning, b: Learning) => targetKey(a) === targetKey(b)
 
@@ -102,12 +108,21 @@ type Control = { channel: number; control: number; pickup?: true }
 
 export const label = (m: Control | Trigger) => `ch${m.channel} ${'note' in m ? `note ${m.note}` : `cc${m.control}`}`
 
-// Where a mapping's knob or macro sits, 0 to 1 over the control's range.
-export function positionOf(scene: Scene, map: Midi): number {
-  if ('macro' in map) return scene.macros.find((m) => m.id === map.macro)!.value
-  const knob = resolve(scene, map.knob)!
-  const [lo, hi] = playRange(map.knob, knob)
+// Where a knob or macro sits, 0 to 1 over a control's range: a knob's play range, else its hard range; a macro's
+// 0 to 1.
+export function positionOf(scene: Scene, t: MidiTarget): number {
+  if ('macro' in t) return scene.macros.find((m) => m.id === t.macro)!.value
+  const knob = resolve(scene, t.knob)!
+  const [lo, hi] = playRange(t.knob, knob)
   return clamp((knob.value - lo) / (hi - lo), [0, 1])
+}
+
+// A knob or macro set from a control's position, 0 to 1, as positionOf reads it (on a draft).
+export function setTarget(draft: Scene, t: MidiTarget, v: number) {
+  if ('macro' in t) return setMacro(draft, t.macro, v)
+  const knob = resolve(draft, t.knob)!
+  const [lo, hi] = playRange(t.knob, knob)
+  knob.value = clamp(lo + (hi - lo) * v, [lo, hi])
 }
 
 // A pickup fader at its last position takes over from a value at a position, 0 to 1, once it comes within a step
@@ -132,6 +147,28 @@ export const learnTrigger = (triggers: Trigger[], t: TriggerTarget, m: Message):
   { channel: m.channel, note: m.number, ...t },
 ]
 
+// The controls with a CC let go: off the A/B fader and the strip.
+export function release(controls: Controls, channel: number, control: number): Controls {
+  const other = (x: Control) => !(x.channel === channel && x.control === control)
+  const { fader, strip, ...rest } = controls
+  return { ...rest, ...(fader && other(fader) ? { fader } : {}), ...(strip ? { strip: strip.filter(other) } : {}) }
+}
+
+// The controls with a CC learned onto a slot of the strip: the CC's old place and the slot's old CC go. The look
+// lets it go too (unmapControl).
+export function learnStrip(controls: Controls, index: number, m: Message): Controls {
+  const kept = release(controls, m.channel, m.number)
+  return {
+    ...kept,
+    strip: [...(kept.strip ?? []).filter((x) => x.index !== index), { channel: m.channel, control: m.number, index }],
+  }
+}
+
+// The look with no mapping on a control change's CC (on a draft).
+export function unmapControl(draft: Scene, m: Message) {
+  if (draft.midi) draft.midi = draft.midi.filter((x) => !(x.channel === m.channel && x.control === m.number))
+}
+
 export function unmap(draft: Scene, t: MidiTarget) {
   if (draft.midi) draft.midi = draft.midi.filter((m) => !same(m, t))
 }
@@ -142,28 +179,44 @@ export function drive(scene: Scene, m: Message, last?: number): Scene {
   const map = scene.midi?.find((x) => x.channel === m.channel && x.control === m.number)
   if (!map) return scene
   if (map.pickup && !takes(positionOf(scene, map), last, m.value)) return scene
-  return update(scene, (d) => {
-    if ('macro' in map) return setMacro(d, map.macro, m.value)
-    const knob = resolve(d, map.knob)!
-    const [lo, hi] = playRange(map.knob, knob)
-    knob.value = clamp(lo + (hi - lo) * m.value, [lo, hi])
-  })
+  return update(scene, (d) => setTarget(d, map, m.value))
+}
+
+// The scene with a control change on the strip's slot its CC drives, of the page showing (slots), or the scene
+// itself when that slot is empty; undefined when the CC is not the strip's. An encoder is endless, so a strip CC
+// takes no pickup.
+export function driveStrip(
+  scene: Scene,
+  controls: Controls,
+  slots: (MidiTarget | undefined)[],
+  m: Message,
+): Scene | undefined {
+  const cc = controls.strip?.find((x) => x.channel === m.channel && x.control === m.number)
+  if (!cc) return undefined
+  const t = slots[cc.index]
+  return t ? update(scene, (d) => setTarget(d, t, m.value)) : scene
 }
 
 // What the controller should show: each encoder its value on its own CC (a pickup fader cannot move, so none),
-// the A/B fader's CC its place when that is no pickup fader, and each button's LED on (velocity 1) or off (0) by
-// its note, keyed as attach() keys the controls.
+// the A/B fader's CC its place when that is no pickup fader, each strip CC its slot's place on the page showing
+// (slots; 0 for an empty slot), over a look's mapping on the same CC, and each button's LED on (velocity 1) or off
+// (0) by its note, keyed as attach() keys the controls.
 export function echoes(
   scene: Scene,
   controls: Controls,
   fader: number,
   lit: (t: Trigger) => boolean,
+  slots: (MidiTarget | undefined)[],
 ): Map<string, number[]> {
   const out = new Map<string, number[]>()
   const cc = (m: Control, at: number) =>
     !m.pickup && out.set(keyOf('cc', m.channel, m.control), [0xb0 | (m.channel - 1), m.control, Math.round(at * 127)])
   for (const m of scene.midi ?? []) cc(m, positionOf(scene, m))
   if (controls.fader) cc(controls.fader, fader)
+  for (const s of controls.strip ?? []) {
+    const t = slots[s.index]
+    cc(s, t ? positionOf(scene, t) : 0)
+  }
   for (const t of controls.buttons)
     out.set(keyOf('note', t.channel, t.note), [0x90 | (t.channel - 1), t.note, lit(t) ? 1 : 0])
   return out

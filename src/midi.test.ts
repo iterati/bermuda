@@ -4,20 +4,34 @@ import { background, LOOKS } from './looks'
 import {
   attach,
   drive,
+  driveStrip,
   ECHO_MS,
   echoes,
   HOLD_MS,
   keyOf,
   learn,
+  learnStrip,
   learnTrigger,
   positionOf,
+  release,
   takes,
+  unmapControl,
   waiting,
   type Learning,
   type Message,
 } from './midi'
 import { setKnob, update } from './motion'
-import { hardRange, parseScene, parseControls, resolve, type Controls, type Scene, type View } from './scene'
+import {
+  hardRange,
+  parseScene,
+  parseControls,
+  resolve,
+  strip,
+  STRIP,
+  type Controls,
+  type Scene,
+  type View,
+} from './scene'
 
 const squareToHex = () => structuredClone(LOOKS.find((l) => l.name === 'Remix - Square to hex')!)
 
@@ -50,9 +64,9 @@ function fakeController() {
 }
 
 // The app's MIDI loop in small: a target learning takes the first control of its kind, a control drives what it
-// maps to (the A/B fader's control first), a button loads its slot or picks its mode, and the controller is sent
-// the look.
-function play(scene: Scene) {
+// maps to (the A/B fader's control first, then the strip's slot of the page showing on the chip picked), a button
+// loads its slot, picks its mode or steps the strip's page, and the controller is sent the look.
+function play(scene: Scene, chip = 'frame') {
   const { access, send, sent, through } = fakeController()
   const state = {
     scene,
@@ -61,26 +75,36 @@ function play(scene: Scene) {
     fader: 0,
     mode: 'stage' as View,
     inputs: [] as string[],
+    chip,
+    page: 0,
   }
+  const pages = () => Math.max(1, Math.ceil(strip(state.scene, state.chip).length / STRIP))
+  const slots = () => Array.from({ length: STRIP }, (_, i) => strip(state.scene, state.chip)[state.page * STRIP + i])
   const at = new Map<string, number>()
   const stop = attach(
     access,
     () =>
-      echoes(state.scene, state.controls, state.fader, (t) =>
-        'slot' in t ? LOOKS[t.slot]?.name === state.scene.name : t.mode === state.mode,
+      echoes(
+        state.scene,
+        state.controls,
+        state.fader,
+        (t) =>
+          'slot' in t ? LOOKS[t.slot]?.name === state.scene.name : 'page' in t ? pages() > 1 : t.mode === state.mode,
+        slots(),
       ),
     {
       inputs: (names) => (state.inputs = names),
       message: (m: Message) => {
         const t = state.learning
         if (m.kind === 'note') {
-          if (t && ('slot' in t || 'mode' in t)) {
+          if (t && ('slot' in t || 'mode' in t || 'page' in t)) {
             state.learning = null
             state.controls = { ...state.controls, buttons: learnTrigger(state.controls.buttons, t, m) }
             return
           }
           const trigger = state.controls.buttons.find((x) => x.channel === m.channel && x.note === m.number)
           if (trigger && 'mode' in trigger) state.mode = trigger.mode
+          else if (trigger && 'page' in trigger) state.page = (state.page + trigger.page + pages()) % pages()
           else if (trigger) state.scene = structuredClone(LOOKS[trigger.slot])
           return
         }
@@ -91,17 +115,26 @@ function play(scene: Scene) {
         const onAb = ab && keyOf('cc', ab.channel, ab.control) === key
         if (t && 'fader' in t) {
           state.learning = null
-          state.controls = { ...state.controls, fader: { channel: m.channel, control: m.number, pickup: true } }
+          state.controls = {
+            ...release(state.controls, m.channel, m.number),
+            fader: { channel: m.channel, control: m.number, pickup: true },
+          }
+        } else if (t && 'strip' in t) {
+          if (state.controls.strip?.some((x) => x.channel === m.channel && x.control === m.number && x.index < t.strip))
+            return
+          state.learning = t.strip < STRIP - 1 ? { strip: t.strip + 1 } : null
+          state.controls = learnStrip(state.controls, t.strip, m)
+          state.scene = update(state.scene, (d) => unmapControl(d, m))
         } else if (t && ('knob' in t || 'macro' in t)) {
           state.learning = null
-          if (onAb) state.controls = { buttons: state.controls.buttons }
+          state.controls = release(state.controls, m.channel, m.number)
           state.scene = drive(
             update(state.scene, (d) => learn(d, t, m)),
             m,
           )
         } else if (onAb) {
           if (!ab.pickup || takes(state.fader, last, m.value)) state.fader = m.value
-        } else state.scene = drive(state.scene, m, last)
+        } else state.scene = driveStrip(state.scene, state.controls, slots(), m) ?? drive(state.scene, m, last)
       },
     },
   )
@@ -127,7 +160,7 @@ describe('MIDI learn', () => {
     }
     expect(parseControls(JSON.stringify(controls))).toEqual(controls)
     expect(() => parseControls({ buttons: [{ channel: 11, note: 8 }] })).toThrow(
-      /^buttons\[0\]: must name one slot or one mode/,
+      /^buttons\[0\]: must name one slot, one mode or one page step/,
     )
   })
 
@@ -274,7 +307,7 @@ describe('a fader with pickup', () => {
   })
 
   it('is never sent a value, as it cannot move', () => {
-    expect(echoes(faded(), { buttons: [] }, 0, () => false).size).toBe(0)
+    expect(echoes(faded(), { buttons: [] }, 0, () => false, []).size).toBe(0)
   })
 
   it('learns onto the A/B fader, with pickup, ahead of any look mapping on its control', () => {
@@ -339,8 +372,10 @@ describe('the controller shows the look', () => {
   it('sends the A/B fader its place on its CC only when an encoder, not a pickup fader, holds it', () => {
     const scene = squareToHex()
     const ab = { channel: 11, control: 2 }
-    expect(echoes(scene, { buttons: [], fader: ab }, 0.5, () => false)).toEqual(new Map([['cc 11/2', [0xba, 2, 64]]]))
-    expect(echoes(scene, { buttons: [], fader: { ...ab, pickup: true } }, 0.5, () => false).size).toBe(0)
+    expect(echoes(scene, { buttons: [], fader: ab }, 0.5, () => false, [])).toEqual(
+      new Map([['cc 11/2', [0xba, 2, 64]]]),
+    )
+    expect(echoes(scene, { buttons: [], fader: { ...ab, pickup: true } }, 0.5, () => false, []).size).toBe(0)
   })
 
   it('never sends an encoder back what its hand is turning', () => {
@@ -408,5 +443,159 @@ describe('the controller shows the look', () => {
     ])
     expect(state.mode).toBe('edit')
     stop()
+  })
+})
+
+describe('the Perform strip by MIDI', () => {
+  const t1 = () => structuredClone(LOOKS.find((l) => l.name.startsWith('Tapestry 1 '))!)
+  // eight encoders on channel 11, CC 1 to 8, on the strip's slots in turn
+  const encoders = {
+    buttons: [],
+    strip: Array.from({ length: 8 }, (_, index) => ({ channel: 11, control: index + 1, index })),
+  }
+  const value = (s: Scene, address: string) => resolve(s, address)!.value
+  const macro = (s: Scene, id: string) => s.macros.find((m) => m.id === id)!.value
+
+  it("drives slot n of the page showing, and the new page's slot n after a page change", () => {
+    const { state, send } = play(t1(), 'sq1')
+    state.controls = encoders
+    // page 1: Breathe, Size, Gain, tone, then scale, turn, shear and height
+    send(0xba, 5, 127)
+    expect(value(state.scene, 'levels[sq1].affine.scale')).toBe(2.25)
+    send(0xba, 5, 0)
+    expect(value(state.scene, 'levels[sq1].affine.scale')).toBe(1.25)
+    // page 2: m, r, round and colour at, then four empty slots
+    state.page = 1
+    send(0xba, 1, 0)
+    expect(value(state.scene, 'levels[sq1].variants[0].shape.m')).toBe(1.01)
+    send(0xba, 2, 127)
+    expect(value(state.scene, 'levels[sq1].variants[0].shape.r')).toBe(2)
+    const before = state.scene
+    send(0xba, 5, 64)
+    expect(state.scene).toBe(before)
+  })
+
+  it('drives a macro slot over 0 to 1, moving its knobs', () => {
+    const { state, send } = play(t1(), 'sq1')
+    state.controls = encoders
+    send(0xba, 1, 127)
+    expect(macro(state.scene, 'breathe')).toBe(1)
+    expect(value(state.scene, 'levels[sq1].affine.scale')).toBeCloseTo(1.75 * 1.25)
+    send(0xba, 1, 0)
+    expect(macro(state.scene, 'breathe')).toBe(0)
+    expect(value(state.scene, 'levels[sq1].affine.scale')).toBeCloseTo(1.75 * 0.75)
+  })
+
+  it("learns 8 encoders in turn, slot 1 to 8, taking each from the look's mappings and the A/B fader", () => {
+    const look = t1()
+    look.midi = [{ channel: 11, control: 3, knob: 'frame.zoom' }]
+    const { state, send } = play(look, 'sq1')
+    state.controls = { buttons: [], fader: { channel: 11, control: 5, pickup: true } }
+    state.learning = { strip: 0 }
+    for (let cc = 1; cc <= 8; cc++) {
+      expect(state.learning).toEqual({ strip: cc - 1 })
+      // an encoder turned sends a burst: its second message learns nothing more
+      send(0xba, cc, 60)
+      send(0xba, cc, 61)
+    }
+    expect(state.learning).toBeNull()
+    expect(state.controls).toEqual(encoders)
+    expect(state.scene.midi).toEqual([])
+    expect(parseControls(JSON.stringify(state.controls))).toEqual(state.controls)
+  })
+
+  it('wins over a look mapping on the same CC', () => {
+    const look = t1()
+    look.midi = [{ channel: 11, control: 1, knob: 'frame.zoom' }]
+    const { state, send } = play(look, 'sq1')
+    state.controls = encoders
+    send(0xba, 1, 127)
+    expect(macro(state.scene, 'breathe')).toBe(1)
+    expect(value(state.scene, 'frame.zoom')).toBe(look.frame.zoom.value)
+  })
+
+  describe('on the controller', () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] })
+    })
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+    const rings = (sent: number[][]) => new Map(sent.filter(([status]) => status === 0xba).map(([, cc, v]) => [cc, v]))
+
+    it("sends each strip CC its slot's place, and the new places after a page change", () => {
+      const { state, send, sent, stop } = play(t1(), 'sq1')
+      state.controls = encoders
+      send(0xba, 64, 0)
+      vi.advanceTimersByTime(ECHO_MS)
+      // the macros at 0.5, scale 1.75 in its play range 1.25 to 2.25, turn, shear and height at their places
+      const place = (address: string) => {
+        const [lo, hi] = hardRange(address)
+        return Math.round(((value(state.scene, address) - lo) / (hi - lo)) * 127)
+      }
+      expect(rings(sent)).toEqual(
+        new Map([
+          [1, 64],
+          [2, 64],
+          [3, 64],
+          [4, 64],
+          [5, 64],
+          [6, place('levels[sq1].affine.turn')],
+          [7, place('levels[sq1].lattice.e2[0]')],
+          [8, place('levels[sq1].lattice.e2[1]')],
+        ]),
+      )
+      // a ring already showing its new place is not sent it again
+      state.page = 1
+      vi.advanceTimersByTime(ECHO_MS)
+      expect(rings(sent)).toEqual(
+        new Map([
+          [1, place('levels[sq1].variants[0].shape.m')],
+          [2, place('levels[sq1].variants[0].shape.r')],
+          [3, place('levels[sq1].variants[0].shape.round')],
+          [4, place('levels[sq1].colour.at')],
+          [5, 0],
+          [6, 0],
+          [7, 0],
+          [8, 0],
+        ]),
+      )
+      stop()
+    })
+
+    it('steps the page by a learned button, its LED lit while the strip has more than one page', () => {
+      const { state, send, sent, stop } = play(t1(), 'sq1')
+      state.controls = encoders
+      state.learning = { page: 1 }
+      send(0x9a, 8, 127)
+      state.learning = { page: -1 }
+      send(0x9a, 9, 127)
+      expect(state.controls.buttons).toEqual([
+        { channel: 11, note: 8, page: 1 },
+        { channel: 11, note: 9, page: -1 },
+      ])
+      send(0x9a, 8, 127)
+      expect(state.page).toBe(1)
+      // round from the last page to the first, and back
+      send(0x9a, 8, 127)
+      expect(state.page).toBe(0)
+      send(0x9a, 9, 127)
+      expect(state.page).toBe(1)
+      vi.advanceTimersByTime(ECHO_MS)
+      expect(sent.filter(([status]) => status === 0x9a)).toEqual([
+        [0x9a, 8, 1],
+        [0x9a, 9, 1],
+      ])
+      // the post chip's strip is the macros alone, one page
+      sent.length = 0
+      state.chip = 'post'
+      state.page = 0
+      vi.advanceTimersByTime(ECHO_MS)
+      expect(sent.filter(([status]) => status === 0x9a)).toEqual([
+        [0x9a, 8, 0],
+        [0x9a, 9, 0],
+      ])
+      stop()
+    })
   })
 })

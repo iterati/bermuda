@@ -4,6 +4,8 @@ import { capturePreset } from './motion'
 import {
   BACKGROUNDS,
   CELLS,
+  chipKnobs,
+  folded,
   FEATURES,
   FORMLESS,
   KINDS,
@@ -12,11 +14,14 @@ import {
   LINES,
   LISTENS,
   parseBank,
+  parseControls,
   parseFader,
   parseScene,
   resolve,
   SHAPES,
+  strip,
   type Address,
+  type Controls,
   VARIATIONS,
   type Bank,
   type Fader,
@@ -213,6 +218,162 @@ describe('the knob kinds', () => {
       expect(shows(scene({ name: 'dots', levels: [level('a')], line: 'dots', dots }), at)).toBe(true)
       expect(shows(scene({ name: 'glow', levels: [level('a')], line: 'glow', dots }), at)).toBe(false)
     }
+  })
+})
+
+describe('the Perform strip', () => {
+  const t1 = LOOKS.find((l) => l.name.startsWith('Tapestry 1 '))!
+
+  it("runs a look's macros in order, then the picked chip's top knobs that show", () => {
+    const sq1 = [
+      { macro: 'breathe' },
+      { macro: 'size' },
+      { macro: 'gain' },
+      { macro: 'music-tone' },
+      ...[
+        'affine.scale',
+        'affine.turn',
+        'lattice.e2[0]',
+        'lattice.e2[1]',
+        'variants[0].shape.m',
+        'variants[0].shape.r',
+        'variants[0].shape.round',
+        'colour.at',
+      ].map((k) => ({ knob: `levels[sq1].${k}` })),
+    ]
+    expect(strip(t1, 'sq1')).toEqual(sq1)
+    // a linked level plays its leader's knobs
+    expect(strip(t1, 'sq2')).toEqual(sq1)
+    expect(strip(t1, 'post')).toEqual(sq1.slice(0, 4))
+  })
+
+  it("leaves out a top knob its show rule says is dead, and takes a sub-chain level's own", () => {
+    const branching = LOOKS.find((l) => l.name === 'Remix - Branching cells')!
+    expect(chipKnobs(branching, 'sqA').every((k) => k.address.startsWith('levels[root].variants[1].below[sqA].'))).toBe(
+      true,
+    )
+    // the spokes are stars, so their m shows; a box has none
+    expect(strip(branching, 'sqA')).toContainEqual({ knob: 'levels[root].variants[1].below[sqA].variants[0].shape.m' })
+    const boxed = structuredClone(t1)
+    boxed.levels[0].variants[0].shape.kind = 'box'
+    expect(strip(boxed, 'sq1')).not.toContainEqual({ knob: 'levels[sq1].variants[0].shape.m' })
+  })
+})
+
+describe('folding', () => {
+  const t1 = LOOKS.find((l) => l.name.startsWith('Tapestry 1 '))!
+  const foldedOf = (s: Scene, chip: string) =>
+    chipKnobs(s, chip)
+      .filter((k) => folded(s, k))
+      .map((k) => k.address)
+
+  it("folds Tapestry 1's dead knobs and its untouched knobs at rest", () => {
+    expect(foldedOf(t1, 'sq1')).toEqual(
+      [
+        'weight',
+        'affine.offset[0]',
+        'affine.offset[1]',
+        'cell.turn',
+        'cell.phase',
+        'variants[0].share',
+        'colour.cellSpread',
+      ].map((k) => `levels[sq1].${k}`),
+    )
+    expect(foldedOf(t1, 'frame')).toEqual(['frame.origin[0]', 'frame.origin[1]', 'frame.turn'])
+    expect(foldedOf(t1, 'palette')).toEqual(['palette.contrast', 'palette.radius'])
+  })
+
+  it('keeps a knob at rest that a modulator, a spread, a play range, a preset or a MIDI control touches', () => {
+    const address = 'levels[sq1].weight'
+    const at = (s: Scene) =>
+      folded(
+        s,
+        knobsOf(s).find((k) => k.address === address)!,
+      )
+    expect(at(t1)).toBe(true)
+    const touched: ((s: Scene) => void)[] = [
+      (s) => s.modulators.push(mod('m', 'cos', 8, [[address, 0.2]])),
+      (s) => s.macros.push({ id: 'x', name: 'x', value: 0, targets: [{ knob: address, from: 0, to: 1 }] }),
+      (s) => (s.levels[0].weight.spread = 0.2),
+      (s) => (s.levels[0].weight.play = [0.5, 1]),
+      (s) => (s.levels[0].weight.glide = 2),
+      (s) => s.presets.push({ name: 'p', values: { [address]: 0.5 } }),
+      (s) => (s.midi = [{ channel: 1, control: 1, knob: address }]),
+    ]
+    for (const touch of touched) {
+      const s = structuredClone(t1)
+      touch(s)
+      expect(at(s)).toBe(false)
+    }
+  })
+
+  it("folds a hard line's falloff", () => {
+    const falloff = (s: Scene) =>
+      folded(
+        s,
+        knobsOf(s).find((k) => k.address === 'line.falloff')!,
+      )
+    expect(falloff(t1)).toBe(false)
+    expect(falloff({ ...t1, line: { ...t1.line, kind: 'hard' } })).toBe(true)
+  })
+})
+
+describe("the app's MIDI as JSON", () => {
+  it('round-trips the strip and the page buttons, and loads with no strip', () => {
+    const controls: Controls = {
+      buttons: [
+        { channel: 1, note: 8, page: 1 },
+        { channel: 1, note: 9, page: -1 },
+        { channel: 1, note: 10, slot: 2 },
+      ],
+      fader: { channel: 1, control: 9, pickup: true },
+      strip: Array.from({ length: 8 }, (_, index) => ({ channel: 11, control: index + 1, index })),
+    }
+    expect(parseControls(JSON.stringify(controls))).toEqual(controls)
+    expect(parseControls({ buttons: [] })).toEqual({ buttons: [] })
+  })
+
+  it.each([
+    ['a page step of 2', { buttons: [{ channel: 1, note: 8, page: 2 }] }, /^buttons\[0\]\.page: must be one of 1, -1/],
+    [
+      'a button with a slot and a page',
+      { buttons: [{ channel: 1, note: 8, slot: 0, page: 1 }] },
+      /^buttons\[0\]: must name one slot, one mode or one page step/,
+    ],
+    [
+      'a slot index of 8',
+      { buttons: [], strip: [{ channel: 1, control: 1, index: 8 }] },
+      /^strip\[0\]\.index: 8 is outside 0 to 7/,
+    ],
+    [
+      'a CC on two slots',
+      {
+        buttons: [],
+        strip: [
+          { channel: 1, control: 1, index: 0 },
+          { channel: 1, control: 1, index: 1 },
+        ],
+      },
+      /^strip\[1\]: channel 1 number 1 is mapped twice/,
+    ],
+    [
+      'a CC on the A/B fader and a slot',
+      { buttons: [], fader: { channel: 1, control: 1 }, strip: [{ channel: 1, control: 1, index: 0 }] },
+      /^strip\[0\]: channel 1 number 1 is mapped twice/,
+    ],
+    [
+      'a slot with two CCs',
+      {
+        buttons: [],
+        strip: [
+          { channel: 1, control: 1, index: 3 },
+          { channel: 1, control: 2, index: 3 },
+        ],
+      },
+      /^strip\[1\]\.index: slot 3 is mapped twice/,
+    ],
+  ])('refuses %s', (_, controls, message) => {
+    expect(() => parseControls(controls)).toThrow(message)
   })
 })
 

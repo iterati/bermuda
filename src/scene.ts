@@ -96,13 +96,19 @@ export type Macro = {
 // takes pickup: it drives only once it passes the value it drives.
 export type MidiTarget = { knob: Address } | { macro: string }
 export type Midi = { channel: number; control: number; pickup?: true } & MidiTarget
-// A controller's button, a note on its channel, for the whole app: it loads a bank slot or picks a view, and its
-// LED is lit while that slot or view is on.
-export type TriggerTarget = { slot: number } | { mode: View }
+// A controller's button, a note on its channel, for the whole app: it loads a bank slot, picks a view or steps the
+// Perform strip's page forward or back, and its LED is lit while that slot or view is on, or while the strip has
+// more than one page.
+export type TriggerTarget = { slot: number } | { mode: View } | { page: 1 | -1 }
 export type Trigger = { channel: number; note: number } & TriggerTarget
-// The app's own MIDI, kept in the browser beside the looks: its buttons, and the CC on the A/B fader (with pickup
-// for a fader, as a look's mappings take it).
-export type Controls = { buttons: Trigger[]; fader?: { channel: number; control: number; pickup?: true } }
+// The app's own MIDI, kept in the browser beside the looks: its buttons, the CC on the A/B fader (with pickup
+// for a fader, as a look's mappings take it), and the CCs on the Perform strip's slots, index 0 to 7 of the page
+// showing, on every look.
+export type Controls = {
+  buttons: Trigger[]
+  fader?: { channel: number; control: number; pickup?: true }
+  strip?: { channel: number; control: number; index: number }[]
+}
 export type Edge = { seconds: number; stagger: number; deepFirst: boolean }
 // scenes: its entries, each a look's name or a look's and one of its presets' ('look / preset'); links: pairs of
 // entries, either way round; every: the autopilot's pace, in clock units between its changes
@@ -254,6 +260,7 @@ export type Kind = {
   help: string // one line: what turning it does
   top?: true // a kind a player reaches for: it fills the Perform strip after the macros
   shows?: (scene: Scene, at: KnobAt) => boolean // false: dead under the scene's current settings
+  rest?: number // the value at which it does nothing, the one level() and scene() give it (looks.ts)
 }
 // the echo rings can show: rings above 0, a spread on them, or a modulator or macro driving them
 const ringsShow = (scene: Scene) =>
@@ -311,11 +318,13 @@ export const KINDS: Record<string, Kind> = {
     range: [-4, 4],
     label: 'origin x',
     help: "which point of the plane sits at the screen's centre, across: slides the whole picture sideways",
+    rest: 0,
   },
   'frame.origin[1]': {
     range: [-4, 4],
     label: 'origin y',
     help: "which point of the plane sits at the screen's centre, up and down: slides the whole picture vertically",
+    rest: 0,
   },
   'frame.zoom': {
     range: [0.1, 8],
@@ -327,11 +336,13 @@ export const KINDS: Record<string, Kind> = {
     range: [-360, 360],
     label: 'turn',
     help: "turns the whole picture round the screen's centre, in degrees",
+    rest: 0,
   },
   'levels[].weight': {
     range: [0, 1],
     label: 'weight',
     help: 'how much of this level there is: 0 passes the plane through untouched and draws nothing, 1 is the whole level',
+    rest: 1,
   },
   'levels[].affine.scale': {
     range: [0.1, 8],
@@ -349,11 +360,13 @@ export const KINDS: Record<string, Kind> = {
     range: [-2, 2],
     label: 'offset x',
     help: "slides this level's grid sideways, in cells",
+    rest: 0,
   },
   'levels[].affine.offset[1]': {
     range: [-2, 2],
     label: 'offset y',
     help: "slides this level's grid up and down, in cells",
+    rest: 0,
   },
   'levels[].variations[].weight': {
     range: [-1, 2],
@@ -381,12 +394,14 @@ export const KINDS: Record<string, Kind> = {
     range: [-180, 180],
     label: 'cell turn',
     help: 'turns every cell and the levels below, in degrees: parity turns odd cells back, hash each cell either way, ring by how far out it is',
+    rest: 0,
   },
   'levels[].cell.phase': {
     range: [-1, 1],
     label: 'ring phase',
     help: "shifts this level's echo rings by part of their spacing (0.5 a whole ring); flipped cells shift back, ring by how far out; needs rings",
     shows: ringsShow,
+    rest: 0,
   },
   'levels[].cell.spill': {
     range: [0, 1],
@@ -422,6 +437,7 @@ export const KINDS: Record<string, Kind> = {
     range: [-180, 180],
     label: 'twist',
     help: "turns this variant's shape in its cell, in degrees; the levels below don't turn with it",
+    rest: 0,
   },
   'levels[].variants[].shape.form': {
     range: [0, 1],
@@ -500,22 +516,26 @@ export const KINDS: Record<string, Kind> = {
     range: [0, 1],
     label: 'colour speed',
     help: "how far this level's own colour takes over from the colour handed down from above: 0 keeps the inherited colour, 1 uses its own",
+    rest: 0.5,
   },
   'levels[].colour.cellSpread': {
     range: [0, 1],
     label: 'cell spread',
     help: "scatters each cell's colour round the palette from colour at, by up to this much, as far as colour speed lets it",
+    rest: 0,
   },
   'contour.rings': {
     range: [0, 24],
     label: 'rings',
     help: 'echo rings round each outline: 0 draws the outline alone, up to 1 fades it into rings, and above 1 packs the rings closer',
+    rest: 0,
   },
   'contour.drift': {
     range: [-8, 8],
     label: 'drift',
     help: 'how fast the echo rings flow in or out (the sign picks which), in radians a beat; needs rings',
     shows: ringsShow,
+    rest: 0,
   },
   'contour.radialWeight': {
     range: [-3, 3],
@@ -534,6 +554,7 @@ export const KINDS: Record<string, Kind> = {
     label: 'falloff',
     help: "how softly a line fades at its edge: a glow's, smooth or dotted line's power, a band's soft edge; hard lines don't use it",
     shows: (scene) => scene.line.kind !== 'hard',
+    rest: 1.2,
   },
   'line.dots.count': {
     range: [1, 64],
@@ -578,16 +599,19 @@ export const KINDS: Record<string, Kind> = {
     range: [0, 2],
     label: 'contrast',
     help: "spreads the palette's lightness away from the middle: 1 as the stops set it, 0 every colour at mid lightness",
+    rest: 1,
   },
   'palette.radius': {
     range: [-2, 2],
     label: 'radius',
     help: "colours by distance from the plane's centre: each unit out moves this far round the palette, before the levels take their own colours",
+    rest: 0.4,
   },
   'palette.time': {
     range: [-2, 2],
     label: 'time',
     help: 'cycles every colour round the palette, in turns a beat',
+    rest: 0,
   },
   'palette.trap.weight': {
     range: [-4, 4],
@@ -603,6 +627,7 @@ export const KINDS: Record<string, Kind> = {
     range: [0.5, 3],
     label: 'gamma',
     help: 'lifts the mid-tones above 1 and darkens them below; 1 leaves the lines as drawn',
+    rest: 2.2,
   },
 }
 export const STAR_N: [number, number] = [3, 16]
@@ -670,6 +695,48 @@ export function knobsOf(scene: Scene): KnobAt[] {
   const { background, frame, levels, contour, line, palette, post } = scene
   walk({ background, frame, levels, contour, line, palette, post }, '', undefined)
   return out
+}
+
+// The knobs a chip of the chain shows, in knobsOf order: a fixed part's, or a level's (a linked level's are its
+// leader's, which it plays).
+export function chipKnobs(scene: Scene, chip: string): KnobAt[] {
+  const all = knobsOf(scene)
+  if ((CHIPS as readonly string[]).includes(chip)) return all.filter((k) => k.address.startsWith(`${chip}.`))
+  const at = allLevels(scene.levels).find(({ level }) => level.id === chip)
+  const id = at?.level.link ?? chip
+  return all.filter((k) => k.level?.level.id === id)
+}
+
+// The Perform strip: every macro of the scene, then the chip's top knobs that are not dead. Its pages are runs of 8.
+export function strip(scene: Scene, chip: string): MidiTarget[] {
+  return [
+    ...scene.macros.map((m) => ({ macro: m.id })),
+    ...chipKnobs(scene, chip)
+      .filter((at) => {
+        const kind = knobKind(at.address)
+        return kind.top && (!kind.shows || kind.shows(scene, at))
+      })
+      .map((at) => ({ knob: at.address })),
+  ]
+}
+export const STRIP = 8
+
+// A knob to fold out of sight: dead under the scene's settings, or at its kind's rest and untouched, with no spread,
+// play range or glide, no modulator or macro on it, no preset holding it elsewhere and no MIDI control on it.
+export function folded(scene: Scene, at: KnobAt): boolean {
+  const kind = knobKind(at.address)
+  if (kind.shows && !kind.shows(scene, at)) return true
+  const { address, knob } = at
+  const still = (v: number) => kind.rest !== undefined && Math.abs(v - kind.rest) < 1e-9
+  return (
+    still(knob.value) &&
+    !knob.spread &&
+    !knob.play &&
+    !knob.glide &&
+    ![...scene.modulators, ...scene.macros].some((m) => m.targets.some((t) => t.knob === address)) &&
+    scene.presets.every((p) => !(address in p.values) || still(p.values[address])) &&
+    !scene.midi?.some((m) => 'knob' in m && m.knob === address)
+  )
 }
 
 const isLevel = (v: unknown): v is Level => !!v && typeof v === 'object' && 'id' in v && 'affine' in v
@@ -904,18 +971,22 @@ function midiControl(x: Json, at: string, field: 'control' | 'note', seen: Set<s
   return out
 }
 
-// Parse the app's own MIDI (text or a parsed value), as strictly as a scene.
+// Parse the app's own MIDI (text or a parsed value), as strictly as a scene. A CC drives one thing: the A/B
+// fader or one slot of the strip.
 export function parseControls(input: unknown): Controls {
   const v = typeof input === 'string' ? (JSON.parse(input) as unknown) : input
-  const o = obj(v, '', ['buttons'], ['fader'])
+  const o = obj(v, '', ['buttons'], ['fader', 'strip'])
   const notes = new Set<string>()
+  const ccs = new Set<string>()
   const out: Controls = {
     buttons: list(o.buttons, 'buttons', 0, 256).map((item, i): Trigger => {
       const at = `buttons[${i}]`
-      const x = obj(item, at, ['channel', 'note'], ['slot', 'mode'])
+      const x = obj(item, at, ['channel', 'note'], ['slot', 'mode', 'page'])
       const [channel, note] = midiControl(x, at, 'note', notes)
-      if ((x.slot === undefined) === (x.mode === undefined)) fail(at, 'must name one slot or one mode')
+      if ([x.slot, x.mode, x.page].filter((t) => t !== undefined).length !== 1)
+        fail(at, 'must name one slot, one mode or one page step')
       if (x.mode !== undefined) return { channel, note, mode: oneOf(x.mode, `${at}.mode`, VIEWS) }
+      if (x.page !== undefined) return { channel, note, page: oneOf(x.page, `${at}.page`, [1, -1] as const) }
       const slot = num(x.slot, `${at}.slot`, [0, 255])
       if (!Number.isInteger(slot)) fail(`${at}.slot`, 'must be a whole number')
       return { channel, note, slot }
@@ -923,9 +994,22 @@ export function parseControls(input: unknown): Controls {
   }
   if (o.fader !== undefined) {
     const x = obj(o.fader, 'fader', ['channel', 'control'], ['pickup'])
-    const [channel, control] = midiControl(x, 'fader', 'control', new Set())
+    const [channel, control] = midiControl(x, 'fader', 'control', ccs)
     if (x.pickup !== undefined && x.pickup !== true) fail('fader.pickup', 'must be true when given')
     out.fader = x.pickup === true ? { channel, control, pickup: true } : { channel, control }
+  }
+  if (o.strip !== undefined) {
+    const slots = new Set<number>()
+    out.strip = list(o.strip, 'strip', 0, STRIP).map((item, i) => {
+      const at = `strip[${i}]`
+      const x = obj(item, at, ['channel', 'control', 'index'])
+      const [channel, control] = midiControl(x, at, 'control', ccs)
+      const index = num(x.index, `${at}.index`, [0, STRIP - 1])
+      if (!Number.isInteger(index)) fail(`${at}.index`, 'must be a whole number')
+      if (slots.has(index)) fail(`${at}.index`, `slot ${index} is mapped twice`)
+      slots.add(index)
+      return { channel, control, index }
+    })
   }
   return out
 }

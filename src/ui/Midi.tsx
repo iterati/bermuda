@@ -1,8 +1,8 @@
 // The MIDI block: the controller's connection, what is learning a control, the look's mappings (each to follow
-// to its knob, to give pickup as a fader, or to drop), the A/B fader's control, and the app's buttons (each to
-// drop), and learning a button.
+// to its knob, to give pickup as a fader, or to drop), the A/B fader's control, the strip's encoders (learned in
+// turn, slot 1 to 8, and dropped at once), and the app's buttons (each to drop), and learning a button.
 import { useState } from 'react'
-import { HAS_MIDI, keyOf, label, mappingOf, positionOf, same, unmap, waiting, type Learning } from '../midi'
+import { HAS_MIDI, keyOf, label, mappingOf, positionOf, release, same, unmap, waiting, type Learning } from '../midi'
 import { VIEWS, type Controls, type MidiTarget, type Scene, type TriggerTarget, type View } from '../scene'
 import { useCtl } from './controls'
 import { short } from './Knob'
@@ -33,10 +33,16 @@ export function Midi({ connected, inputs, onConnect, looks, controls, fader, onC
           ? 'the A/B fader'
           : 'slot' in t
             ? `look ${t.slot + 1}${looks[t.slot] ? ` · ${looks[t.slot].name}` : ''}`
-            : VIEW_NAMES[t.mode]
+            : 'strip' in t
+              ? `slot ${t.strip + 1} of the strip`
+              : 'page' in t
+                ? `${t.page > 0 ? 'next' : 'previous'} strip page`
+                : VIEW_NAMES[t.mode]
   const picked: TriggerTarget = button.startsWith('slot ')
     ? { slot: Number(button.slice(5)) }
-    : { mode: button as View }
+    : button.startsWith('page ')
+      ? { page: button === 'page 1' ? 1 : -1 }
+      : { mode: button as View }
   const learningPicked = !!learning && same(learning, picked)
   return (
     <div className="panel-block">
@@ -56,9 +62,16 @@ export function Midi({ connected, inputs, onConnect, looks, controls, fader, onC
       </div>
       {learning && (
         <div className="midi-learning">
-          <span>
-            {'slot' in learning || 'mode' in learning ? 'press a button' : 'move a control'} for <b>{name(learning)}</b>
-          </span>
+          {'strip' in learning ? (
+            <span>
+              turn the encoder for <b>slot {learning.strip + 1}</b>
+            </span>
+          ) : (
+            <span>
+              {'slot' in learning || 'mode' in learning || 'page' in learning ? 'press a button' : 'move a control'} for{' '}
+              <b>{name(learning)}</b>
+            </span>
+          )}
           <button className="mini" title="Esc" onClick={() => learn(null)}>
             cancel
           </button>
@@ -135,7 +148,10 @@ export function Midi({ connected, inputs, onConnect, looks, controls, fader, onC
                   />
                   fader
                 </label>
-                <button className="mini" onClick={() => onControls({ buttons: controls.buttons })}>
+                <button
+                  className="mini"
+                  onClick={() => onControls(release(controls, controls.fader!.channel, controls.fader!.control))}
+                >
                   ×
                 </button>
               </>
@@ -152,6 +168,33 @@ export function Midi({ connected, inputs, onConnect, looks, controls, fader, onC
           {controls.fader && waiting(controls.fader, fader, positions) && (
             <div className="pickup">waiting: move the fader to {percent(fader)}</div>
           )}
+          <span className="target">
+            <span>strip</span>
+            {controls.strip?.length ? (
+              <>
+                <span className="dim">
+                  {[...controls.strip]
+                    .sort((a, b) => a.index - b.index)
+                    .map((x) => `${x.index + 1} ch${x.channel} cc${x.control}`)
+                    .join(', ')}
+                </span>
+                <button
+                  className="mini"
+                  title="forget the strip's encoders"
+                  onClick={() => onControls({ ...controls, strip: [] })}
+                >
+                  ×
+                </button>
+              </>
+            ) : null}
+            <button
+              className={`mini${learning && 'strip' in learning ? ' learning' : ''}`}
+              title="map the next 8 encoders you turn to the strip's 8 slots, in turn, on every look (Esc stops)"
+              onClick={() => learn(learning && 'strip' in learning ? null : { strip: 0 })}
+            >
+              {learning && 'strip' in learning ? 'turn an encoder…' : 'learn the strip'}
+            </button>
+          </span>
         </div>
       )}
       {HAS_MIDI && (
@@ -170,6 +213,8 @@ export function Midi({ connected, inputs, onConnect, looks, controls, fader, onC
                     {VIEW_NAMES[v]}
                   </option>
                 ))}
+                <option value="page 1">next strip page</option>
+                <option value="page -1">previous strip page</option>
               </select>
             </label>
             <button

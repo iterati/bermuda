@@ -159,6 +159,8 @@ const tempo = () =>
 describe('music', { timeout: 60_000 }, () => {
   it("a song sets the clock's tempo to its own while it is heard", async () => {
     await view('Stage')
+    // the Music block is a tab of Stage's right column
+    await page.$$eval('.tabs button', (tabs) => tabs.find((t) => t.textContent === 'Music')!.click())
     const input = (await page.$('label[title^="hear a song"] input'))!
     await input.uploadFile(clickTrack(120, 30))
     await page.waitForFunction(

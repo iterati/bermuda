@@ -1,6 +1,6 @@
 // The controls of each chip of the chain: background, frame, a level, contour, line, palette, post.
 // Stage shows the picked chip's; Edit shows every chip's at once.
-import { createContext, useContext, type ReactNode } from 'react'
+import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
 import { COSINES, css, paletteAt, stopsFromCosine } from '../colour'
 import {
   addSubChain,
@@ -18,8 +18,10 @@ import {
   BACKGROUNDS,
   CELLS,
   clamp,
+  folded,
   hardRange,
   LATTICES,
+  knobsOf,
   LINES,
   MAX_STOPS,
   MAX_VARIANTS,
@@ -32,6 +34,7 @@ import {
   VARIATIONS,
   type Address,
   type LatticeKind,
+  type MidiTarget,
   type Level,
   type Scene,
   type Shape,
@@ -47,7 +50,7 @@ export type Ctl = {
   setFocus: (address: Address) => void
   edit: (fn: (draft: Scene) => void) => void
   setKnob: (address: Address, value: number) => void
-  nudge: (address: Address, steps: number) => void // steps of 1% of its range, up for more
+  nudge: (t: MidiTarget, steps: number) => void // steps of 1% of a knob's range or a macro's 0 to 1, up for more
   pick: (chip: string) => void
   learning: Learning | null // what the next MIDI control or button maps to
   learn: (target: Learning | null) => void
@@ -171,6 +174,43 @@ const Group = ({ title, children, actions }: { title: string; children: ReactNod
   </div>
 )
 
+// A row: its title, its menus, pad and buttons (children), then its knobs; the knobs that fold (dead, or at rest
+// and untouched) go into a +N at its end, which opens the row to show them. A focused knob never folds.
+function Row({ title, knobs, children }: { title?: string; knobs: [string, Address][]; children?: ReactNode }) {
+  const { scene, focus } = useCtl()
+  const [open, setOpen] = useState(false)
+  // the scene holds still between frames, while the live one moves
+  const all = useMemo(() => knobsOf(scene), [scene])
+  const hidden = knobs.filter(
+    ([, at]) =>
+      at !== focus &&
+      folded(
+        scene,
+        all.find((k) => k.address === at)!,
+      ),
+  )
+  return (
+    <div className="row">
+      {title && <span className="row-title">{title}</span>}
+      {children}
+      {knobs
+        .filter((k) => open || !hidden.includes(k))
+        .map(([label, at]) => (
+          <Knob key={at} label={label} at={at} />
+        ))}
+      {hidden.length > 0 && (
+        <button
+          className="mini fold"
+          title={hidden.map(([label]) => label).join(' · ')}
+          onClick={() => setOpen((o) => !o)}
+        >
+          {open ? '−' : `+${hidden.length}`}
+        </button>
+      )}
+    </div>
+  )
+}
+
 export function Section({ chip }: { chip: string }) {
   switch (chip) {
     case 'background':
@@ -178,18 +218,26 @@ export function Section({ chip }: { chip: string }) {
     case 'frame':
       return (
         <Group title="Frame">
-          <Knob label="origin x" at="frame.origin[0]" />
-          <Knob label="origin y" at="frame.origin[1]" />
-          <Knob label="zoom" at="frame.zoom" />
-          <Knob label="turn" at="frame.turn" />
+          <Row
+            knobs={[
+              ['origin x', 'frame.origin[0]'],
+              ['origin y', 'frame.origin[1]'],
+              ['zoom', 'frame.zoom'],
+              ['turn', 'frame.turn'],
+            ]}
+          />
         </Group>
       )
     case 'contour':
       return (
         <Group title="Contour">
-          <Knob label="rings" at="contour.rings" />
-          <Knob label="drift" at="contour.drift" />
-          <Knob label="radial wt" at="contour.radialWeight" />
+          <Row
+            knobs={[
+              ['rings', 'contour.rings'],
+              ['drift', 'contour.drift'],
+              ['radial wt', 'contour.radialWeight'],
+            ]}
+          />
         </Group>
       )
     case 'line':
@@ -256,33 +304,38 @@ function LineSection() {
   const { scene, edit } = useCtl()
   return (
     <Group title="Line">
-      <Choice
-        label="kind"
-        value={scene.line.kind}
-        options={LINES}
-        onChange={(v) =>
-          edit((d) => {
-            d.line.kind = v
-            // dots keep their knobs when the kind moves on, so a way back finds them as they were
-            if (v === 'dots') d.line.dots ??= { count: { value: 16 }, size: { value: 0.3 }, crawl: { value: 1 } }
-          })
-        }
-      />
-      <Choice
-        label="units"
-        value={scene.line.units}
-        options={['cell', 'screen'] as const}
-        onChange={(v) => edit((d) => (d.line.units = v))}
-      />
-      <Knob label="width" at="line.width" />
-      <Knob label="falloff" at="line.falloff" />
-      {scene.line.kind === 'dots' && (
-        <>
-          <Knob label="dots" at="line.dots.count" />
-          <Knob label="dot size" at="line.dots.size" />
-          <Knob label="crawl" at="line.dots.crawl" />
-        </>
-      )}
+      <Row
+        knobs={[
+          ['width', 'line.width'],
+          ['falloff', 'line.falloff'],
+          ...(scene.line.kind === 'dots'
+            ? ([
+                ['dots', 'line.dots.count'],
+                ['dot size', 'line.dots.size'],
+                ['crawl', 'line.dots.crawl'],
+              ] as [string, Address][])
+            : []),
+        ]}
+      >
+        <Choice
+          label="kind"
+          value={scene.line.kind}
+          options={LINES}
+          onChange={(v) =>
+            edit((d) => {
+              d.line.kind = v
+              // dots keep their knobs when the kind moves on, so a way back finds them as they were
+              if (v === 'dots') d.line.dots ??= { count: { value: 16 }, size: { value: 0.3 }, crawl: { value: 1 } }
+            })
+          }
+        />
+        <Choice
+          label="units"
+          value={scene.line.units}
+          options={['cell', 'screen'] as const}
+          onChange={(v) => edit((d) => (d.line.units = v))}
+        />
+      </Row>
     </Group>
   )
 }
@@ -291,19 +344,20 @@ function PostSection() {
   const { scene, edit } = useCtl()
   return (
     <Group title="Composite and post">
-      <Choice
-        label="composite"
-        value={scene.composite}
-        options={['add', 'first'] as const}
-        onChange={(v) => edit((d) => (d.composite = v))}
-      />
-      <Choice
-        label="AA"
-        value={scene.post.aa}
-        options={[1, 2, 3] as const}
-        onChange={(v) => edit((d) => (d.post.aa = v))}
-      />
-      <Knob label="gamma" at="post.gamma" />
+      <Row knobs={[['gamma', 'post.gamma']]}>
+        <Choice
+          label="composite"
+          value={scene.composite}
+          options={['add', 'first'] as const}
+          onChange={(v) => edit((d) => (d.composite = v))}
+        />
+        <Choice
+          label="AA"
+          value={scene.post.aa}
+          options={[1, 2, 3] as const}
+          onChange={(v) => edit((d) => (d.post.aa = v))}
+        />
+      </Row>
     </Group>
   )
 }
@@ -337,10 +391,14 @@ function PaletteSection() {
           background: `linear-gradient(90deg, ${Array.from({ length: 33 }, (_, i) => css(paletteAt(live.palette, i / 32))).join(', ')})`,
         }}
       />
-      <Knob label="hue" at="palette.hue" />
-      <Knob label="contrast" at="palette.contrast" />
-      <Knob label="radius" at="palette.radius" />
-      <Knob label="time" at="palette.time" />
+      <Row
+        knobs={[
+          ['hue', 'palette.hue'],
+          ['contrast', 'palette.contrast'],
+          ['radius', 'palette.radius'],
+          ['time', 'palette.time'],
+        ]}
+      />
       {scene.palette.trap ? (
         <span className="pair">
           <Knob label="trap" at="palette.trap.weight" />
@@ -504,13 +562,15 @@ function LevelSection({ id }: { id: string }) {
     )
   return (
     <Group title={`Level ${id}`} actions={actions}>
-      <div className="row">
-        <Knob label="weight" at={`${at}.weight`} />
-        <Knob label="scale" at={`${at}.affine.scale`} />
-        <Knob label="turn" at={`${at}.affine.turn`} />
-        <Knob label="offset x" at={`${at}.affine.offset[0]`} />
-        <Knob label="offset y" at={`${at}.affine.offset[1]`} />
-      </div>
+      <Row
+        knobs={[
+          ['weight', `${at}.weight`],
+          ['scale', `${at}.affine.scale`],
+          ['turn', `${at}.affine.turn`],
+          ['offset x', `${at}.affine.offset[0]`],
+          ['offset y', `${at}.affine.offset[1]`],
+        ]}
+      />
       <div className="row">
         <span className="row-title">variations</span>
         {level.variations.map((v, i) => (
@@ -552,13 +612,16 @@ function LevelSection({ id }: { id: string }) {
           </button>
         )}
       </div>
-      <div className="row">
-        <span className="row-title">lattice</span>
+      <Row
+        title="lattice"
+        knobs={[
+          [E2_LABELS[kind][0], `${at}.lattice.e2[0]`],
+          [E2_LABELS[kind][1], `${at}.lattice.e2[1]`],
+          ...(kind === 'voronoi' ? ([['jitter', `${at}.lattice.jitter`]] as [string, Address][]) : []),
+        ]}
+      >
         <Choice label="kind" value={kind} options={LATTICES} onChange={(to) => edit((d) => setLattice(d, id, to))} />
         <LatticePad at={at} kind={kind} />
-        <Knob label={E2_LABELS[kind][0]} at={`${at}.lattice.e2[0]`} />
-        <Knob label={E2_LABELS[kind][1]} at={`${at}.lattice.e2[1]`} />
-        {kind === 'voronoi' && <Knob label="jitter" at={`${at}.lattice.jitter`} />}
         {level.lattice.sectors !== undefined && (
           <Stepper
             label="sectors"
@@ -581,17 +644,20 @@ function LevelSection({ id }: { id: string }) {
         >
           snap
         </button>
-      </div>
-      <div className="row">
-        <span className="row-title">cell</span>
+      </Row>
+      <Row
+        title="cell"
+        knobs={[
+          ['cell turn', `${at}.cell.turn`],
+          ['ring phase', `${at}.cell.phase`],
+        ]}
+      >
         <Choice
           label="turn by"
           value={level.cell.by}
           options={CELLS}
           onChange={(by) => edit((d) => (findLevel(d, id).level.cell.by = by))}
         />
-        <Knob label="cell turn" at={`${at}.cell.turn`} />
-        <Knob label="ring phase" at={`${at}.cell.phase`} />
         {SPILLS.includes(kind) && (
           <Extra
             label="spill"
@@ -607,12 +673,14 @@ function LevelSection({ id }: { id: string }) {
             }
           />
         )}
-      </div>
+      </Row>
       {level.variants.map((v, i) => (
-        <div className="row variant" key={i}>
-          <span className="row-title">{level.variants.length > 1 ? `variant ${i + 1}` : 'shape'}</span>
-          {level.variants.length > 1 && <Knob label="share" at={`${at}.variants[${i}].share`} />}
-          <ShapeKnobs
+        <Row
+          key={i}
+          title={level.variants.length > 1 ? `variant ${i + 1}` : 'shape'}
+          knobs={[['share', `${at}.variants[${i}].share`], ...shapeKnobs(`${at}.variants[${i}].shape`, v.shape)]}
+        >
+          <ShapeMenus
             at={`${at}.variants[${i}].shape`}
             shape={v.shape}
             change={(fn) =>
@@ -676,14 +744,14 @@ function LevelSection({ id }: { id: string }) {
               ×
             </button>
           )}
-        </div>
+        </Row>
       ))}
       {level.variants.map(
         ({ shape }, i) =>
           shape.join && (
             <div className="row variant" key={`join${i}`}>
               <span className="row-title">{level.variants.length > 1 ? `join ${i + 1}` : 'join'}</span>
-              <ShapeKnobs
+              <ShapeMenus
                 at={`${at}.variants[${i}].shape.join.shape`}
                 shape={shape.join.shape}
                 change={(fn) =>
@@ -693,6 +761,9 @@ function LevelSection({ id }: { id: string }) {
                   })
                 }
               />
+              {shapeKnobs(`${at}.variants[${i}].shape.join.shape`, shape.join.shape).map(([label, a]) => (
+                <Knob key={a} label={label} at={a} />
+              ))}
               <Knob label="offset x" at={`${at}.variants[${i}].shape.join.offset[0]`} />
               <Knob label="offset y" at={`${at}.variants[${i}].shape.join.offset[1]`} />
               <Knob label="blend" at={`${at}.variants[${i}].shape.join.blend`} />
@@ -729,12 +800,14 @@ function LevelSection({ id }: { id: string }) {
           </button>
         )}
       </div>
-      <div className="row">
-        <span className="row-title">colour</span>
-        <Knob label="at" at={`${at}.colour.at`} />
-        <Knob label="speed" at={`${at}.colour.speed`} />
-        <Knob label="cell spread" at={`${at}.colour.cellSpread`} />
-      </div>
+      <Row
+        title="colour"
+        knobs={[
+          ['at', `${at}.colour.at`],
+          ['speed', `${at}.colour.speed`],
+          ['cell spread', `${at}.colour.cellSpread`],
+        ]}
+      />
     </Group>
   )
 }
@@ -762,11 +835,23 @@ const FORM: Partial<Record<ShapeKind, string>> = {
   stairs: 'steepness',
 }
 
-// A shape's controls: its kind, the star's points and m (the stairs' steps), a kind's form, its size, round, twist
-// and corner; change edits the shape on a draft, then prunes what pointed at a knob it dropped.
-function ShapeKnobs({ at, shape, change }: { at: Address; shape: Shape; change: (fn: (s: Shape) => void) => void }) {
+// A shape's knobs: the star's m, a kind's form, its size, round and twist.
+function shapeKnobs(at: Address, shape: Shape): [string, Address][] {
   const kind = shape.kind ?? 'star'
   const form = FORM[kind]
+  return [
+    ...(kind === 'star' ? ([['m', `${at}.m`]] as [string, Address][]) : []),
+    ...(form ? ([[form, `${at}.form`]] as [string, Address][]) : []),
+    ['r', `${at}.r`],
+    ['round', `${at}.round`],
+    ['twist', `${at}.twist`],
+  ]
+}
+
+// A shape's menus: its kind, the star's points (the stairs' steps) and its corner; change edits the shape on a
+// draft, then prunes what pointed at a knob it dropped.
+function ShapeMenus({ at, shape, change }: { at: Address; shape: Shape; change: (fn: (s: Shape) => void) => void }) {
+  const kind = shape.kind ?? 'star'
   return (
     <>
       <Choice
@@ -790,11 +875,6 @@ function ShapeKnobs({ at, shape, change }: { at: Address; shape: Shape; change: 
           onChange={(n) => change((s) => (s.n = n))}
         />
       )}
-      {kind === 'star' && <Knob label="m" at={`${at}.m`} />}
-      {form && <Knob label={form} at={`${at}.form`} />}
-      <Knob label="r" at={`${at}.r`} />
-      <Knob label="round" at={`${at}.round`} />
-      <Knob label="twist" at={`${at}.twist`} />
       <Extra
         label="corner"
         at={`${at}.corner`}

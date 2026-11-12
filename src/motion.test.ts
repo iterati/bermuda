@@ -3,7 +3,7 @@ import { moveLevel, removeLevel } from './edit'
 import { level, LOOKS, mod, scene, star } from './looks'
 import { gcd } from './loop'
 import { advance, applyPreset, capturePreset, detunePeriods, newLive, setMacro, update, wave } from './motion'
-import { FEATURES, knobsOf, type Listen, type Modulator, type Scene } from './scene'
+import { FEATURES, hardRange, knobsOf, resolve, type Listen, type Modulator, type Scene } from './scene'
 import type { Heard } from './music'
 
 const base = () =>
@@ -210,6 +210,36 @@ describe('the built-in looks', () => {
     for (const look of LOOKS) {
       const knobs = knobsOf(look).map((k) => k.knob)
       expect(new Set(knobs).size, look.name).toBe(knobs.length)
+    }
+  })
+
+  it('have 3 to 5 macros each', () => {
+    for (const look of LOOKS) expect(look.macros.length, look.name).toSatisfy((n: number) => n >= 3 && n <= 5)
+  })
+
+  // the default macros, Breathing lattice's and Square to hex's, and the music's tone
+  const DEFAULTS = ['breathe', 'morph', 'character', 'size', 'hue', 'gain', 'lattice', 'music-tone']
+
+  it('move nothing at their own values, the defaults and Square to hex', () => {
+    for (const look of LOOKS)
+      for (const m of look.macros.filter((m) => DEFAULTS.includes(m.id))) {
+        const moved = update(look, (d) => setMacro(d, m.id, m.value))
+        for (const { knob } of m.targets) {
+          const [lo, hi] = hardRange(knob)
+          expect(
+            Math.abs(resolve(moved, knob)!.value - resolve(look, knob)!.value),
+            `${look.name}: ${m.name}, ${knob}`,
+          ).toBeLessThan((hi - lo) / 1000)
+        }
+      }
+  })
+
+  it('aim no macro at a linked level, which plays its leader knobs', () => {
+    for (const look of LOOKS) {
+      const at = new Map(knobsOf(look).map((k) => [k.address, k]))
+      for (const m of look.macros)
+        for (const { knob } of m.targets)
+          expect(at.get(knob)!.level?.level.link, `${look.name}: ${knob}`).toBeUndefined()
     }
   })
 })

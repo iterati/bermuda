@@ -176,6 +176,66 @@ button {
   margin-left: 200px; /* clear of the chain */
   padding: 6px 10px;
 }
+/* the Perform strip: 8 big knobs, each in its own place, an empty one kept; the pager and more beside them */
+.perform {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.perform .slot {
+  flex: none;
+  width: 84px;
+  height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.perform .knob {
+  width: 80px;
+}
+.perform .knob svg {
+  width: 64px;
+  height: 64px;
+}
+.perform .knob-value {
+  font-size: 13px;
+}
+.perform .knob-label {
+  font-size: 11px;
+  max-width: 80px;
+}
+.perform-side {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.strip-back {
+  float: right;
+  margin-left: 8px;
+}
+/* the right column's tabs, one block at a time under them */
+.tabs {
+  display: flex;
+  margin-bottom: 8px;
+}
+.tabs button {
+  flex: 1;
+  padding: 3px 4px;
+}
+/* a block title's menus keep inside the column */
+.block-title select.mini {
+  max-width: 150px;
+}
 
 /* the fader from A to B: on Stage it floats at the top, between the chain and the bank */
 .stage .top {
@@ -540,6 +600,9 @@ button {
 .knob.modulated .value {
   stroke: var(--mod);
 }
+.knob.macro .value {
+  stroke: #ffc878;
+}
 .knob .live {
   fill: #fff;
 }
@@ -718,6 +781,17 @@ button {
   align-items: center;
   gap: 6px;
   justify-content: space-between;
+}
+.mod-line {
+  cursor: pointer;
+}
+.mod-sum {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .mod-row {
   display: flex;

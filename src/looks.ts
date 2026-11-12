@@ -4,7 +4,7 @@
 import { stopsFromCosine } from './colour'
 import { update } from './motion'
 import { blend, wire } from './music'
-import { FORMLESS } from './scene'
+import { FORMLESS, kindOf, knobKind, knobsOf, playRange } from './scene'
 import type {
   Address,
   Bank,
@@ -229,6 +229,47 @@ const palettePreset = (name: string, cosine: string): Preset => ({
 })
 
 const spokes = (n: number, r: number) => star(n, n, r)
+
+// A look's default macros, the Perform strip's first knobs, for the groups its knobs move together: Breathe the
+// levels' scale (those a modulator on the clock moves, else every level's), Morph the rounds and Character the
+// stars' m such a modulator moves (or, for m, a play range), Size every shape's r, Hue the palette's hue, and Gain
+// the radial weight where such a modulator moves it. Each runs its knobs either side of the look's value, inside
+// their play ranges, so at its own value, 0.5, it moves nothing; a Morph of rounds all 0 runs them 0 to 1 from 0. A
+// linked level plays its leader's knobs, so it is left out, and so is a knob a macro of the look holds already.
+function defaults(look: Scene): Macro[] {
+  const moved = (address: Address) =>
+    look.modulators.some((m) => !m.listen && m.targets.some((t) => t.knob === address))
+  const held = new Set(look.macros.flatMap((m) => m.targets.map((t) => t.knob)))
+  const free = knobsOf(look).filter((k) => !k.level?.level.link && !held.has(k.address))
+  const of = (kind: string) => free.filter((k) => kindOf(k.address) === kind)
+  const scales = of('levels[].affine.scale')
+  const groups: [string, typeof free, (v: number) => number][] = [
+    ['Breathe', scales.some((k) => moved(k.address)) ? scales.filter((k) => moved(k.address)) : scales, (v) => v / 4],
+    ['Morph', of('levels[].variants[].shape.round').filter((k) => moved(k.address)), () => 0.5],
+    [
+      'Character',
+      // a star's m alone: no other kind reads it
+      of('levels[].variants[].shape.m').filter(
+        (k) => (moved(k.address) || k.knob.play) && knobKind(k.address).shows!(look, k),
+      ),
+      () => 2,
+    ],
+    ['Size', of('levels[].variants[].shape.r'), (v) => 0.4 * v],
+    ['Hue', of('palette.hue'), () => 180],
+    ['Gain', of('contour.radialWeight').filter((k) => moved(k.address)), () => 1.5],
+  ]
+  return groups.flatMap(([name, knobs, span]) => {
+    if (name === 'Morph' && knobs.length && knobs.every((k) => k.knob.value === 0))
+      return [{ id: 'morph', name, value: 0, targets: knobs.map((k) => ({ knob: k.address, from: 0, to: 1 })) }]
+    const targets = knobs.flatMap(({ address, knob }) => {
+      const v = knob.value
+      const [lo, hi] = playRange(address, knob)
+      const s = Math.min(span(v), v - lo, hi - v)
+      return s > 1e-9 ? [{ knob: address, from: v - s, to: v + s }] : []
+    })
+    return targets.length ? [{ id: name.toLowerCase(), name, value: 0.5, targets }] : []
+  })
+}
 
 export const LOOKS: Scene[] = [
   scene({
@@ -1386,6 +1427,20 @@ export const LOOKS: Scene[] = [
     drift: 0.6,
     width: 0.003,
     palette: 'dusk',
+    macros: [
+      {
+        id: 'lattice',
+        name: 'Lattice',
+        value: 0.5,
+        // square at 0 and hex at 1, each end the look's value and a half-width either side
+        targets: [
+          { knob: 'levels[b1].lattice.e2[0]', from: 0, to: 0.5 },
+          { knob: 'levels[b1].lattice.e2[1]', from: 1, to: 0.866 },
+          { knob: 'levels[b1].affine.scale', from: 1.411, to: 1.729 },
+          { knob: 'levels[b1].affine.turn', from: 45, to: 30 },
+        ],
+      },
+    ],
     modulators: [
       mod('lattice', 'cos', 24, [
         ['levels[b1].lattice.e2[0]', 0.25, 0.4],
@@ -2326,7 +2381,15 @@ export const LOOKS: Scene[] = [
     }),
     (d) => blend(d, 0, 1),
   ),
-].map((look) => (look.modulators.some((m) => m.listen) ? look : update(look, wire)))
+]
+  .map((look) => (look.modulators.some((m) => m.listen) ? look : update(look, wire)))
+  // the default macros come before wire()'s tone macro, which holds the hue
+  .map((look) =>
+    update(look, (d) => {
+      const tone = d.macros.findIndex((m) => m.id === 'music-tone')
+      d.macros.splice(tone < 0 ? d.macros.length : tone, 0, ...defaults(d))
+    }),
+  )
 
 // The built-in bank: the four Tapestries and the twenty round the ring, each next to the ones it morphs into
 // best, and linked to the two or three of those.

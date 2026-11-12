@@ -8,9 +8,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { missingKeys, pruneTimeline, type Shot } from './direct'
 import { BANK, LOOKS } from './looks'
-import { attach, drive, echoes, HAS_MIDI, keyOf, learn, learnTrigger, takes, waiting, type Learning } from './midi'
+import {
+  attach,
+  drive,
+  driveStrip,
+  echoes,
+  HAS_MIDI,
+  keyOf,
+  learn,
+  learnStrip,
+  learnTrigger,
+  release,
+  takes,
+  unmapControl,
+  waiting,
+  type Learning,
+} from './midi'
 import { morphSize } from './morph'
-import { applyPreset, capturePreset, newLive, setKnob, update } from './motion'
+import { applyPreset, capturePreset, newLive, setKnob, setMacro, update } from './motion'
 import { listen, type Heard, type Listening } from './music'
 import {
   bendOf,
@@ -28,6 +43,7 @@ import {
 import {
   allLevels,
   CHIPS,
+  clamp,
   depthOf,
   hardRange,
   knobsOf,
@@ -38,10 +54,13 @@ import {
   parseScene,
   parseTimeline,
   resolve,
+  strip,
+  STRIP,
   type Address,
   type Bank as BankShape,
   type Controls,
   type Edge,
+  type MidiTarget,
   type Scene,
   type Timeline,
   type View,
@@ -58,6 +77,7 @@ import { Looks } from './ui/Looks'
 import { Midi } from './ui/Midi'
 import { Macros, Modulators } from './ui/Motion'
 import { Music } from './ui/Music'
+import { Perform } from './ui/Perform'
 import { Picture, type Side, type Transition } from './ui/Picture'
 
 const STORE = 'bermuda.looks'
@@ -138,6 +158,9 @@ function timelineRefusal(next: Timeline, before: Timeline | null, looks: Scene[]
 
 const other = (side: Side): Side => (side === 'a' ? 'b' : 'a')
 
+// the Stage's right column, one block at a time
+const TABS = ['Music', 'Motion', 'Macros', 'MIDI', 'Bank'] as const
+
 export function App() {
   const [initial] = useState(() =>
     loadStored('saved looks', STORE, (text) => (JSON.parse(text) as unknown[]).map(parseScene), [] as Scene[]),
@@ -168,6 +191,9 @@ export function App() {
   const [hidden, setHidden] = useState(false)
   const [picked, setPicked] = useState<string>(LOOKS[0].levels[0].id)
   const [focus, setFocus] = useState<Address | null>(null)
+  // the Stage's bottom panel: the Perform strip, or every knob of the picked chip; and its right column's tab
+  const [more, setMore] = useState(false)
+  const [tab, setTab] = useState<(typeof TABS)[number]>('Motion')
   const [bpm, setBpm] = useState(60)
   // the song or microphone being heard, and what it heard as the picture last drew
   const [music, setMusic] = useState<Listening | null>(null)
@@ -296,11 +322,18 @@ export function App() {
     },
     [scene, pair, side, setScene],
   )
-  // a knob stepped by 1% of its range a step, from its value as it is when the step lands, so no step is lost
+  // a knob stepped by 1% of its range a step, a macro by 1% of its 0 to 1, from its value as it is when the step
+  // lands, so no step is lost
   const nudge = useCallback(
-    (address: Address, steps: number) => {
-      const [lo, hi] = hardRange(address)
-      setScene((s) => setKnob(s, address, resolve(s, address)!.value + steps * (hi - lo) * 0.01))
+    (t: MidiTarget, steps: number) => {
+      if ('macro' in t)
+        return setScene((s) =>
+          update(s, (d) =>
+            setMacro(d, t.macro, clamp(d.macros.find((m) => m.id === t.macro)!.value + steps * 0.01, [0, 1])),
+          ),
+        )
+      const [lo, hi] = hardRange(t.knob)
+      setScene((s) => setKnob(s, t.knob, resolve(s, t.knob)!.value + steps * (hi - lo) * 0.01))
     },
     [setScene],
   )
@@ -468,6 +501,24 @@ export function App() {
       ? null
       : learning
 
+  // the chips in chain order, for the arrow keys
+  const chips = useMemo(
+    () => ['background', 'frame', ...allLevels(scene.levels).map(({ level }) => level.id), ...CHIPS.slice(2)],
+    [scene.levels],
+  )
+  const pickedChip = chips.includes(picked) ? picked : 'frame'
+
+  // the Perform strip and its page showing, back to the first when the side, its look or the picked chip changes
+  const performing = useMemo(() => strip(scene, pickedChip), [scene, pickedChip])
+  const pages = Math.max(1, Math.ceil(performing.length / STRIP))
+  const pageKey = `${side}\n${scene.name}\n${pickedChip}`
+  const [paged, setPaged] = useState({ key: pageKey, page: 0 })
+  const pageOf = (p: typeof paged) => (p.key === pageKey ? Math.min(p.page, pages - 1) : 0)
+  const page = pageOf(paged)
+  const slots: (MidiTarget | undefined)[] = Array.from({ length: STRIP }, (_, i) => performing[page * STRIP + i])
+  // the next page or the one before, round from the last to the first
+  const turnPage = (by: 1 | -1) => setPaged((p) => ({ key: pageKey, page: (pageOf(p) + by + pages) % pages }))
+
   // the MIDI handlers read the app as it is now
   const now = useRef({
     scene,
@@ -481,9 +532,27 @@ export function App() {
     keyframe,
     toMode,
     learning: learningNow,
+    slots,
+    pages,
+    turnPage,
   })
   useEffect(() => {
-    now.current = { scene, setScene, fader, looks, mode, controls, load, go, keyframe, toMode, learning: learningNow }
+    now.current = {
+      scene,
+      setScene,
+      fader,
+      looks,
+      mode,
+      controls,
+      load,
+      go,
+      keyframe,
+      toMode,
+      learning: learningNow,
+      slots,
+      pages,
+      turnPage,
+    }
   })
   useEffect(() => {
     if (!midi) return
@@ -491,18 +560,37 @@ export function App() {
     return attach(
       midi,
       () => {
-        const { scene, fader, looks, mode, controls } = now.current
-        return echoes(scene, controls, fader, (t) =>
-          'slot' in t ? looks[t.slot]?.name === scene.name : t.mode === mode,
+        const { scene, fader, looks, mode, controls, slots, pages } = now.current
+        return echoes(
+          scene,
+          controls,
+          fader,
+          (t) => ('slot' in t ? looks[t.slot]?.name === scene.name : 'page' in t ? pages > 1 : t.mode === mode),
+          slots,
         )
       },
       {
         inputs: setInputs,
         message: (m) => {
-          const { scene, setScene, fader, looks, mode, controls, load, go, keyframe, toMode, learning } = now.current
-          // a target learning takes the first control of its kind: knobs, macros and the fader a CC, triggers a note
+          const {
+            scene,
+            setScene,
+            fader,
+            looks,
+            mode,
+            controls,
+            load,
+            go,
+            keyframe,
+            toMode,
+            learning,
+            slots,
+            turnPage,
+          } = now.current
+          // a target learning takes the first control of its kind: knobs, macros, the fader and the strip's slots a
+          // CC, triggers a note
           if (m.kind === 'note') {
-            if (learning && ('slot' in learning || 'mode' in learning)) {
+            if (learning && ('slot' in learning || 'mode' in learning || 'page' in learning)) {
               now.current.learning = null
               setLearning(null)
               return saveControls({ ...controls, buttons: learnTrigger(controls.buttons, learning, m) })
@@ -510,6 +598,7 @@ export function App() {
             const t = controls.buttons.find((x) => x.channel === m.channel && x.note === m.number)
             // in Play a slot rides a transition, as the number keys do
             if (t && 'mode' in t) toMode(t.mode)
+            else if (t && 'page' in t) turnPage(t.page)
             else if (t && looks[t.slot] && mode === 'play') go(keyframe(looks[t.slot]))
             else if (t && looks[t.slot]) load(looks[t.slot])
             return
@@ -528,13 +617,30 @@ export function App() {
             now.current.learning = null
             setLearning(null)
             // a fader learns with pickup, as it cannot move to where the A/B fader is
-            return saveControls({ ...controls, fader: { channel: m.channel, control: m.number, pickup: true } })
+            return saveControls({
+              ...release(controls, m.channel, m.number),
+              fader: { channel: m.channel, control: m.number, pickup: true },
+            })
+          }
+          if (learning && 'strip' in learning) {
+            // a turning encoder sends a burst: a CC this round learned already is not a new one
+            if (
+              controls.strip?.some((x) => x.channel === m.channel && x.control === m.number && x.index < learning.strip)
+            )
+              return
+            const next = learning.strip < STRIP - 1 ? { strip: learning.strip + 1 } : null
+            now.current.learning = next
+            setLearning(next)
+            now.current.controls = learnStrip(controls, learning.strip, m)
+            saveControls(now.current.controls)
+            return setScene((s) => update(s, (d) => unmapControl(d, m)))
           }
           if (learning && ('knob' in learning || 'macro' in learning)) {
             now.current.learning = null
             setLearning(null)
-            // the A/B fader lets the control go, and a control learning a target drives it from its first move
-            if (ab) saveControls({ buttons: controls.buttons })
+            // the A/B fader and the strip let the control go, and a control learning a target drives it from its
+            // first move
+            saveControls(release(controls, m.channel, m.number))
             setScene((s) =>
               drive(
                 update(s, (d) => learn(d, learning, m)),
@@ -545,7 +651,7 @@ export function App() {
             // in Play the fader is the transitions', as with the , and . keys
             if (mode === 'play') return
             if (!controls.fader!.pickup || takes(fader, last, m.value)) setFader(m.value)
-          } else setScene((s) => drive(s, m, last))
+          } else setScene((s) => driveStrip(s, controls, slots, m) ?? drive(s, m, last))
         },
       },
     )
@@ -565,13 +671,6 @@ export function App() {
     positions,
   }
 
-  // the chips in chain order, for the arrow keys
-  const chips = useMemo(
-    () => ['background', 'frame', ...allLevels(scene.levels).map(({ level }) => level.id), ...CHIPS.slice(2)],
-    [scene.levels],
-  )
-  const pickedChip = chips.includes(picked) ? picked : 'frame'
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return
@@ -587,7 +686,10 @@ export function App() {
       else if (e.key === 'f') toMode(mode === 'play' ? 'stage' : 'play')
       else if (e.key === 'o') changeBank({ ...bank, autopilot: { ...auto, on: !auto.on } })
       else if (e.key === 'n') autopilot()
-      else if (e.key === ' ') {
+      else if (e.key === 'PageDown' || e.key === 'PageUp') {
+        e.preventDefault()
+        turnPage(e.key === 'PageDown' ? 1 : -1)
+      } else if (e.key === ' ') {
         e.preventDefault()
         setRunning((r) => !r)
       } else if (/^[0-9]$/.test(e.key) && !e.metaKey && !e.ctrlKey) {
@@ -608,7 +710,7 @@ export function App() {
         setPicked(chips[(i + chips.length) % chips.length])
       } else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && focused) {
         e.preventDefault()
-        nudge(focused, (e.shiftKey ? 10 : 1) * (e.key === 'ArrowUp' ? 1 : -1))
+        nudge({ knob: focused }, (e.shiftKey ? 10 : 1) * (e.key === 'ArrowUp' ? 1 : -1))
       } else if (e.key === 's' && !e.metaKey && !e.ctrlKey) save()
       else if (e.key === 'p')
         setScene((s) => update(s, (d) => d.presets.push(capturePreset(d, `Preset ${d.presets.length + 1}`))))
@@ -637,7 +739,7 @@ export function App() {
     const onWheel = (e: WheelEvent) => {
       if (!focused || mode === 'play' || !(e.target instanceof Element && e.target.matches('.picture'))) return
       e.preventDefault()
-      nudge(focused, wheelSteps(e))
+      nudge({ knob: focused }, wheelSteps(e))
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
@@ -832,8 +934,8 @@ export function App() {
             ) : (
               <span className="dim keys">
                 Tab hides · E edit · D decks · T direct · Space pause · 1-0 looks · [ ] presets · ← → chips · ↑ ↓ knob ·
-                M MIDI learn · S save · P preset · A B side · , . fader · X swap · L loop · R mutate · F play · O
-                autopilot · N next
+                PgDn PgUp strip page · M MIDI learn · S save · P preset · A B side · , . fader · X swap · L loop · R
+                mutate · F play · O autopilot · N next
               </span>
             )}
           </header>
@@ -887,22 +989,46 @@ export function App() {
               <Chain picked={pickedChip} />
             </nav>
             <aside className="panel right">
-              {musicBlock}
-              <Modulators />
-              <Macros />
-              {midiBlock}
-              {looksPanel}
-              {bankPanel}
+              <div className="seg tabs">
+                {TABS.map((t) => (
+                  <button key={t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>
+                    {t}
+                  </button>
+                ))}
+              </div>
+              {tab === 'Music' && musicBlock}
+              {tab === 'Motion' && <Modulators />}
+              {tab === 'Macros' && <Macros />}
+              {tab === 'MIDI' && midiBlock}
+              {tab === 'Bank' && (
+                <>
+                  {looksPanel}
+                  {bankPanel}
+                </>
+              )}
             </aside>
             {/* the knob detail floats over the knobs' panel, so opening it moves no knob */}
             <div className="stage-bottom">
-              {focused && (
+              {more && focused && (
                 <div className="panel knob-slot">
                   <KnobDetail />
                 </div>
               )}
               <section className="panel bottom">
-                <Section chip={pickedChip} />
+                {more ? (
+                  <>
+                    <button
+                      className="mini strip-back"
+                      title="back to the Perform strip"
+                      onClick={() => setMore(false)}
+                    >
+                      ◂ strip
+                    </button>
+                    <Section chip={pickedChip} />
+                  </>
+                ) : (
+                  <Perform slots={slots} page={page} pages={pages} onPage={turnPage} onMore={() => setMore(true)} />
+                )}
               </section>
             </div>
           </>

@@ -70,8 +70,8 @@ describe('the bank', () => {
 describe('the autopilot', () => {
   it('leaves the macros that listen to the music to it', () => {
     const look = LOOKS.find((l) => l.name === 'Music - On the beat')!
-    expect(look.macros.map((m) => m.listen)).toEqual(['tone'])
-    expect(playable(look).macros).toEqual([])
+    expect(look.macros.filter((m) => m.listen).map((m) => m.listen)).toEqual(['tone'])
+    expect(playable(look).macros).toEqual(look.macros.filter((m) => !m.listen))
     const plain = structuredClone(look)
     delete plain.macros[0].listen
     expect(playable(plain).macros).toEqual(plain.macros)
@@ -102,7 +102,8 @@ describe('the autopilot', () => {
     const few = step(withAuto({ busy: 0.2, change: 0 }), LOOKS, { ...at, scene: { ...at.scene, presets: [] } })!
     const all = step(withAuto({ busy: 1, change: 0 }), LOOKS, { ...at, scene: { ...at.scene, presets: [] } })!
     expect(moved(at.scene, few.scene).length).toBe(1)
-    expect(moved(at.scene, all.scene).length).toBe(2)
+    // its two knobs with play ranges, scale and m, and its macros Breathe, Character and Size, one knob each
+    expect(moved(at.scene, all.scene).length).toBe(3)
   })
 
   it("is at a preset's entry once it plays that preset", () => {
