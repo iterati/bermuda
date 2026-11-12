@@ -1,6 +1,6 @@
 // The music block: a song file from this computer (played round), the microphone or a browser tab's sound; why a
-// tab is heard no more, once its share ends; what is heard (the tempo and
-// the beat, the tone, the drive and the feel it sets, the eight bands); and wiring the look to it.
+// tab is heard no more, once its share ends; what is heard (the tempo and the beat, the tone, the drive and the
+// feel it sets, the eight bands); and wiring the look to it.
 import { wire, type From, type Heard, type Listening } from '../music'
 import { BANDS } from '../scene'
 import { useCtl } from './controls'

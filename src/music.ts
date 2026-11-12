@@ -1,10 +1,10 @@
-// Music: what the app hears in a song file, the microphone or a browser tab, read from the samples alone. Each hop of samples
-// is one frame: its spectrum gives the loudness in eight bands, the tone (where the sound sits, dark to light)
-// and the onset strength (how much louder it got, bin by bin, each band counting alike); the last few seconds of
-// onsets give the tempo (their autocorrelation) and where the beats fall (a comb of beats laid over them), and the
-// beat runs on between reads, pulled toward them. The drive comes of the tempo and how clear its pulse is: fast and
-// sharp is a beat to speed to, slow and soft a sensual groove; it sets the feel (snap or glide) and the clock's
-// rate. A worklet taps the Web Audio graph and hands the samples over.
+// Music: what the app hears in a song file, the microphone or a browser tab, read from the samples alone. Each hop of
+// samples is one frame: its spectrum gives the loudness in eight bands, the tone (where the sound sits, dark to light)
+// and the onset strength (how much louder it got, bin by bin, each band counting alike); the last few seconds of onsets
+// give the tempo (their autocorrelation) and where the beats fall (a comb of beats laid over them), and the beat runs
+// on between reads, pulled toward them. The drive comes of the tempo and how clear its pulse is: fast and sharp is a
+// beat to speed to, slow and soft a sensual groove; it sets the feel (snap or glide) and the clock's rate. A worklet
+// taps the Web Audio graph and hands the samples over.
 import {
   BANDS,
   clamp,
@@ -368,8 +368,13 @@ export async function listen(from: From, ended?: () => void): Promise<Listening>
       // a browser that wants a press first leaves it paused, for the play button
       await song.play().catch(() => undefined)
     }
-    // a track stopped here fires no ended, so only the browser's ending of the share stops it
-    if (from === 'tab') stream!.getAudioTracks()[0].addEventListener('ended', () => (stop(), ended?.()), { once: true })
+    // a track stopped here fires no ended, so only the browser's ending of the share stops it; one it ended while
+    // the tap loaded is ended already
+    if (from === 'tab') {
+      const [sound] = stream!.getAudioTracks()
+      sound.addEventListener('ended', () => (stop(), ended?.()), { once: true })
+      if (sound.readyState === 'ended') throw new Error("the tab's share ended")
+    }
   } catch (err) {
     stop()
     throw err

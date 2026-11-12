@@ -4,8 +4,8 @@
 // A or B; every change is instant, and so is MIDI, which plays the side being edited and the fader. Play is the
 // picture alone with the bank over it: every change there rides a timed transition, the fader run from the side
 // showing to the other with the change loaded on it, and the autopilot walks the bank. A song, the microphone or
-// a tab, once heard, sets the clock's tempo and lands Play's transitions on its beats. Key I shows the frame-time readout
-// over the picture in every view.
+// a tab, once heard, sets the clock's tempo and lands Play's transitions on its beats. Key I shows the frame-time
+// readout over the picture in every view.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { director, missingKeys, pruneTimeline, type Shot } from './direct'
 import { BANK, LOOKS } from './looks'
