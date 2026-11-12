@@ -176,6 +176,26 @@ describe('generateShader', () => {
     for (const text of programs) expect(kindsIn(text)).toEqual(every)
     expect(generateShader(PARTS)).toBe(programs[0])
   })
+
+  it("calls vary, lattice, cellAt and drawn once each in render, with every part on and in main's three programs", () => {
+    // each function's call sites, its name's every use but its definition: a compiler inlines each call, so the own
+    // cell and the cells round it share one lattice and one cellAt, and the stretch's probes the level's one vary
+    const calls = (text: string) =>
+      Object.fromEntries(
+        (['vary', 'lattice', 'cellAt', 'drawn'] as const).map((fn) => [
+          fn,
+          (text.match(new RegExp(`\\b${fn}\\(`, 'g'))?.length ?? 0) - 1,
+        ]),
+      )
+    const once = { vary: 1, lattice: 1, cellAt: 1, drawn: 1 }
+    for (const parts of [
+      PARTS,
+      PARTS.filter((p) => p !== 'metal'),
+      PARTS.filter((p) => p !== 'metal' && p !== 'fill'),
+      [],
+    ])
+      expect(calls(generateShader(parts)), `${parts.length} parts`).toEqual(once)
+  })
 })
 
 // what a fresh renderer's context did: each fragment shader compiled (its source, when its compile started), each

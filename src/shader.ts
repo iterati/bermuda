@@ -455,6 +455,15 @@ export function generateShader(parts: Iterable<Part> = PARTS): string {
     .join('\n')
   const cell = (by: (typeof CELLS)[number]) => `${CELLS.indexOf(by)}.`
   const lattice = (kind: LatticeKind) => `${LATTICES.indexOf(kind)}.`
+  // metal's flag, ahead of the level's vary where the stretch is, as it picks how many points vary takes
+  const metalFlag = `#ifdef METAL
+    // metal reads its slope on the screen, so it measures the stretch as lines in screen units do
+    bool metal = f0.x > 0. && row(j, ${FILL_TEXEL} + 1).y > 0.;
+#else
+    bool metal = false;
+#endif
+`
+  const stretchLine = has('stretch') ? '    if (measured) Jq = stretch(q, qx, qy, e, j) * Jq;\n' : ''
   return `#version 300 es
 ${has('metal') ? '#define METAL\n' : has('fill') ? '#define FILL\n' : ''}#ifdef METAL
 #define FILL
@@ -855,10 +864,10 @@ ${
 ${
   has('stretch')
     ? `// how far level row j's variations stretch the plane at q0 (to q): the linear weight's scale alone, else measured
-mat2 stretch(vec2 q0, vec2 q, int j) {
+// from the probes qx and qy, e off q0 along x and y, which the level's one vary gives with q
+mat2 stretch(vec2 q, vec2 qx, vec2 qy, float e, int j) {
   if (row(j, 7).w > .5) return mat2(row(j, 2).x);
-  float e = 1e-3 * max(length(q0), 1e-3);
-  return mat2((vary(q0 + vec2(e, 0), j) - q) / e, (vary(q0 + vec2(0, e), j) - q) / e);
+  return mat2((qx - q) / e, (qy - q) / e);
 }
 
 `
@@ -931,20 +940,143 @@ vec3 render(vec2 fc, vec3 bg, int start) {
     vec4 t0 = row(j, 0), t1 = row(j, 1), t4 = row(j, 4), t5 = row(j, 5), t6 = row(j, 6), t7 = row(j, 7);
     vec4 f0 = row(j, ${FILL_TEXEL});
     float w = t0.x, kc;
-    // affine, variations, lattice; the level weight blends the re-tiling toward pass-through
-    vec2 q0 = t0.y * (rot(t0.z) * p) + t1.xy, q = vary(q0, j);
-    vec4 cell = lattice(q, t1.zw, t7, kc);
+${has('stretch') ? metalFlag : ''}    // affine, variations, lattice; the level weight blends the re-tiling toward pass-through
+${
+  has('stretch')
+    ? `    vec2 q0 = t0.y * (rot(t0.z) * p) + t1.xy, q, qx, qy;
+    // the level's point, then, where the stretch is measured and a variation but linear has weight, the stretch's
+    // two probes, from one vary call, so it is inlined once
+    bool measured = uLine.w > 0. || metal;
+    float e = 1e-3 * max(length(q0), 1e-3);
+    for (int s = 0; s < (measured && t7.w <= .5 ? 3 : 1); s++) {
+      vec2 v = vary(s == 0 ? q0 : s == 1 ? q0 + vec2(e, 0) : q0 + vec2(0, e), j);
+      if (s == 0) q = v;
+      else if (s == 1) qx = v;
+      else qy = v;
+    }
+`
+    : `    vec2 q0 = t0.y * (rot(t0.z) * p) + t1.xy, q = vary(q0, j);
+`
+}${
+    has('spill')
+      ? `    bool mirror = t4.x == ${cell('mirror')};
+    mat2 Jq = t0.y * rot(t0.z) * J;
+${has('stretch') ? '' : metalFlag}${stretchLine}    vec4 cell;
+    vec2 local, nid;
+    float px, scale;
+    Cell own, near;
+#ifdef FILL
+    float pxc;
+    bool fr = false, inFront, inBack;
+    Cell front, back;
+    vec2 fid, bid, fat;
+#endif
+    // the cell's own shape (k 4, o 0), then, where spill is on, the outlines of the shapes of the cells a step round
+    // it, drawn where they reach into this one (the nearest outline, so overlapping shapes each show theirs), faded in
+    // by spill: one lattice and one cellAt for all, so each is inlined once. The parse keeps spill to lattices whose
+    // cells are translates, triangle steps by half the pad to reach both halves, and voronoi's are its pad's
+    // neighbours, each at its own jittered point
+    float st = t7.x == ${LATTICES.indexOf('triangle')}. ? .5 : 1.;
+    for (int s = 0; s < (t6.w > 0. ? 9 : 1); s++) {
+      int k = s == 0 ? 4 : s <= 4 ? s - 1 : s;
+      vec2 o = vec2(k % 3 - 1, k / 3 - 1);
+      vec4 nc;
+      float kn;
+${
+  has('lattice.voronoi')
+    ? `      if (k != 4 && t7.x == ${LATTICES.indexOf('voronoi')}.) {
+        vec2 d = jittered(cell.zw + o, t7.z) - jittered(cell.zw, t7.z);
+        nc = vec4(cell.xy - d.x * vec2(1, 0) - d.y * t1.zw, cell.zw + o);
+      } else {`
+    : '      {'
+}
+        vec2 dq = st * (o.x * vec2(1, 0) + o.y * t1.zw);
+#ifdef FILL
+        // in front order the neighbours are found from a point pulled a little toward the cell's middle, so a
+        // sample on a row's edge cannot round into a row past the one beside it and lose the cell in front
+        vec2 pull = fr ? 1e-3 * cell.xy : vec2(0), at = q - pull + dq;
+#else
+        vec2 at = q + dq;
+#endif
+        // the cell itself at q
+        nc = lattice(k == 4 ? q : at, t1.zw, t7, kn);
+        if (k != 4) {
+#ifdef FILL
+          nc.xy += pull - dq;
+#else
+          nc.xy -= dq;
+#endif
+        }
+      }
+      if (k == 4) {
+        cell = nc;
+        kc = kn;
+      } else if (nc.zw == cell.zw) continue;
+      Cell c = cellAt(j, mix(p, mirror ? mirrored(nc.xy, nc.zw) : nc.xy, w), nc.zw, w, ringOf(q, nc, t7.x));
+      if (k == 4) {
+        // the cell's offset, reflected where the Cell step mirrors
+        local = mirror ? mirrored(cell.xy, cell.zw) : cell.xy;
+        J = J * (1. - w) + kc * Jq * w;
+        // how many screen units a cell unit spans here
+        px = inversesqrt(max(abs(determinant(J)), 1e-12));
+        scale = mix(1., px, uLine.w);
+        own = c;
+        near = own;
+        nid = cell.zw;
+#ifdef FILL
+        // front order: of the cells whose paint reaches the pixel (pxc, a pixel in cell units), the lowest row's then
+        // the leftmost's in front, and the next behind it, painted first so the front's edge blends into it, not the
+        // ground
+        pxc = 2. / uRes.y / px;
+        fr = f0.x > 0. && row(j, ${FILL_TEXEL} + 2).z > .5 && t6.w > 0.;
+        front = own;
+        back = own;
+        fid = cell.zw;
+        bid = cell.zw;
+        fat = cell.xy;
+        inFront = !fr || own.d < pxc;
+        inBack = false;
+#endif
+        continue;
+      }
+      if (abs(c.d) < abs(near.d)) {
+        near = c;
+        nid = nc.zw;
+      }
+#ifdef FILL
+      if (fr && c.d < pxc) {
+        if (!inFront || before(nc.zw, fid)) {
+          back = front;
+          bid = fid;
+          inBack = inFront;
+          front = c;
+          fid = nc.zw;
+          fat = nc.xy;
+          inFront = true;
+        } else if (!inBack || before(nc.zw, bid)) {
+          back = c;
+          bid = nc.zw;
+          inBack = true;
+        }
+      }
+#endif
+    }
+    // draw: the cell's line, then, where spill is on, the nearest spilled outline's mixed in by spill, from one drawn
+    // call, so it is inlined once
+    float a;
+    for (int s = 0; s < (t6.w > 0. ? 2 : 1); s++) {
+      Cell c = own;
+      if (s == 1) c = near;
+      float l = drawn(c, t4.z, depth, scale);
+      a = s == 0 ? l : mix(a, l, t6.w);
+    }
+`
+      : `    vec4 cell = lattice(q, t1.zw, t7, kc);
     // the cell's offset, reflected where the Cell step mirrors
     bool mirror = t4.x == ${cell('mirror')};
     vec2 local = mirror ? mirrored(cell.xy, cell.zw) : cell.xy;
     mat2 Jq = t0.y * rot(t0.z) * J;
-#ifdef METAL
-    // metal reads its slope on the screen, so it measures the stretch as lines in screen units do
-    bool metal = f0.x > 0. && row(j, ${FILL_TEXEL} + 1).y > 0.;
-#else
-    bool metal = false;
-#endif
-${has('stretch') ? '    if (uLine.w > 0. || metal) Jq = stretch(q0, q, j) * Jq;\n' : ''}    J = J * (1. - w) + kc * Jq * w;
+${has('stretch') ? '' : metalFlag}${stretchLine}    J = J * (1. - w) + kc * Jq * w;
     // how many screen units a cell unit spans here
     float px = inversesqrt(max(abs(determinant(J)), 1e-12)), scale = mix(1., px, uLine.w);
     // draw: the cell's shape and line
@@ -965,64 +1097,8 @@ ${has('stretch') ? '    if (uLine.w > 0. || metal) Jq = stretch(q0, q, j) * Jq;\
     vec2 fid = cell.zw, bid = cell.zw, fat = cell.xy;
     bool inFront = !fr || own.d < pxc, inBack = false;
 #endif
-${
-  has('spill')
-    ? `    if (t6.w > 0.) {
-      float st = t7.x == ${LATTICES.indexOf('triangle')}. ? .5 : 1.;
-      for (int k = 0; k < 9; k++) {
-        if (k == 4) continue;
-        vec2 o = vec2(k % 3 - 1, k / 3 - 1);
-        vec4 nc;
-${
-  has('lattice.voronoi')
-    ? `        if (t7.x == ${LATTICES.indexOf('voronoi')}.) {
-          vec2 d = jittered(cell.zw + o, t7.z) - jittered(cell.zw, t7.z);
-          nc = vec4(cell.xy - d.x * vec2(1, 0) - d.y * t1.zw, cell.zw + o);
-        } else {`
-    : '        {'
-}
-          vec2 dq = st * (o.x * vec2(1, 0) + o.y * t1.zw);
-          float kn;
-#ifdef FILL
-          // in front order the neighbours are found from a point pulled a little toward the cell's middle, so a
-          // sample on a row's edge cannot round into a row past the one beside it and lose the cell in front
-          vec2 pull = fr ? 1e-3 * cell.xy : vec2(0);
-          nc = lattice(q - pull + dq, t1.zw, t7, kn);
-          nc.xy += pull - dq;
-#else
-          nc = lattice(q + dq, t1.zw, t7, kn);
-          nc.xy -= dq;
-#endif
-        }
-        if (nc.zw == cell.zw) continue;
-        Cell c = cellAt(j, mix(p, mirror ? mirrored(nc.xy, nc.zw) : nc.xy, w), nc.zw, w, ringOf(q, nc, t7.x));
-        if (abs(c.d) < abs(near.d)) {
-          near = c;
-          nid = nc.zw;
-        }
-#ifdef FILL
-        if (fr && c.d < pxc) {
-          if (!inFront || before(nc.zw, fid)) {
-            back = front;
-            bid = fid;
-            inBack = inFront;
-            front = c;
-            fid = nc.zw;
-            fat = nc.xy;
-            inFront = true;
-          } else if (!inBack || before(nc.zw, bid)) {
-            back = c;
-            bid = nc.zw;
-            inBack = true;
-          }
-        }
-#endif
-      }
-      a = mix(a, drawn(near, t4.z, depth, scale), t6.w);
-    }
 `
-    : ''
-}    // the line over a fill keeps as much of itself as the fill's line
+  }    // the line over a fill keeps as much of itself as the fill's line
     a *= f0.y;
     // a level whose cells are under a few pixels fades out rather than shimmer (log-polar's centre)
     a *= exp(-r0 * (uRadial.x + uRadial.y * depth)) * w * smoothstep(1., 3., uRes.y * .5 * px);
