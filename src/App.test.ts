@@ -143,7 +143,7 @@ describe('the views', { timeout: 30_000 }, () => {
     // A on its own program, compiled on its first draw
     const parts = [...needs(LOOKS[0])].sort()
     const [fps, count, compiled] = await lines()
-    expect(fps).toMatch(/^\d+ fps$/)
+    expect(fps).toMatch(/^\d+(\.\d)? fps$/)
     expect(count).toBe(`${parts.length} parts`)
     expect(compiled).toMatch(/^compiled in \d+ ms$/)
     await page.click('.frame-parts')

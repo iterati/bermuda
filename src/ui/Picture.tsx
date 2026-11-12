@@ -94,7 +94,8 @@ export function Picture(props: Props) {
         return
       }
       times.push(now)
-      while (now - times[0] > 1000) times.shift()
+      // the frames since the last one a second or more ago, so a frame slower than a second still counts
+      while (times.length > 2 && now - times[1] >= 1000) times.shift()
       if (now - told < 250) return
       told = now
       onFrames({ fps: times.length > 1 ? ((times.length - 1) * 1000) / (now - times[0]) : 0, drew })

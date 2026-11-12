@@ -11,7 +11,7 @@ export function FrameTime({ fps, drew }: Frames) {
   const { parts, fallback, ms } = drew
   return (
     <div className="panel frame-time">
-      <div>{Math.round(fps)} fps</div>
+      <div>{fps < 10 ? fps.toFixed(1) : Math.round(fps)} fps</div>
       {fallback ? (
         <div>everything (fallback)</div>
       ) : (
