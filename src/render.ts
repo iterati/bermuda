@@ -66,8 +66,8 @@ export type Toward = {
 
 const shapeIndex = (shape: Shape) => SHAPES.indexOf(shape.kind ?? 'star')
 
-// The level rows as shader.ts and its engines lay them out: every level, sub-chains included, gets a row; a level's next
-// row is the one after it in its own list, and a variant's sub-chain replaces the rest of the chain below it. A
+// The level rows as shader.ts and its engines lay them out: every level, sub-chains included, gets a row; a level's
+// next row is the one after it in its own list, and a variant's sub-chain replaces the rest of the chain below it. A
 // second chain packs into the same data from its start row on.
 export function packLevels(
   levels: Level[],
