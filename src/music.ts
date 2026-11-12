@@ -17,6 +17,7 @@ import {
   type Modulator,
   type Scene,
 } from './scene'
+import TAP from './tap.js?url&no-inline'
 
 export const SIZE = 2048 // the spectrum's window, in samples
 export const HOP = 512 // samples from one frame to the next
@@ -292,27 +293,8 @@ export function heardAt(ear: Ear, time: number): Heard {
 
 // ---- the sound in the browser ----
 
-// The tap: each block's channels mixed to one, posted on with the audio clock's time of its first sample.
-const TAP = `registerProcessor('bermuda-tap', class extends AudioWorkletProcessor {
-  block = new Float32Array(1024)
-  fill = 0
-  at = 0
-  process([input]) {
-    if (!this.fill) this.at = currentTime
-    for (let i = 0; i < 128; i++) {
-      let s = 0
-      for (const ch of input) s += ch[i]
-      this.block[this.fill + i] = input.length ? s / input.length : 0
-    }
-    this.fill += 128
-    if (this.fill === this.block.length) {
-      this.port.postMessage({ at: this.at, samples: this.block }, [this.block.buffer])
-      this.block = new Float32Array(1024)
-      this.fill = 0
-    }
-    return true
-  }
-})`
+// the tap's URL: its own file beside the build's assets, never a blob: or data: URL, which a page's policy may refuse
+export { TAP }
 
 // A song or the microphone being heard: the audio clock's time at the ear's first sample, and the song's player.
 export type Listening = {
@@ -353,7 +335,7 @@ export async function listen(from: File | 'mic'): Promise<Listening> {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
       })
-    await ctx.audioWorklet.addModule(url(new Blob([TAP], { type: 'text/javascript' })))
+    await ctx.audioWorklet.addModule(TAP)
     const tap = new AudioWorkletNode(ctx, 'bermuda-tap', { numberOfOutputs: 0 })
     let first = true
     tap.port.onmessage = ({ data }: MessageEvent<{ at: number; samples: Float32Array }>) => {

@@ -1,8 +1,9 @@
 // The analysis of synthetic sound: click tracks at known tempi give their tempo and where their beats fall, tones
 // at known pitches light their own band and read dark or light, a fast sharp click drives where a slow soft swell
-// grooves, and silence reads as none; the felt beat snaps each beat's move to its start.
+// grooves, and silence reads as none; the felt beat snaps each beat's move to its start. The tap loads from a file
+// of its own, as a page whose policy refuses blob: and data: scripts (the board viewer's) would refuse it.
 import { describe, expect, it } from 'vitest'
-import { felt, hear, heardAt, newEar, type Ear } from './music'
+import { felt, hear, heardAt, newEar, TAP, type Ear } from './music'
 import { BANDS } from './scene'
 
 const RATE = 44100
@@ -101,5 +102,12 @@ describe('music', () => {
     expect(felt(3.25, 0)).toBeCloseTo(3.25)
     expect(felt(3.25, 1) - 3).toBeGreaterThan(0.85)
     expect(felt(4, 1)).toBe(4)
+  })
+})
+
+describe('the tap', () => {
+  it('loads from a file of its own, never a blob: or data: URL', () => {
+    expect(TAP).not.toMatch(/^(blob|data):/)
+    expect(TAP).toMatch(/tap[\w.-]*\.js/)
   })
 })
