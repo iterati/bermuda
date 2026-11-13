@@ -319,6 +319,9 @@ describe('MIDI map mode', () => {
   it('in map mode a press on a control arms its learn and changes nothing else, and a press on the one learning cancels it', async () => {
     await pick('Looks')
     await page.evaluate(() => (document.activeElement as HTMLElement).blur())
+    // paused, so the knob's live value, which its modulator moves, holds still between the reads
+    await page.keyboard.press(' ')
+    await pause()
     const before = await showing()
     expect(before).toEqual({
       view: 'stage',
