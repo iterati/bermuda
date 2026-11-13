@@ -317,6 +317,7 @@ export function Macros() {
           {armed?.id === m.id && <div className="armed-note">move knobs, by hand or MIDI, then press learn</div>}
           <Slider
             className="macro-slider"
+            data-learn={JSON.stringify({ macro: m.id })}
             min={0}
             max={1}
             step={0.001}

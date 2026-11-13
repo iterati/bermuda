@@ -1,6 +1,7 @@
-// The MIDI block: the controller's connection, what is learning a control, the look's mappings (each to follow
-// to its knob, to give pickup as a fader, or to drop), the A/B fader's control, the strip's encoders (learned in
-// turn, slot 1 to 8, and dropped at once), and the app's buttons (each to drop), and learning a button.
+// The MIDI block: the controller's connection, the look's mappings (each to follow to its knob, to give pickup as a
+// fader, or to drop), the A/B fader's control, the strip's encoders (learned in turn, slot 1 to 8, and dropped at
+// once), and the app's buttons (each to drop), and learning a button. Beside it, what is learning a control, shown on
+// every view, and in MIDI map mode what drives each control a controller can drive.
 import { useState } from 'react'
 import { HAS_MIDI, keyOf, label, mappingOf, positionOf, release, same, unmap, waiting, type Learning } from '../midi'
 import { VIEWS, type Controls, type MidiTarget, type Scene, type TriggerTarget, type View } from '../scene'
@@ -20,24 +21,26 @@ type Props = {
 const percent = (v: number) => `${Math.round(v * 100)}%`
 const VIEW_NAMES: Record<View, string> = { stage: 'Stage', edit: 'Edit', decks: 'Decks' }
 
+const macroName = (scene: Scene, id: string) => scene.macros.find((m) => m.id === id)!.name
+// what learns, or what a button drives, in words
+const nameOf = (t: Learning, scene: Scene, looks: Scene[]) =>
+  'knob' in t
+    ? short(t.knob)
+    : 'macro' in t
+      ? `macro ${macroName(scene, t.macro)}`
+      : 'fader' in t
+        ? 'the A/B fader'
+        : 'slot' in t
+          ? `look ${t.slot + 1}${looks[t.slot] ? ` · ${looks[t.slot].name}` : ''}`
+          : 'strip' in t
+            ? `slot ${t.strip + 1} of the strip`
+            : 'page' in t
+              ? `${t.page > 0 ? 'next' : 'previous'} strip page`
+              : VIEW_NAMES[t.mode]
+
 export function Midi({ connected, inputs, onConnect, looks, controls, fader, onControls }: Props) {
   const { scene, edit, setFocus, learning, learn, positions } = useCtl()
   const [button, setButton] = useState('slot 0')
-  const macroName = (id: string) => scene.macros.find((m) => m.id === id)!.name
-  const name = (t: Learning) =>
-    'knob' in t
-      ? short(t.knob)
-      : 'macro' in t
-        ? `macro ${macroName(t.macro)}`
-        : 'fader' in t
-          ? 'the A/B fader'
-          : 'slot' in t
-            ? `look ${t.slot + 1}${looks[t.slot] ? ` · ${looks[t.slot].name}` : ''}`
-            : 'strip' in t
-              ? `slot ${t.strip + 1} of the strip`
-              : 'page' in t
-                ? `${t.page > 0 ? 'next' : 'previous'} strip page`
-                : VIEW_NAMES[t.mode]
   const picked: TriggerTarget = button.startsWith('slot ')
     ? { slot: Number(button.slice(5)) }
     : button.startsWith('page ')
@@ -60,27 +63,12 @@ export function Midi({ connected, inputs, onConnect, looks, controls, fader, onC
           </button>
         )}
       </div>
-      {learning && (
-        <div className="midi-learning">
-          {'strip' in learning ? (
-            <span>
-              turn the encoder for <b>slot {learning.strip + 1}</b>
-            </span>
-          ) : (
-            <span>
-              {'slot' in learning || 'mode' in learning || 'page' in learning ? 'press a button' : 'move a control'} for{' '}
-              <b>{name(learning)}</b>
-            </span>
-          )}
-          <button className="mini" title="Esc" onClick={() => learn(null)}>
-            cancel
-          </button>
-        </div>
-      )}
       {HAS_MIDI && (
         <div className="targets">
           {!scene.midi?.length && !learning && (
-            <span className="dim">focus a knob and press M, or learn on a macro, then move a control</span>
+            <span className="dim">
+              ◎ map (M): click a knob or macro, then move a control; or focus a knob and press M
+            </span>
           )}
           {scene.midi?.map((m) => {
             const at = positions.get(keyOf('cc', m.channel, m.control))
@@ -94,7 +82,7 @@ export function Midi({ connected, inputs, onConnect, looks, controls, fader, onC
                       {short(m.knob)}
                     </button>
                   ) : (
-                    <span className="chip-macro">macro {macroName(m.macro)}</span>
+                    <span className="chip-macro">macro {macroName(scene, m.macro)}</span>
                   )}
                   <label className="check" title="a fader: it takes over only once it passes the value">
                     <input
@@ -228,7 +216,7 @@ export function Midi({ connected, inputs, onConnect, looks, controls, fader, onC
           {controls.buttons.map((t) => (
             <span className="target" key={label(t)}>
               <b className="chip-midi">{label(t)}</b>
-              <span>{name(t)}</span>
+              <span>{nameOf(t, scene, looks)}</span>
               <button
                 className="mini"
                 onClick={() => onControls({ ...controls, buttons: controls.buttons.filter((x) => x !== t) })}
@@ -243,11 +231,62 @@ export function Midi({ connected, inputs, onConnect, looks, controls, fader, onC
   )
 }
 
-// A knob's or a macro's control: its mapping to drop (amber while its fader waits to pick up), else a learn button.
+// What is learning a control, with its cancel, on every view; in MIDI map mode with nothing learning, how to map.
+export function MidiLearning({ looks }: { looks: Scene[] }) {
+  const { scene, learning, learn, mapping } = useCtl()
+  if (!learning && !mapping) return null
+  return (
+    <div className="midi-learning panel">
+      {!learning ? (
+        <span>MIDI map: click a control, then move a knob or press a button on the controller · Esc ends</span>
+      ) : 'strip' in learning ? (
+        <span>
+          turn the encoder for <b>slot {learning.strip + 1}</b>
+        </span>
+      ) : (
+        <span>
+          {'slot' in learning || 'mode' in learning || 'page' in learning ? 'press a button' : 'move a control'} for{' '}
+          <b>{nameOf(learning, scene, looks)}</b>
+        </span>
+      )}
+      {learning && (
+        <button className="mini" title="Esc" onClick={() => learn(null)}>
+          cancel
+        </button>
+      )}
+    </div>
+  )
+}
+
+// What drives a target, if anything: a knob's or macro's CC on the look, the A/B fader's and a strip slot's CC, a
+// button's note.
+export function driver(scene: Scene, controls: Controls, t: Learning) {
+  if ('knob' in t || 'macro' in t) return mappingOf(scene, t)
+  if ('fader' in t) return controls.fader
+  if ('strip' in t) return controls.strip?.find((x) => x.index === t.strip)
+  return controls.buttons.find((x) => same(x, t))
+}
+
+// In MIDI map mode, the CC or note that drives a control, its whole label its title; a strip slot's its encoder.
+export function MapTag({ target }: { target: Learning }) {
+  const { scene, controls, mapping } = useCtl()
+  const d = mapping ? driver(scene, controls, target) : undefined
+  if (!d) return null
+  const text = 'note' in d ? `n${d.note}` : `cc${d.control}`
+  return (
+    <b className="map-tag" title={label(d)}>
+      {'strip' in target ? `E${target.strip + 1} · ${text}` : text}
+    </b>
+  )
+}
+
+// A knob's or a macro's control, in MIDI map mode: its mapping to drop (amber while its fader waits to pick up), else
+// a learn button.
 export function MidiLearn({ target }: { target: MidiTarget }) {
-  const { scene, edit, learning, learn, positions } = useCtl()
+  const { scene, edit, learning, learn, positions, mapping } = useCtl()
   const map = mappingOf(scene, target)
   const on = !!learning && same(learning, target)
+  if (!mapping) return null
   if (map)
     return (
       <span className="pair">

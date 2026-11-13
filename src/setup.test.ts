@@ -257,9 +257,11 @@ describe('the setup sheet', () => {
     const strip = '.setup-body button[title^="map the next 8 encoders"]'
     await page.click(strip)
     expect(await page.$eval(strip, (el) => el.textContent)).toBe('turn an encoder…')
-    expect(await page.$('.setup-body .midi-learning')).not.toBe(null)
-    await page.keyboard.press('Escape')
+    // the learning line is under the bar, not in the sheet
+    expect(await page.$('.app > .midi-learning')).not.toBe(null)
     expect(await page.$('.setup-body .midi-learning')).toBe(null)
+    await page.keyboard.press('Escape')
+    expect(await page.$('.midi-learning')).toBe(null)
     expect(await page.$eval(strip, (el) => el.textContent)).toBe('learn the strip')
     expect(await sheet()).toEqual({ page: 'MIDI', on: true })
     await page.keyboard.press('Escape')
@@ -315,7 +317,7 @@ describe('the setup sheet', () => {
     const stage = await keys()
     expect(stage).toMatchObject({ whole: true, panel: true, under: true })
     expect(stage!.text).toMatch(/^H hides · Tab live knobs · Enter types · /)
-    expect(stage!.text).toContain('M MIDI learn · G setup · S save')
+    expect(stage!.text).toContain('M map (on a focused knob: learn it) · G setup · S save')
     expect(stage!.text).toContain('F play · U undock · O autopilot')
     await page.click(HELP)
     expect(await keys()).toBe(null)

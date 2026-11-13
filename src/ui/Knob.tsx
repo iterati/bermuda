@@ -84,9 +84,10 @@ export function wheelTurn(e: Pick<WheelEvent, 'deltaX' | 'deltaY' | 'deltaMode' 
 
 // A range input the wheel turns, a notch 1% of min to max (at least its step), landed on its step; a press, click or
 // drag moves it no more. What a turn rounds away carries on to the next, so a trackpad's stream and shift's fifths add
-// up.
+// up. data-learn: what it learns in MIDI map mode, if a controller can drive it.
 export function Slider(props: {
   className?: string
+  'data-learn'?: string
   min: number
   max: number
   step: number
@@ -129,6 +130,7 @@ export function Slider(props: {
     <input
       ref={el}
       className={props.className}
+      data-learn={props['data-learn']}
       type="range"
       min={min}
       max={max}
@@ -263,6 +265,7 @@ export function Knob(props: { label: string } & ({ at: Address } | { macro: stri
       data-tab={macro || liveKnobs.has(id) ? '' : undefined}
       data-knob={macro ? undefined : id}
       data-macro={macro?.id}
+      data-learn={JSON.stringify(target)}
       className={`knob${focused ? ' focused' : ''}${modulated ? ' modulated' : ''}${learningThis ? ' learning' : ''}${macro ? ' macro' : ''}${typingThis ? ' typing' : ''}`}
       title={
         macro

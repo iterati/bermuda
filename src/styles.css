@@ -118,6 +118,11 @@ button {
   border-color: var(--accent);
   color: var(--accent);
 }
+.bar > .mini.map.on {
+  background: rgba(140, 255, 190, 0.16);
+  border-color: var(--midi);
+  color: var(--midi);
+}
 /* the keys, behind ?, under the bar's right end */
 .keys {
   position: absolute;
@@ -242,6 +247,7 @@ button {
   gap: 6px;
 }
 .perform .slot {
+  position: relative;
   flex: none;
   width: 84px;
   height: 100px;
@@ -1104,13 +1110,59 @@ kbd {
   font-size: 11px;
   white-space: nowrap;
 }
+/* what is learning a control, or MIDI map mode's how-to: under the bar, centred, over the panels and the sheet,
+   clear of the error */
 .midi-learning {
+  position: absolute;
+  top: 128px;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  background: rgba(10, 40, 24, 0.9);
+  border: 1px solid var(--midi);
   color: var(--midi);
-  margin-top: 4px;
+  white-space: nowrap;
+  z-index: 4;
+}
+/* in Edit, over the picture, clear of the Rack's knob detail */
+.edit > .midi-learning {
+  left: calc((100% - 560px) / 2);
+}
+/* MIDI map mode: what a controller can drive, outlined, with what drives it */
+.mapping [data-learn] {
+  outline: 1.5px dashed rgba(140, 255, 190, 0.55);
+  outline-offset: 2px;
+}
+.mapping .seg [data-learn] {
+  outline-offset: -2px;
+}
+.mapping .pager {
+  gap: 9px;
+}
+.map-tag {
+  margin-left: 4px;
+  font-size: 10px;
+  font-weight: normal;
+  color: var(--midi);
+}
+.look-name .map-tag {
+  margin-left: auto;
+}
+/* a strip slot's encoder, at its top left, the knob's own MIDI at its top right */
+.perform .slot > .map-tag {
+  position: absolute;
+  top: 3px;
+  left: 4px;
+  margin: 0;
+  padding: 1px 3px;
+  line-height: 1;
+  border-radius: 4px;
+  background: rgba(10, 40, 24, 0.85);
+  z-index: 1;
 }
 .midi-inputs {
   max-width: 170px;

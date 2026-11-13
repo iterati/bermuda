@@ -6,7 +6,9 @@
 // showing to the other with the change loaded on it, and the autopilot walks the bank. A song, the microphone or
 // a tab, once heard, sets the clock's tempo and lands Play's transitions on its beats. Key I shows the frame-time
 // readout over the picture in every view. ⚙ or G opens the setup sheet over Stage, Edit or Decks: MIDI, the looks'
-// saving and files, the bank's management and the pair's files; ? shows the keys.
+// saving and files, the bank's management and the pair's files; ? shows the keys. ◎ map or M is MIDI map mode over
+// Stage, Edit or Decks: every control a controller can drive is outlined with what drives it, and a press on one
+// learns it; what is learning shows under the bar on every view.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { director, missingKeys, pruneTimeline, type Shot } from './direct'
@@ -22,6 +24,7 @@ import {
   learnStrip,
   learnTrigger,
   release,
+  same,
   takes,
   unmapControl,
   waiting,
@@ -83,7 +86,7 @@ import { FrameTime, type Frames } from './ui/FrameTime'
 import { wheelTurn } from './ui/Knob'
 import { KnobDetail } from './ui/KnobDetail'
 import { download, Looks } from './ui/Looks'
-import { Midi } from './ui/Midi'
+import { MapTag, Midi, MidiLearning } from './ui/Midi'
 import { Macros, Modulators } from './ui/Motion'
 import { Music } from './ui/Music'
 import { Perform } from './ui/Perform'
@@ -203,6 +206,8 @@ export function App() {
   // the setup sheet's page open, in Stage, Edit and Decks; and whether the keys show
   const [setup, setSetup] = useState<(typeof SETUP)[number] | null>(null)
   const [keys, setKeys] = useState(false)
+  // MIDI map mode, in Stage, Edit and Decks
+  const [mapping, setMapping] = useState(false)
   // the controls window the UI is undocked into, this one keeping the picture alone, and its copy of the picture;
   // and the document the UI is in
   const [undocked, setUndocked] = useState<Window | null>(null)
@@ -512,8 +517,11 @@ export function App() {
       setQueue([])
       if (document.fullscreenElement) void document.exitFullscreen()
     }
-    // the setup sheet is Stage's, Edit's and Decks'
-    if (next === 'play' || next === 'direct') setSetup(null)
+    // the setup sheet and MIDI map mode are Stage's, Edit's and Decks'
+    if (next === 'play' || next === 'direct') {
+      setSetup(null)
+      setMapping(false)
+    }
     setMode(next)
   }
   // the controls into their own window, from a click or key, styled as this one; once open, it comes to the front.
@@ -816,6 +824,8 @@ export function App() {
     pick: setPicked,
     learning: learningNow,
     learn: learnMidi,
+    mapping,
+    controls,
     positions,
     locked,
     armed: armedNow,
@@ -884,10 +894,15 @@ export function App() {
       else if (e.key === 'p')
         setScene((s) => update(s, (d) => d.presets.push(capturePreset(d, `Preset ${d.presets.length + 1}`))))
       else if ((e.key === 'm' || e.key === 'M') && focused && HAS_MIDI) learnMidi({ knob: focused })
+      else if ((e.key === 'm' || e.key === 'M') && mode !== 'play' && !e.metaKey && !e.ctrlKey && HAS_MIDI)
+        setMapping((m) => !m)
       else if (e.key === 'Escape' && mode === 'play') toMode('stage')
       else if (e.key === 'Escape') {
-        // a control learning keeps the setup sheet open, its learning cancelled
-        if (!learningNow) setSetup(null)
+        // a control learning keeps the setup sheet open and MIDI map mode on, its learning cancelled
+        if (!learningNow) {
+          setSetup(null)
+          setMapping(false)
+        }
         setFocus(null)
         setLearning(null)
         setArmed(null)
@@ -927,6 +942,24 @@ export function App() {
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
+  })
+  // in MIDI map mode a press on a control a controller can drive arms its learn, or cancels it if it is the one
+  // learning, and does nothing else: it reaches no control and focuses nothing
+  useEffect(() => {
+    if (!mapping) return
+    const el = app.current!
+    const onPress = (e: Event) => {
+      const on = (e.target as Element).closest('[data-learn]')
+      if (!on) return
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.type !== 'click') return
+      const t = JSON.parse(on.getAttribute('data-learn')!) as Learning
+      learnMidi(learningNow && same(learningNow, t) ? null : t)
+    }
+    const presses = ['pointerdown', 'mousedown', 'click', 'dblclick']
+    for (const type of presses) el.addEventListener(type, onPress, true)
+    return () => presses.forEach((type) => el.removeEventListener(type, onPress, true))
   })
 
   // the Looks block whole, or its play part
@@ -1071,7 +1104,7 @@ export function App() {
     </aside>
   )
 
-  const cls = `app ${mode}${hidden ? ' hidden' : ''}`
+  const cls = `app ${mode}${hidden ? ' hidden' : ''}${mapping ? ' mapping' : ''}`
   // what floats over the picture ahead of Direct: the readout, the bar and the error; then each view's panels
   const top = (
     <>
@@ -1086,18 +1119,30 @@ export function App() {
           />
           <Dice at={knobsOf(scene).map((k) => k.address)} what="the whole look" />
           <span className="seg">
-            <button className={mode === 'stage' ? 'on' : ''} onClick={() => toMode('stage')}>
+            <button
+              className={mode === 'stage' ? 'on' : ''}
+              data-learn={JSON.stringify({ mode: 'stage' })}
+              onClick={() => toMode('stage')}
+            >
               Stage
+              <MapTag target={{ mode: 'stage' }} />
             </button>
-            <button className={mode === 'edit' ? 'on' : ''} onClick={() => toMode('edit')}>
+            <button
+              className={mode === 'edit' ? 'on' : ''}
+              data-learn={JSON.stringify({ mode: 'edit' })}
+              onClick={() => toMode('edit')}
+            >
               Edit
+              <MapTag target={{ mode: 'edit' }} />
             </button>
             <button
               className={mode === 'decks' ? 'on' : ''}
+              data-learn={JSON.stringify({ mode: 'decks' })}
               onClick={() => toMode('decks')}
               title="A and B in their own previews either side of the mix, to cue one while the other plays (D)"
             >
               Decks
+              <MapTag target={{ mode: 'decks' }} />
             </button>
             <button onClick={() => toMode('play')} title="the picture alone, every change a transition (F)">
               Play
@@ -1162,6 +1207,18 @@ export function App() {
             mutate
           </button>
           <button
+            className={`mini map${mapping ? ' on' : ''}`}
+            disabled={!HAS_MIDI}
+            onClick={() => setMapping((m) => !m)}
+            title={
+              HAS_MIDI
+                ? 'MIDI map: every control a controller can drive shows its mapping; click one, move a control (M)'
+                : 'no Web MIDI here'
+            }
+          >
+            {mapping ? '◉ map on' : '◎ map'}
+          </button>
+          <button
             className={`mini${setup ? ' on' : ''}`}
             onClick={() => setSetup((p) => (p ? null : 'MIDI'))}
             title="setup: MIDI, the looks' saving and presets, the bank's management, the pair's files (G)"
@@ -1183,13 +1240,14 @@ export function App() {
           ) : (
             <>
               H hides · Tab live knobs · Enter types · E edit · D decks · T direct · Space pause · 1-0 looks · [ ]
-              presets · ← → chips · ↑ ↓ knob · PgDn PgUp strip page · M MIDI learn · G setup · S save · P preset · A B
-              side · , . fader · X swap · L loop · R mutate · C roll chip · ⇧C roll look · F play · U undock · O
-              autopilot · N next · I readout
+              presets · ← → chips · ↑ ↓ knob · PgDn PgUp strip page · M map (on a focused knob: learn it) · G setup · S
+              save · P preset · A B side · , . fader · X swap · L loop · R mutate · C roll chip · ⇧C roll look · F play
+              · U undock · O autopilot · N next · I readout
             </>
           )}
         </div>
       )}
+      <MidiLearning looks={looks} />
       {error && (
         <div className="error panel" onClick={() => setError(undefined)}>
           {error} <span className="dim">(click to close)</span>

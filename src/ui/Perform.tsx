@@ -5,6 +5,7 @@ import { useMemo } from 'react'
 import { kindOf, knobKind, knobsOf, type Address, type MidiTarget } from '../scene'
 import { useCtl } from './controls'
 import { Knob } from './Knob'
+import { MapTag } from './Midi'
 
 type Props = {
   slots: (MidiTarget | undefined)[]
@@ -28,6 +29,7 @@ export function Perform({ slots, page, pages, onPage, onMore }: Props) {
     <div className="perform">
       {slots.map((t, i) => (
         <div className="slot" key={i}>
+          <MapTag target={{ strip: i }} />
           {t &&
             ('macro' in t ? (
               <Knob key={t.macro} label={scene.macros.find((m) => m.id === t.macro)!.name} macro={t.macro} />
@@ -39,14 +41,24 @@ export function Perform({ slots, page, pages, onPage, onMore }: Props) {
       <div className="perform-side">
         {pages > 1 && (
           <span className="pager">
-            <button className="mini" title="the page before (PgUp)" onClick={() => onPage(-1)}>
-              ◂
+            <button
+              className="mini"
+              title="the page before (PgUp)"
+              data-learn={JSON.stringify({ page: -1 })}
+              onClick={() => onPage(-1)}
+            >
+              ◂<MapTag target={{ page: -1 }} />
             </button>
             <span>
               page {page + 1}/{pages}
             </span>
-            <button className="mini" title="the next page (PgDn)" onClick={() => onPage(1)}>
-              ▸
+            <button
+              className="mini"
+              title="the next page (PgDn)"
+              data-learn={JSON.stringify({ page: 1 })}
+              onClick={() => onPage(1)}
+            >
+              ▸<MapTag target={{ page: 1 }} />
             </button>
           </span>
         )}

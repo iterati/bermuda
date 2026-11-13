@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { capturePreset } from '../motion'
 import { parseScene, type Scene } from '../scene'
 import { useCtl } from './controls'
+import { MapTag } from './Midi'
 
 type Props = {
   looks: Scene[]
@@ -97,9 +98,15 @@ export function Looks({ looks, saved, onLoad, onSave, onDelete, onError, part }:
           return (
             <li key={look.name} className={current ? 'current' : ''}>
               <div className="look">
-                <button className="look-name" onClick={() => onLoad(look)} title={i < 10 ? `key ${(i + 1) % 10}` : ''}>
+                <button
+                  className="look-name"
+                  data-learn={JSON.stringify({ slot: i })}
+                  onClick={() => onLoad(look)}
+                  title={i < 10 ? `key ${(i + 1) % 10}` : ''}
+                >
                   {i < 10 && <kbd>{(i + 1) % 10}</kbd>}
                   {look.name}
+                  <MapTag target={{ slot: i }} />
                 </button>
                 {!part && saved.has(look.name) && (
                   <button className="mini" title="delete from the browser" onClick={() => onDelete(look.name)}>

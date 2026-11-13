@@ -40,6 +40,7 @@ import {
   STAR_N,
   VARIATIONS,
   type Address,
+  type Controls,
   type LatticeKind,
   type MidiTarget,
   type Level,
@@ -67,6 +68,8 @@ export type Ctl = {
   pick: (chip: string) => void
   learning: Learning | null // what the next MIDI control or button maps to
   learn: (target: Learning | null) => void
+  mapping: boolean // MIDI map mode: each control a controller can drive outlined, with what drives it
+  controls: Controls // the app's own MIDI: its buttons, the A/B fader's CC and the strip's
   positions: ReadonlyMap<string, number> // each MIDI control's last position, 0 to 1, by midi.ts keyOf
   locked: boolean // a look saved in this browser, which the dice leave alone
   armed: Armed | null // the macro learning by example, and the scene as it was armed

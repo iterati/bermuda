@@ -4,6 +4,7 @@ import { useMemo } from 'react'
 import { depthWindow, morphSize } from '../morph'
 import type { Edge, Scene } from '../scene'
 import { Slider } from './Knob'
+import { MapTag } from './Midi'
 import type { Side } from './Picture'
 
 type Props = {
@@ -42,6 +43,7 @@ export function Fader({ pair, side, fader, edge, onSide, onFader, onEdge, onSwap
           viewBox={`0 0 ${W} ${height}`}
           preserveAspectRatio="none"
           height={height}
+          data-learn={JSON.stringify({ fader: true })}
           onPointerDown={(e) => {
             e.currentTarget.setPointerCapture(e.pointerId)
             set(e)
@@ -70,6 +72,7 @@ export function Fader({ pair, side, fader, edge, onSide, onFader, onEdge, onSwap
           })}
           <line className="handle" x1={fader * W} x2={fader * W} y1={0} y2={height} />
         </svg>
+        <MapTag target={{ fader: true }} />
         <button className={`side${side === 'b' ? ' on' : ''}`} title="edit B (key B)" onClick={() => onSide('b')}>
           <kbd>B</kbd>
           <span>{pair.b.name}</span>
