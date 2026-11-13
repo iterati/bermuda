@@ -198,18 +198,20 @@ export function Knob(props: { label: string } & ({ at: Address } | { macro: stri
   // the typed value's field, opened holding the value, selected; its hint over the page just above the knob, as the
   // panel under the knob clips what leaves it, kept there as the panel scrolls
   const field = useRef<HTMLInputElement>(null)
-  const [hintAt, setHintAt] = useState<{ x: number; y: number } | null>(null)
+  const [hintAt, setHintAt] = useState<{ x: number; y: number; body: HTMLElement } | null>(null)
   useLayoutEffect(() => {
     if (!typingThis) return
     field.current!.select()
+    // the knob's own document, the controls window's while the UI is undocked
+    const page = el.current!.ownerDocument
     const place = () => {
       const r = el.current!.getBoundingClientRect()
-      setHintAt({ x: r.x + r.width / 2, y: r.y })
+      setHintAt({ x: r.x + r.width / 2, y: r.y, body: page.body })
     }
     place()
-    window.addEventListener('scroll', place, true)
+    page.defaultView!.addEventListener('scroll', place, true)
     return () => {
-      window.removeEventListener('scroll', place, true)
+      page.defaultView!.removeEventListener('scroll', place, true)
       // a knob gone while its field is open, as a strip page turns, leaves it closed
       done()
     }
@@ -318,7 +320,7 @@ export function Knob(props: { label: string } & ({ at: Address } | { macro: stri
           <div className="type-hint" style={{ left: hintAt.x, top: hintAt.y }}>
             Enter sets · Esc · Tab next · {kind ? `${format(id, lo)} to ${format(id, hi)}` : '0 to 1'}
           </div>,
-          document.body,
+          hintAt.body,
         )}
     </div>
   )

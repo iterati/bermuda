@@ -7,6 +7,7 @@
 // a tab, once heard, sets the clock's tempo and lands Play's transitions on its beats. Key I shows the frame-time
 // readout over the picture in every view.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { director, missingKeys, pruneTimeline, type Shot } from './direct'
 import { BANK, LOOKS } from './looks'
 import {
@@ -194,6 +195,11 @@ export function App() {
   const [shown, setShown] = useState(scene)
   const [mode, setMode] = useState<View | 'play' | 'direct'>('stage')
   const [hidden, setHidden] = useState(false)
+  // the controls window the UI is undocked into, this one keeping the picture alone, and its copy of the picture;
+  // and the document the UI is in
+  const [undocked, setUndocked] = useState<Window | null>(null)
+  const [monitor, setMonitor] = useState<HTMLCanvasElement | null>(null)
+  const doc = undocked?.document ?? document
   // the frame-time readout, off at load, and its numbers while it is on
   const [readout, setReadout] = useState(false)
   const [frames, setFrames] = useState<Frames>()
@@ -405,10 +411,10 @@ export function App() {
       setTurned((t) => ({ ...t, [to]: new Set() }))
       setTyping(null)
       tabbing.current = false
-      if (document.activeElement instanceof HTMLElement && document.activeElement.matches('.knob'))
-        document.activeElement.blur()
+      const on = doc.activeElement as HTMLElement | null
+      if (on?.matches('.knob')) on.blur()
     },
-    [lives, pair, side],
+    [lives, pair, side, doc],
   )
   const load = useCallback(
     (look: Scene, presetIndex?: number) => put(keyframe(look, presetIndex), presetIndex),
@@ -479,6 +485,11 @@ export function App() {
   }, [mode, auto.on, running, run, queue.length, cycle, seconds, refused])
 
   const toMode = (next: View | 'play' | 'direct') => {
+    // the Stage alone undocks: leaving it closes the controls window, and the view opens here
+    if (next !== 'stage' && undocked) {
+      undocked.close()
+      setUndocked(null)
+    }
     if (next === 'play') {
       // Play goes on from the side showing, the fader run home to it if it sat between, and fills the screen
       const showing = fader < 0.5 ? 'a' : 'b'
@@ -494,6 +505,28 @@ export function App() {
     }
     setMode(next)
   }
+  // the controls into their own window, from a click or key, styled as this one; once open, it comes to the front.
+  // Closed, they dock back.
+  const undock = () => {
+    if (undocked) return undocked.focus()
+    const w = window.open('', 'bermuda-controls', 'popup,width=1280,height=800')
+    if (!w) return setError('the controls window was blocked: allow pop-ups for this page')
+    // in place of what it held, as one reopened by its name holds them already
+    w.document.head.replaceChildren(
+      ...[...document.querySelectorAll('style, link[rel=stylesheet]')].map((el) => el.cloneNode(true)),
+    )
+    w.document.title = 'bermuda · controls'
+    w.document.body.style.margin = '0'
+    w.addEventListener('pagehide', () => setUndocked((u) => (u === w ? null : u)))
+    setUndocked(w)
+  }
+  // this window closing closes the controls window
+  useEffect(() => {
+    if (!undocked) return
+    const close = () => undocked.close()
+    window.addEventListener('pagehide', close)
+    return () => window.removeEventListener('pagehide', close)
+  }, [undocked])
   // the entry to add to the bank: the look playing, or its preset in play; it must be one of the looks
   const add = () => {
     const s = pair[side]
@@ -545,29 +578,33 @@ export function App() {
   // the walk of Tab (by 1) and Shift-Tab (by -1) over the live knobs on screen, round from the last to the first: the
   // Perform strip's first, then the rest in the page's order; from anywhere else, the next one after it on the page.
   // A scene knob takes the app's focus too, as a click gives it.
-  const walk = useCallback((by: 1 | -1) => {
-    const shown = [...document.querySelectorAll<HTMLElement>('[data-tab]')].filter((el) => el.checkVisibility())
-    const stops = [...shown.filter((el) => el.closest('.perform')), ...shown.filter((el) => !el.closest('.perform'))]
-    if (!stops.length) return
-    const at = document.activeElement!
-    const i = stops.indexOf(at as HTMLElement)
-    const after = (el: HTMLElement) => !!(at.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)
-    const next =
-      i >= 0
-        ? stops[(i + by + stops.length) % stops.length]
-        : by > 0
-          ? (stops.find(after) ?? stops[0])
-          : (stops.findLast((el) => !after(el)) ?? stops[stops.length - 1])
-    tabbing.current = true
-    next.focus()
-    if (next.dataset.knob) setFocus(next.dataset.knob)
-  }, [])
-  // a click ends the Tab focus
+  const walk = useCallback(
+    (by: 1 | -1) => {
+      const shown = [...doc.querySelectorAll<HTMLElement>('[data-tab]')].filter((el) => el.checkVisibility())
+      const stops = [...shown.filter((el) => el.closest('.perform')), ...shown.filter((el) => !el.closest('.perform'))]
+      if (!stops.length) return
+      const at = doc.activeElement!
+      const i = stops.indexOf(at as HTMLElement)
+      const after = (el: HTMLElement) => !!(at.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)
+      const next =
+        i >= 0
+          ? stops[(i + by + stops.length) % stops.length]
+          : by > 0
+            ? (stops.find(after) ?? stops[0])
+            : (stops.findLast((el) => !after(el)) ?? stops[stops.length - 1])
+      tabbing.current = true
+      next.focus()
+      if (next.dataset.knob) setFocus(next.dataset.knob)
+    },
+    [doc],
+  )
+  // a click in either window ends the Tab focus
   useEffect(() => {
     const click = () => (tabbing.current = false)
-    window.addEventListener('pointerdown', click, true)
-    return () => window.removeEventListener('pointerdown', click, true)
-  }, [])
+    const wins = undocked ? [window, undocked] : [window]
+    for (const v of wins) v.addEventListener('pointerdown', click, true)
+    return () => wins.forEach((v) => v.removeEventListener('pointerdown', click, true))
+  }, [undocked])
 
   // a focused knob that an edit took away is dropped
   const focused = focus && knobsOf(scene).some((k) => k.address === focus) ? focus : null
@@ -776,7 +813,9 @@ export function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return
+      // by its tag, as the controls window's elements are of its realm, not this one's
+      const tag = (e.target as Element).tagName
+      if (tag === 'INPUT' || tag === 'SELECT') return
       if (e.key === 'Tab') {
         e.preventDefault()
         walk(e.shiftKey ? -1 : 1)
@@ -786,12 +825,11 @@ export function App() {
         if (e.key === 't' || e.key === 'Escape') toMode('stage')
       } else if (e.key === 'Enter') {
         // the value of the focused knob, or of the strip macro Tab is on, typed in its field; a button keeps its Enter
-        const el = document.activeElement
-        if (el !== document.body && !el?.matches('.knob')) return
-        const macro = tabbing.current && el instanceof HTMLElement ? el.dataset.macro : undefined
+        const el = doc.activeElement as HTMLElement | null
+        if (el !== doc.body && !el?.matches('.knob')) return
+        const macro = tabbing.current ? el?.dataset.macro : undefined
         const t = macro ? { macro } : focused && { knob: focused }
-        if (!t || !document.querySelector(`[data-${macro ? 'macro' : 'knob'}="${CSS.escape(macro ?? focused!)}"]`))
-          return
+        if (!t || !doc.querySelector(`[data-${macro ? 'macro' : 'knob'}="${CSS.escape(macro ?? focused!)}"]`)) return
         e.preventDefault()
         setTyping(t)
       } else if (e.key === 't') toMode('direct')
@@ -801,6 +839,7 @@ export function App() {
       } else if (e.key === 'e' || e.key === 'E') toMode(mode === 'edit' ? 'stage' : 'edit')
       else if (e.key === 'd' || e.key === 'D') toMode(mode === 'decks' ? 'stage' : 'decks')
       else if (e.key === 'f') toMode(mode === 'play' ? 'stage' : 'play')
+      else if ((e.key === 'u' || e.key === 'U') && mode === 'stage' && !e.metaKey && !e.ctrlKey) undock()
       else if (e.key === 'o') changeBank({ ...bank, autopilot: { ...auto, on: !auto.on } })
       else if (e.key === 'n') autopilot()
       else if (e.key === 'PageDown' || e.key === 'PageUp') {
@@ -837,7 +876,7 @@ export function App() {
         setFocus(null)
         setLearning(null)
         setArmed(null)
-        if (tabbing.current && document.activeElement instanceof HTMLElement) document.activeElement.blur()
+        if (tabbing.current) (doc.activeElement as HTMLElement | null)?.blur()
         tabbing.current = false
       } else if (e.key === 'l') toggleLoop()
       else if (e.key === 'r') mutateShown()
@@ -852,20 +891,22 @@ export function App() {
         edit((d) => dice(d, at, Math.random))
       }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    // the controls window's keys act where they were pressed
+    const wins = undocked ? [window, undocked] : [window]
+    for (const v of wins) v.addEventListener('keydown', onKey)
+    return () => wins.forEach((v) => v.removeEventListener('keydown', onKey))
   })
 
-  // the wheel over the picture turns the knob or strip macro Tab is on, and else nothing (over a knob, each knob
-  // takes its own)
+  // the wheel over the picture, or the controls window's copy of it, turns the knob or strip macro Tab is on, and else
+  // nothing (over a knob, each knob takes its own)
   const app = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = app.current!
     const onWheel = (e: WheelEvent) => {
-      const on = document.activeElement
-      if (!tabbing.current || !(on instanceof HTMLElement) || !on.checkVisibility()) return
+      const on = doc.activeElement as HTMLElement | null
+      if (!tabbing.current || !on?.checkVisibility()) return
       const t = on.dataset.knob ? { knob: on.dataset.knob } : on.dataset.macro ? { macro: on.dataset.macro } : null
-      if (!t || mode === 'play' || !(e.target instanceof Element && e.target.matches('.picture'))) return
+      if (!t || mode === 'play' || !(e.target as Element).matches('.picture')) return
       e.preventDefault()
       nudge(t, wheelTurn(e))
     }
@@ -953,9 +994,270 @@ export function App() {
     />
   )
 
+  const cls = `app ${mode}${hidden ? ' hidden' : ''}`
+  // what floats over the picture ahead of Direct: the readout, the bar and the error; then each view's panels
+  const top = (
+    <>
+      {readout && frames && <FrameTime {...frames} />}
+      {mode !== 'play' && (
+        <header className="bar panel">
+          <span className="brand">bermuda</span>
+          <input
+            className="look-title"
+            value={scene.name}
+            onChange={(e) => e.target.value && edit((d) => (d.name = e.target.value))}
+          />
+          <Dice at={knobsOf(scene).map((k) => k.address)} what="the whole look" />
+          <span className="seg">
+            <button className={mode === 'stage' ? 'on' : ''} onClick={() => toMode('stage')}>
+              Stage
+            </button>
+            <button className={mode === 'edit' ? 'on' : ''} onClick={() => toMode('edit')}>
+              Edit
+            </button>
+            <button
+              className={mode === 'decks' ? 'on' : ''}
+              onClick={() => toMode('decks')}
+              title="A and B in their own previews either side of the mix, to cue one while the other plays (D)"
+            >
+              Decks
+            </button>
+            <button onClick={() => toMode('play')} title="the picture alone, every change a transition (F)">
+              Play
+            </button>
+            <button
+              className={mode === 'direct' ? 'on' : ''}
+              onClick={() => toMode(mode === 'direct' ? 'stage' : 'direct')}
+              title="a timeline of keys and curves over a song, and its export to video (T)"
+            >
+              Direct
+            </button>
+          </span>
+          {mode === 'stage' && (
+            <button
+              className="mini"
+              onClick={undock}
+              title="undock: the controls in their own window, this one the picture alone (U); close it to dock them back"
+            >
+              {undocked ? '⇲ docked out' : '⇱ undock'}
+            </button>
+          )}
+          <button className="mini" onClick={() => setRunning((r) => !r)} title="space">
+            {running ? '❚❚' : '▶'}
+          </button>
+          <label className="num" title={heard?.locked ? "the music's tempo" : undefined}>
+            <span>{heard?.locked ? '♪ bpm' : 'bpm'}</span>
+            <input
+              type="number"
+              min={10}
+              max={300}
+              value={tempo}
+              disabled={heard?.locked}
+              onChange={(e) => e.target.valueAsNumber >= 10 && setBpm(Math.min(300, e.target.valueAsNumber))}
+            />
+          </label>
+          <label
+            className="check"
+            title="loop: every period snapped to the loop's length, so it plays round seamlessly (L)"
+          >
+            <input type="checkbox" checked={!!scene.loop} onChange={toggleLoop} />
+            loop
+          </label>
+          {scene.loop && (
+            <label className="num">
+              <span>loop s</span>
+              <input
+                type="number"
+                min={0.1}
+                max={3600}
+                value={scene.loop.seconds}
+                onKeyDown={(e) => e.stopPropagation()}
+                onChange={(e) => {
+                  const v = e.target.valueAsNumber
+                  if (v >= 0.1 && v <= 3600) edit((d) => (d.loop = { seconds: v }))
+                }}
+              />
+            </label>
+          )}
+          <button
+            className="mini"
+            onClick={mutateShown}
+            title="nudge every knob with a play range, and every macro, at random inside its range (R)"
+          >
+            mutate
+          </button>
+          {mode === 'direct' ? (
+            <span className="dim keys">
+              H hides · Space play · Home rewinds · wheel zooms · shift-drag the waveform loops · double-click adds a
+              key · T or Esc to Stage
+            </span>
+          ) : (
+            <span className="dim keys">
+              H hides · Tab live knobs · Enter types · E edit · D decks · T direct · Space pause · 1-0 looks · [ ]
+              presets · ← → chips · ↑ ↓ knob · PgDn PgUp strip page · M MIDI learn · S save · P preset · A B side · , .
+              fader · X swap · L loop · R mutate · C roll chip · ⇧C roll look · F play · U undock · O autopilot · N next
+              · I readout
+            </span>
+          )}
+        </header>
+      )}
+      {error && (
+        <div className="error panel" onClick={() => setError(undefined)}>
+          {error} <span className="dim">(click to close)</span>
+        </div>
+      )}
+    </>
+  )
+  const views =
+    mode === 'direct' ? null : mode === 'play' ? (
+      <aside className="panel playbar">
+        <div className="now">
+          <b>{run ? pair[run.to].name : scene.name}</b>
+          {heard && (
+            <span className="dim music-tempo" title="the music's tempo; each change lands on its beat">
+              {' '}
+              ♪ {heard.locked ? tempo : '…'}
+            </span>
+          )}
+          {next && (
+            <span className="dim">
+              {' '}
+              → {next.entry === current ? 'inside the look' : (next.entry ?? next.scene.name)}
+            </span>
+          )}
+          <button className="mini" title="back to Stage (F or Esc)" onClick={() => toMode('stage')}>
+            stage
+          </button>
+        </div>
+        {bankPanel}
+      </aside>
+    ) : mode === 'stage' ? (
+      <>
+        <section className="panel top">{faderPanel}</section>
+        <nav className="panel left">
+          <Chain picked={pickedChip} />
+        </nav>
+        <aside className="panel right">
+          <div className="seg tabs">
+            {TABS.map((t) => (
+              <button key={t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>
+                {t}
+              </button>
+            ))}
+          </div>
+          {tab === 'Music' && musicBlock}
+          {tab === 'Motion' && <Modulators />}
+          {tab === 'Macros' && <Macros />}
+          {tab === 'MIDI' && midiBlock}
+          {tab === 'Bank' && (
+            <>
+              {looksPanel}
+              {bankPanel}
+            </>
+          )}
+        </aside>
+        {/* the knob detail floats over the knobs' panel, so opening it moves no knob */}
+        <div className="stage-bottom">
+          {more && focused && (
+            <div className="panel knob-slot">
+              <KnobDetail />
+            </div>
+          )}
+          <section className="panel bottom">
+            {more ? (
+              <>
+                <button className="mini strip-back" title="back to the Perform strip" onClick={() => setMore(false)}>
+                  ◂ strip
+                </button>
+                <Section chip={pickedChip} />
+              </>
+            ) : (
+              <Perform slots={slots} page={page} pages={pages} onPage={turnPage} onMore={() => setMore(true)} />
+            )}
+          </section>
+        </div>
+      </>
+    ) : mode === 'decks' ? (
+      <>
+        {(['a', 'b'] as const).map((s) => (
+          <div key={s} className={`deck-column ${s}`}>
+            <Deck
+              side={s}
+              scene={pair[s]}
+              preset={pair[s].presets[presets[s]]?.name}
+              share={run ? undefined : s === 'a' ? 1 - fader : fader}
+              editing={side === s}
+              looks={looks}
+              canvas={(el) => {
+                decks.current[s] = el
+              }}
+              onEdit={() => setSide(s)}
+              onLoad={(look, presetIndex) => put(keyframe(look, presetIndex), presetIndex, s)}
+            />
+            {s === 'a' ? (
+              <nav className="panel">
+                <div className="block-title" title="the chain, the knobs and the panels under B edit this side">
+                  Editing {side.toUpperCase()}
+                </div>
+                <Chain picked={pickedChip} />
+              </nav>
+            ) : (
+              <aside className="panel">
+                {musicBlock}
+                <Modulators />
+                <Macros />
+                {midiBlock}
+                {looksPanel}
+                {bankPanel}
+              </aside>
+            )}
+          </div>
+        ))}
+        <section className="mixer">
+          <div className="panel">{faderPanel}</div>
+          <div className="panel">
+            <Section chip={pickedChip} />
+          </div>
+          {/* the knob detail floats over the mix's foot, so opening it moves no knob */}
+          {focused && (
+            <div className="panel knob-slot">
+              <KnobDetail />
+            </div>
+          )}
+        </section>
+      </>
+    ) : (
+      <aside className="rack">
+        <div className="panel">{faderPanel}</div>
+        <div className="panel rack-chain">
+          <Chain picked={pickedChip} />
+        </div>
+        {/* the knob detail's slot is always there and of one height, so focusing a knob moves no knob */}
+        <div className="panel knob-slot">{focused ? <KnobDetail /> : <span className="dim">no knob focused</span>}</div>
+        {chips.map((chip) => (
+          <div
+            key={chip}
+            className={`panel rack-section${chip === pickedChip ? ' picked' : ''}`}
+            onClick={() => setPicked(chip)}
+          >
+            <Section chip={chip} />
+          </div>
+        ))}
+        <div className="panel">
+          {musicBlock}
+          <Modulators />
+          <Macros />
+          {midiBlock}
+        </div>
+        <div className="panel">{looksPanel}</div>
+        <div className="panel">{bankPanel}</div>
+      </aside>
+    )
+  // undocked, this window keeps the picture alone, with Direct hidden in it as in the Stage, and the rest is in the
+  // controls window over its copy of the picture
   return (
     <CtlContext.Provider value={ctl}>
-      <div ref={app} className={`app ${mode}${hidden ? ' hidden' : ''}`}>
+      <div ref={undocked ? undefined : app} className={cls}>
         <Picture
           pair={pair}
           side={side}
@@ -979,106 +1281,9 @@ export function App() {
           aspect={mode === 'direct' ? video.width / video.height : undefined}
           ahead={ahead}
           onFrames={readout ? setFrames : undefined}
+          monitor={monitor}
         />
-        {readout && frames && <FrameTime {...frames} />}
-        {mode !== 'play' && (
-          <header className="bar panel">
-            <span className="brand">bermuda</span>
-            <input
-              className="look-title"
-              value={scene.name}
-              onChange={(e) => e.target.value && edit((d) => (d.name = e.target.value))}
-            />
-            <Dice at={knobsOf(scene).map((k) => k.address)} what="the whole look" />
-            <span className="seg">
-              <button className={mode === 'stage' ? 'on' : ''} onClick={() => toMode('stage')}>
-                Stage
-              </button>
-              <button className={mode === 'edit' ? 'on' : ''} onClick={() => toMode('edit')}>
-                Edit
-              </button>
-              <button
-                className={mode === 'decks' ? 'on' : ''}
-                onClick={() => toMode('decks')}
-                title="A and B in their own previews either side of the mix, to cue one while the other plays (D)"
-              >
-                Decks
-              </button>
-              <button onClick={() => toMode('play')} title="the picture alone, every change a transition (F)">
-                Play
-              </button>
-              <button
-                className={mode === 'direct' ? 'on' : ''}
-                onClick={() => toMode(mode === 'direct' ? 'stage' : 'direct')}
-                title="a timeline of keys and curves over a song, and its export to video (T)"
-              >
-                Direct
-              </button>
-            </span>
-            <button className="mini" onClick={() => setRunning((r) => !r)} title="space">
-              {running ? '❚❚' : '▶'}
-            </button>
-            <label className="num" title={heard?.locked ? "the music's tempo" : undefined}>
-              <span>{heard?.locked ? '♪ bpm' : 'bpm'}</span>
-              <input
-                type="number"
-                min={10}
-                max={300}
-                value={tempo}
-                disabled={heard?.locked}
-                onChange={(e) => e.target.valueAsNumber >= 10 && setBpm(Math.min(300, e.target.valueAsNumber))}
-              />
-            </label>
-            <label
-              className="check"
-              title="loop: every period snapped to the loop's length, so it plays round seamlessly (L)"
-            >
-              <input type="checkbox" checked={!!scene.loop} onChange={toggleLoop} />
-              loop
-            </label>
-            {scene.loop && (
-              <label className="num">
-                <span>loop s</span>
-                <input
-                  type="number"
-                  min={0.1}
-                  max={3600}
-                  value={scene.loop.seconds}
-                  onKeyDown={(e) => e.stopPropagation()}
-                  onChange={(e) => {
-                    const v = e.target.valueAsNumber
-                    if (v >= 0.1 && v <= 3600) edit((d) => (d.loop = { seconds: v }))
-                  }}
-                />
-              </label>
-            )}
-            <button
-              className="mini"
-              onClick={mutateShown}
-              title="nudge every knob with a play range, and every macro, at random inside its range (R)"
-            >
-              mutate
-            </button>
-            {mode === 'direct' ? (
-              <span className="dim keys">
-                H hides · Space play · Home rewinds · wheel zooms · shift-drag the waveform loops · double-click adds a
-                key · T or Esc to Stage
-              </span>
-            ) : (
-              <span className="dim keys">
-                H hides · Tab live knobs · Enter types · E edit · D decks · T direct · Space pause · 1-0 looks · [ ]
-                presets · ← → chips · ↑ ↓ knob · PgDn PgUp strip page · M MIDI learn · S save · P preset · A B side · ,
-                . fader · X swap · L loop · R mutate · C roll chip · ⇧C roll look · F play · O autopilot · N next · I
-                readout
-              </span>
-            )}
-          </header>
-        )}
-        {error && (
-          <div className="error panel" onClick={() => setError(undefined)}>
-            {error} <span className="dim">(click to close)</span>
-          </div>
-        )}
+        {!undocked && top}
         <Direct
           timeline={timeline}
           looks={looks}
@@ -1094,156 +1299,16 @@ export function App() {
           onTimeline={changeTimeline}
           onError={setError}
         />
-        {mode === 'direct' ? null : mode === 'play' ? (
-          <aside className="panel playbar">
-            <div className="now">
-              <b>{run ? pair[run.to].name : scene.name}</b>
-              {heard && (
-                <span className="dim music-tempo" title="the music's tempo; each change lands on its beat">
-                  {' '}
-                  ♪ {heard.locked ? tempo : '…'}
-                </span>
-              )}
-              {next && (
-                <span className="dim">
-                  {' '}
-                  → {next.entry === current ? 'inside the look' : (next.entry ?? next.scene.name)}
-                </span>
-              )}
-              <button className="mini" title="back to Stage (F or Esc)" onClick={() => toMode('stage')}>
-                stage
-              </button>
-            </div>
-            {bankPanel}
-          </aside>
-        ) : mode === 'stage' ? (
-          <>
-            <section className="panel top">{faderPanel}</section>
-            <nav className="panel left">
-              <Chain picked={pickedChip} />
-            </nav>
-            <aside className="panel right">
-              <div className="seg tabs">
-                {TABS.map((t) => (
-                  <button key={t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>
-                    {t}
-                  </button>
-                ))}
-              </div>
-              {tab === 'Music' && musicBlock}
-              {tab === 'Motion' && <Modulators />}
-              {tab === 'Macros' && <Macros />}
-              {tab === 'MIDI' && midiBlock}
-              {tab === 'Bank' && (
-                <>
-                  {looksPanel}
-                  {bankPanel}
-                </>
-              )}
-            </aside>
-            {/* the knob detail floats over the knobs' panel, so opening it moves no knob */}
-            <div className="stage-bottom">
-              {more && focused && (
-                <div className="panel knob-slot">
-                  <KnobDetail />
-                </div>
-              )}
-              <section className="panel bottom">
-                {more ? (
-                  <>
-                    <button
-                      className="mini strip-back"
-                      title="back to the Perform strip"
-                      onClick={() => setMore(false)}
-                    >
-                      ◂ strip
-                    </button>
-                    <Section chip={pickedChip} />
-                  </>
-                ) : (
-                  <Perform slots={slots} page={page} pages={pages} onPage={turnPage} onMore={() => setMore(true)} />
-                )}
-              </section>
-            </div>
-          </>
-        ) : mode === 'decks' ? (
-          <>
-            {(['a', 'b'] as const).map((s) => (
-              <div key={s} className={`deck-column ${s}`}>
-                <Deck
-                  side={s}
-                  scene={pair[s]}
-                  preset={pair[s].presets[presets[s]]?.name}
-                  share={run ? undefined : s === 'a' ? 1 - fader : fader}
-                  editing={side === s}
-                  looks={looks}
-                  canvas={(el) => {
-                    decks.current[s] = el
-                  }}
-                  onEdit={() => setSide(s)}
-                  onLoad={(look, presetIndex) => put(keyframe(look, presetIndex), presetIndex, s)}
-                />
-                {s === 'a' ? (
-                  <nav className="panel">
-                    <div className="block-title" title="the chain, the knobs and the panels under B edit this side">
-                      Editing {side.toUpperCase()}
-                    </div>
-                    <Chain picked={pickedChip} />
-                  </nav>
-                ) : (
-                  <aside className="panel">
-                    {musicBlock}
-                    <Modulators />
-                    <Macros />
-                    {midiBlock}
-                    {looksPanel}
-                    {bankPanel}
-                  </aside>
-                )}
-              </div>
-            ))}
-            <section className="mixer">
-              <div className="panel">{faderPanel}</div>
-              <div className="panel">
-                <Section chip={pickedChip} />
-              </div>
-              {/* the knob detail floats over the mix's foot, so opening it moves no knob */}
-              {focused && (
-                <div className="panel knob-slot">
-                  <KnobDetail />
-                </div>
-              )}
-            </section>
-          </>
-        ) : (
-          <aside className="rack">
-            <div className="panel">{faderPanel}</div>
-            <div className="panel rack-chain">
-              <Chain picked={pickedChip} />
-            </div>
-            {/* the knob detail's slot is always there and of one height, so focusing a knob moves no knob */}
-            <div className="panel knob-slot">
-              {focused ? <KnobDetail /> : <span className="dim">no knob focused</span>}
-            </div>
-            {chips.map((chip) => (
-              <div
-                key={chip}
-                className={`panel rack-section${chip === pickedChip ? ' picked' : ''}`}
-                onClick={() => setPicked(chip)}
-              >
-                <Section chip={chip} />
-              </div>
-            ))}
-            <div className="panel">
-              {musicBlock}
-              <Modulators />
-              <Macros />
-              {midiBlock}
-            </div>
-            <div className="panel">{looksPanel}</div>
-            <div className="panel">{bankPanel}</div>
-          </aside>
-        )}
+        {!undocked && views}
+        {undocked &&
+          createPortal(
+            <div ref={app} className={cls}>
+              <canvas ref={setMonitor} className="picture" />
+              {top}
+              {views}
+            </div>,
+            undocked.document.body,
+          )}
       </div>
     </CtlContext.Provider>
   )

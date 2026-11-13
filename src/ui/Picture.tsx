@@ -7,7 +7,8 @@
 // on, and what is heard goes up with the live scene, paused or not. In Direct it draws the timeline's frame instead,
 // at the export's aspect. Each draw is given the parts it needs, a side's alone and the pair's for the morph between
 // them, and the renderer warms what may draw next between frames; while the readout is on, the frames a second and
-// what the picture drew on go up a few times a second.
+// what the picture drew on go up a few times a second. While the UI is undocked, each frame is copied to the controls
+// window's monitor.
 import { useEffect, useMemo, useRef } from 'react'
 import type { Shot } from '../direct'
 import { snapLoop } from '../loop'
@@ -40,6 +41,7 @@ type Props = {
   aspect?: number // width over height, else the picture fills the screen
   ahead?: Set<Part>[] // the parts sets the app may draw next, in order, for the warm-up after the pair's
   onFrames?: (frames: Frames) => void // the readout's numbers, while it is on
+  monitor?: HTMLCanvasElement | null // the controls window's copy of the frame, while the UI is undocked
 }
 
 const density = () => Math.min(window.devicePixelRatio, 1.5)
@@ -179,6 +181,12 @@ export function Picture(props: Props) {
       if (run && through >= 1 && !landed) {
         landed = true
         onLand()
+      }
+      const mon = latest.current.monitor
+      if (mon?.clientWidth) {
+        if (mon.width !== mon.clientWidth || mon.height !== mon.clientHeight)
+          [mon.width, mon.height] = [mon.clientWidth, mon.clientHeight]
+        mon.getContext('2d')!.drawImage(el, 0, 0, mon.width, mon.height)
       }
       if (frame++ % 4 === 0) onLive(side === 'a' ? a : b, heardNow)
       raf = requestAnimationFrame(tick)
