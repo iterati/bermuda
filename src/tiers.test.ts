@@ -171,6 +171,14 @@ const state = (selector: string) =>
     modulated: el.classList.contains('modulated'),
     typed: !!document.querySelector('.knob-type'),
   }))
+// the value a knob shows once it is no longer from, as the live scene shows it a frame or more late, or as it is
+// after a few seconds
+async function moved(selector: string, from: string | null | undefined) {
+  let value = from
+  for (const end = Date.now() + 5000; Date.now() < end && value === from; await pause(50))
+    value = (await state(selector)).value
+  return value
+}
 const centre = (selector: string) =>
   page.$eval(selector, (el) => {
     el.scrollIntoView({ block: 'center' })
@@ -333,15 +341,17 @@ describe('the tiers', () => {
     })
     const before = await state(sel)
     expect(before).toMatchObject({ focused: false, modulated: false, typed: false })
-    // the wheel
+    // the wheel, down and up, so one way would move it from either end, and the live scene's late frames past
     const { x, y } = await centre(sel)
     await page.mouse.move(x, y)
-    for (let i = 0; i < 3; i++) {
-      await page.mouse.wheel({ deltaY: -100 })
-      await pause(100)
+    for (const deltaY of [100, -100]) {
+      for (let i = 0; i < 3; i++) {
+        await page.mouse.wheel({ deltaY })
+        await pause(100)
+      }
+      await pause(1000)
+      expect(await state(sel)).toEqual(before)
     }
-    await pause()
-    expect(await state(sel)).toEqual(before)
     // a press, which focuses nothing, then Enter, and a double-click
     await page.mouse.click(x, y)
     await pause()
@@ -394,7 +404,7 @@ describe('the tiers', () => {
     await page.mouse.move(x, y)
     await page.mouse.wheel({ deltaY: 100 })
     await pause()
-    expect((await state(sel)).value).not.toBe(before.value)
+    expect(await moved(sel, before.value)).not.toBe(before.value)
     expect(await page.$eval(sel, (el) => [el.classList.contains('idle'), el.hasAttribute('data-tab')])).toEqual([
       false,
       true,
@@ -455,7 +465,7 @@ describe('the tiers', () => {
     await page.mouse.move(x, y)
     await page.mouse.wheel({ deltaY: 100 })
     await pause()
-    expect((await state(sel)).value).not.toBe(before)
+    expect(await moved(sel, before)).not.toBe(before)
     expect(await page.$eval(sel, (el) => el.getAttribute('title')!.split('\n')[0])).toBe(
       `${knobKind(dead).label}: ${knobKind(dead).help}`,
     )

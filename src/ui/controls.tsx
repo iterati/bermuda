@@ -66,7 +66,7 @@ export type Ctl = {
   set: (t: MidiTarget, value: number) => void // a value typed, clamped to the hard range (a macro's 0 to 1); turned
   liveKnobs: ReadonlySet<Address> // the knobs live to the hand (scene.ts liveKnob), the stops of Tab's walk
   offKnobs: ReadonlySet<Address> // the knobs dead under the scene's settings, their kind's shows false
-  tiers: boolean // inside the Stage's context panel on a chip: its knobs live, idle (dimmed) or off (greyed, not turned)
+  tiers: boolean // in the Stage's context panel on a chip: its knobs live, idle (dimmed) or off (greyed, not turned)
   typing: Typing | null // the knob or macro whose value is being typed
   type: Dispatch<SetStateAction<Typing | null>>
   walk: (by: 1 | -1) => void // Tab's walk on to the next live knob on screen, or back to the one before
@@ -239,22 +239,23 @@ const Group = ({
 }
 
 // A row: its title, its menus, pad and buttons (children), then its knobs; the knobs that fold (dead, or at rest
-// and untouched) go into a +N at its end, which opens the row to show them. A focused knob never folds. In the
-// Stage's context panel only the off ones fold, into an off N, each with its why, and the idle ones show. A row with
+// and untouched) go into a +N at its end, which opens the row to show them; in the Stage's context panel only the
+// off ones fold, into an off N, each with its why, and the idle ones show. A focused knob never folds. A row with
 // a play range ends in its dice, which roll its knobs, folded ones too.
 function Row({ title, knobs, children }: { title?: string; knobs: [string, Address][]; children?: ReactNode }) {
   const { scene, focus, tiers, offKnobs } = useCtl()
   const [open, setOpen] = useState(false)
   // the scene holds still between frames, while the live one moves
   const all = useMemo(() => knobsOf(scene), [scene])
-  const hidden = knobs.filter(([, at]) =>
-    tiers
-      ? offKnobs.has(at)
-      : at !== focus &&
-        folded(
-          scene,
-          all.find((k) => k.address === at)!,
-        ),
+  const hidden = knobs.filter(
+    ([, at]) =>
+      at !== focus &&
+      (tiers
+        ? offKnobs.has(at)
+        : folded(
+            scene,
+            all.find((k) => k.address === at)!,
+          )),
   )
   return (
     <div className="row">
@@ -290,7 +291,7 @@ export function labelOf(all: readonly KnobAt[], address: Address) {
 
 // The Stage's context panel on a chip, under the knob's detail: its live knobs in the chip's order, each on the
 // strip's page showing (slots) tagged with its encoder, then the way to the whole chip, its every row and its menus
-// and buttons, closed each time the panel turns to the chip.
+// and buttons: closed each time the panel turns to the chip from closed or another view, kept as the chip changes.
 export function LiveBlock({ chip, slots }: { chip: string; slots: readonly (MidiTarget | undefined)[] }) {
   const { scene, liveKnobs, offKnobs } = useCtl()
   const [whole, setWhole] = useState(false)
@@ -302,9 +303,7 @@ export function LiveBlock({ chip, slots }: { chip: string; slots: readonly (Midi
     <>
       <div className="live-block">
         <div className="live-head">
-          <span>
-            <b>live {live.length}</b> <span className="dim">· in the chip&apos;s order</span>
-          </span>
+          <b>live {live.length}</b> <span className="dim">· in the chip&apos;s order</span>
         </div>
         <div className="row live-row">
           {live.map(({ address }) => (

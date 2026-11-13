@@ -1,8 +1,9 @@
 // Undocking, the app itself in headless Chrome at 1280x800, on Tapestry 1: U or ⇱ undock opens the controls window,
 // the UI in it with a copy of the picture, and the main window keeps the picture alone; open, either brings the
 // window to the front. The Stage there is a console: the copy at the top left with the looks under it, and the
-// fader, the context panel, always open, and the bottom deck beside them; docked back it is the play surface again. The keys, Tab, Enter and the wheel work in the controls window, a text field there keeps its
-// keys, and keys pressed in the main window still reach the app. Edit, Decks and Direct undock the same way, each
+// fader, the context panel, always open, and the bottom deck beside them; docked back it is the play surface again.
+// The keys, Tab, Enter and the wheel work in the controls window, a text field there keeps its keys, and keys pressed
+// in the main window still reach the app. Edit, Decks and Direct undock the same way, each
 // view's copy of the picture in its picture's place and whole in its own shape, the main window's picture whole,
 // Direct's framed; moving among them keeps the UI undocked, and Direct's panel moves without a remount. Closing the
 // controls window docks the UI back in its view, the picture never rebuilt, and Play docks it back.
