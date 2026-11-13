@@ -89,17 +89,10 @@ const RIG: Controls = {
   strip: Array.from({ length: 8 }, (_, i) => ({ channel: 1, control: 1 + i, index: i })),
 }
 // what the rig's pads learn, notes 8 to 23, the last three none
-const PADS: (TriggerTarget | null)[] = [
-  ...Array.from({ length: 8 }, (_, i) => ({ slot: i })),
-  { page: -1 },
-  { page: 1 },
-  { mode: 'stage' },
-  { mode: 'edit' },
-  { mode: 'decks' },
-  null,
-  null,
-  null,
-]
+const PADS = Array.from({ length: 16 }, (_, i): TriggerTarget | null => {
+  const b = RIG.buttons.find((x) => x.note === 8 + i)
+  return !b ? null : 'slot' in b ? { slot: b.slot } : 'page' in b ? { page: b.page } : { mode: b.mode }
+})
 
 const pause = (ms = 200) => new Promise((r) => setTimeout(r, ms))
 async function seed(controls: Controls) {

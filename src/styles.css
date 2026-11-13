@@ -1090,7 +1090,9 @@ kbd {
   pointer-events: none;
 }
 .knob.learning,
-.mini.learning {
+.mini.learning,
+.sm-enc.learning,
+.hwpad.learning {
   animation: learning 0.9s ease-in-out infinite alternate;
 }
 @keyframes learning {
@@ -1227,10 +1229,6 @@ kbd {
 .sm-enc.waiting i {
   color: #ffc878;
 }
-.sm-enc.learning,
-.hwpad.learning {
-  animation: learning 0.9s ease-in-out infinite alternate;
-}
 .controller .pads {
   grid-template-columns: repeat(8, 1fr);
   margin: 4px 0 6px;
@@ -1286,6 +1284,7 @@ kbd {
   margin-top: 6px;
 }
 .hw-fader {
+  position: relative;
   margin-left: auto;
   display: flex;
   align-items: center;
@@ -1310,6 +1309,13 @@ kbd {
 }
 .hw-fader.waiting .hw-cap {
   background: #ffc878;
+}
+/* under the track's right end, so turning map mode on moves nothing */
+.hw-fader .map-tag {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin: 2px 0 0;
 }
 .hw-fader.waiting {
   color: #ffc878;

@@ -279,9 +279,8 @@ describe('the pads row and the drawn controller', () => {
     const leds = async () => {
       await pause(300)
       const shown = await pads(ROW)
-      const sent = await page.evaluate(
-        () => Array.from({ length: 16 }, (_, i) => (window as unknown as { fake: Fake }).fake.led(8 + i) ?? null),
-        [],
+      const sent = await page.evaluate(() =>
+        Array.from({ length: 16 }, (_, i) => (window as unknown as { fake: Fake }).fake.led(8 + i) ?? null),
       )
       return { lit: shown.map((x) => x.lit), sent }
     }
@@ -344,8 +343,11 @@ describe('the pads row and the drawn controller', () => {
     await cc(1, 0)
     const before = await showing()
     expect(before.value).not.toBe(fresh)
+    // the pads and the drawn fader's words and track, where they are
     const boxes = () =>
-      page.$$eval(`${ROW} .hwpad`, (els) => els.map((el) => JSON.stringify(el.getBoundingClientRect())))
+      page.$$eval(`${ROW} .hwpad, ${ROW} .hw-fader > :not(.map-tag)`, (els) =>
+        els.map((el) => JSON.stringify(el.getBoundingClientRect())),
+      )
     const off = await boxes()
     await page.keyboard.press('m')
     const shown = await pads(ROW)
@@ -357,8 +359,9 @@ describe('the pads row and the drawn controller', () => {
     // a learned pad its target, outlined; an empty one neither
     expect(shown.map((x) => x.learns)).toEqual([...TARGETS.map((t) => JSON.stringify(t)), null, null, null])
     expect(shown.map((x) => x.outline)).toEqual(RIG_PADS.map((t) => (t === '·' ? 'none' : 'dashed')))
-    // turning map mode on moves no pad
+    // turning map mode on moves no pad, and not the drawn fader, its cc9 under it
     expect(await boxes()).toEqual(off)
+    expect(await page.$eval('.hw-fader .map-tag', (el) => el.textContent)).toBe('cc9')
     // a press arms its learn, and another cancels it
     await pad(ROW, 9)
     expect(await line()).toBe(`press a button for look 2 · ${LOOKS[1].name}`)
@@ -384,7 +387,7 @@ describe('the pads row and the drawn controller', () => {
     const after = await pads(ROW)
     expect([after[13].text, after[13].tag, after[13].learns]).toEqual([`1 ${t1.name}`, 'n21', '{"slot":0}'])
     expect([after[0].text, after[0].tag, after[0].learns, after[0].empty]).toEqual(['·', 'n8', null, true])
-    // map mode off, the notes go, and no pad moves
+    // map mode off, the notes go, and nothing moves
     await page.keyboard.press('Escape')
     expect((await pads(ROW)).every((x) => x.tag === null)).toBe(true)
     expect(await boxes()).toEqual(off)
