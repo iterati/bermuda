@@ -292,6 +292,13 @@ describe('the play surface', () => {
     expect(await panel()).toBe(null)
     expect(await walk(1)).toEqual([KNOB])
     expect(await panel()).toMatchObject({ head: `${FIRST} › ${knobKind(KNOB).label}`, detail: KNOB })
+    // Enter types it in one field, on the strip where Tab is, and none in the panel; Esc leaves the field alone
+    await page.keyboard.press('Enter')
+    await page.waitForSelector('.knob-type')
+    expect(await page.$$eval('.knob-type', (fields) => fields.map((f) => !!f.closest('.perform')))).toEqual([true])
+    await page.keyboard.press('Escape')
+    expect(await page.$('.knob-type')).toBe(null)
+    expect(await panel()).toMatchObject({ detail: KNOB })
     // Esc closes it and drops the focus
     await page.keyboard.press('Escape')
     expect(await panel()).toBe(null)

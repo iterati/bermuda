@@ -246,14 +246,17 @@ const tempo = () =>
 describe('music', { timeout: 60_000 }, () => {
   it("a song sets the clock's tempo to its own while it is heard", async () => {
     await view('Stage')
-    // the Music block is a tab of Stage's right column
-    await page.$$eval('.tabs button', (tabs) => tabs.find((t) => t.textContent === 'Music')!.click())
+    // the Music block opens in the Stage's context panel by ♪ in the bar
+    const note = '.bar button[title^="the music"]'
+    expect(await page.$eval(note, (b) => b.textContent)).toBe('♪ song / mic')
+    await page.click(note)
     const input = (await page.$('label[title^="hear a song"] input'))!
     await input.uploadFile(clickTrack(120, 30))
     await page.waitForFunction(
       () => /^1(19|20|21) bpm$/.test(document.querySelector('.music-beat b')?.textContent ?? ''),
       { timeout: 40_000 },
     )
+    expect(await page.$eval(note, (b) => b.textContent)).toMatch(/^♪ \d+ bpm$/)
     const [bpm, fixed] = await tempo()
     expect(Math.abs((bpm as number) - 120)).toBeLessThanOrEqual(1)
     expect(fixed).toBe(true)

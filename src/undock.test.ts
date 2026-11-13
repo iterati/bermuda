@@ -261,8 +261,12 @@ describe('undocking', () => {
       await popup.keyboard.press('Tab')
       walked.push(await on(popup))
     }
-    expect(walked).toEqual([...STRIP, STRIP[0]])
-    for (let i = 0; i < STRIP.indexOf(TURN); i++) await popup.keyboard.press('Tab')
+    // the strip, then the knobs of the context panel the first stop opened
+    expect(walked.slice(0, 8)).toEqual(STRIP)
+    expect(await popup.$eval('.context', (c) => c.contains(document.activeElement))).toBe(true)
+    await popup.keyboard.down('Shift')
+    for (let i = 0; i < STRIP.length - STRIP.indexOf(TURN); i++) await popup.keyboard.press('Tab')
+    await popup.keyboard.up('Shift')
     expect(await on(popup)).toBe(TURN)
     await popup.keyboard.press('Enter')
     await popup.waitForSelector('.knob-type')

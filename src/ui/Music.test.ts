@@ -77,8 +77,8 @@ beforeAll(async () => {
   })
   await page.goto(`${ORIGIN}/index.html`)
   await page.waitForSelector('canvas.picture')
-  // the Music block is a tab of Stage's right column
-  await page.$$eval('.tabs button', (tabs) => tabs.find((t) => t.textContent === 'Music')!.click())
+  // the Music block opens in the Stage's context panel by ♪ in the bar
+  await page.click('.bar button[title^="the music"]')
 }, 60_000)
 
 afterAll(() => browser?.close())

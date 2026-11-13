@@ -393,7 +393,7 @@ describe('the pads row and the drawn controller', () => {
     expect(await boxes()).toEqual(off)
   }, 60_000)
 
-  it("the pads are the Stage's alone: H hides them, more puts the chip's knobs in their place, and Edit, Decks, Direct and Play show none", async () => {
+  it("the pads are the Stage's alone: H hides them, they stay under the strip while the context panel is open, and Edit, Decks, Direct and Play show none", async () => {
     await seed(RIG)
     expect(await visible(`${ROW} .hwpad`)).toBe(16)
     expect(await visible('.hw-fader')).toBe(1)
@@ -402,13 +402,14 @@ describe('the pads row and the drawn controller', () => {
     expect(await visible('.hw-fader')).toBe(0)
     await page.keyboard.press('h')
     expect(await visible(`${ROW} .hwpad`)).toBe(16)
-    // more: the chip's section in the strip's place and the pads', and ◂ strip brings both back
+    // more: the chip's knobs in the context panel, and the strip and the pads stay under them
     await page.click('.perform-side button[title="every knob of the picked chip"]')
-    expect(await page.$$('.hwpad, .hw-fader')).toEqual([])
-    expect(await visible('.stage .bottom .knob')).toBeGreaterThan(8)
-    await page.click('.strip-back')
+    await page.waitForSelector('.context .group')
+    expect(await visible('.context .knob')).toBeGreaterThan(8)
     expect(await visible(`${ROW} .hwpad`)).toBe(16)
+    expect(await visible('.hw-fader')).toBe(1)
     expect(await visible('.perform .slot')).toBe(8)
+    await page.click('.context button[title="close (Esc)"]')
     for (const [key, view, back] of [
       ['e', 'edit', 'e'],
       ['d', 'decks', 'd'],

@@ -164,6 +164,8 @@ describe('Tab', () => {
     expect(await walk(stops.length)).toEqual(stops)
     // a wheel notch on an idle knob, not a dead one, makes it a stop
     const turned = idle.find((a) => !dead.includes(a))!
+    // scrolled into the context panel's view
+    await page.$eval(knob(turned), (el) => el.scrollIntoView({ block: 'center' }))
     const { x, y } = await centre(knob(turned))
     await page.mouse.move(x, y)
     await page.mouse.wheel({ deltaY: -100 })
