@@ -164,14 +164,14 @@ describe('a scene as JSON', () => {
   })
 
   it('names every knob by a path through level ids, sub-chains included', () => {
-    const branching = LOOKS.find((l) => l.name.includes('Branching'))!
-    const addresses = knobsOf(branching).map((k) => k.address)
-    expect(addresses).toContain('levels[root].variants[1].below[sqA].affine.scale')
-    expect(resolve(branching, 'levels[root].variants[1].below[sqA].affine.scale')).toBe(
-      branching.levels[0].variants[1].below![0].affine.scale,
+    const quilt = LOOKS.find((l) => l.name.includes('Patchwork'))!
+    const addresses = knobsOf(quilt).map((k) => k.address)
+    expect(addresses).toContain('levels[patch].variants[1].below[tris].affine.scale')
+    expect(resolve(quilt, 'levels[patch].variants[1].below[tris].affine.scale')).toBe(
+      quilt.levels[0].variants[1].below![0].affine.scale,
     )
-    expect(kindOf('levels[root].variants[1].below[sqA].affine.offset[1]')).toBe('levels[].affine.offset[1]')
-    for (const a of addresses) expect(resolve(branching, a)).toBeDefined()
+    expect(kindOf('levels[patch].variants[1].below[tris].affine.offset[1]')).toBe('levels[].affine.offset[1]')
+    for (const a of addresses) expect(resolve(quilt, a)).toBeDefined()
   })
 })
 
@@ -416,12 +416,12 @@ describe('the Perform strip', () => {
   })
 
   it("leaves out a top knob its show rule says is dead, and takes a sub-chain level's own", () => {
-    const branching = LOOKS.find((l) => l.name === 'Remix - Branching cells')!
-    expect(chipKnobs(branching, 'sqA').every((k) => k.address.startsWith('levels[root].variants[1].below[sqA].'))).toBe(
+    const quilt = LOOKS.find((l) => l.name === 'Patchwork quilt')!
+    expect(chipKnobs(quilt, 'tris').every((k) => k.address.startsWith('levels[patch].variants[1].below[tris].'))).toBe(
       true,
     )
-    // the spokes are stars, so their m shows; a box has none
-    expect(strip(branching, 'sqA')).toContainEqual({ knob: 'levels[root].variants[1].below[sqA].variants[0].shape.m' })
+    // the triangles are stars, so their m shows; a box has none
+    expect(strip(quilt, 'tris')).toContainEqual({ knob: 'levels[patch].variants[1].below[tris].variants[0].shape.m' })
     const boxed = structuredClone(t1)
     boxed.levels[0].variants[0].shape.kind = 'box'
     expect(strip(boxed, 'sq1')).not.toContainEqual({ knob: 'levels[sq1].variants[0].shape.m' })

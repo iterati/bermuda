@@ -356,7 +356,7 @@ describe('the built-in looks', () => {
     for (const look of LOOKS) expect(look.macros.length, look.name).toSatisfy((n: number) => n >= 3 && n <= 5)
   })
 
-  // the default macros, Breathing lattice's and Square to hex's, and the music's tone
+  // the default macros, Square to hex's, and the music's tone
   const DEFAULTS = ['breathe', 'morph', 'character', 'size', 'hue', 'gain', 'lattice', 'music-tone']
 
   it('move nothing at their own values, the defaults and Square to hex', () => {

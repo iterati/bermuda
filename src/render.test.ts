@@ -245,7 +245,7 @@ describe('the morph', () => {
     ['A lone level into its mirror', alone({}), alone({ by: 'mirror' })],
   ]
   const pairs: [string, Scene, Scene][] = [
-    ['Square into Hex', preset('Remix - Square to hex', 'Square'), preset('Remix - Square to hex', 'Hex')],
+    ['Square to hex into Hex', look('Remix - Square to hex'), preset('Remix - Square to hex', 'Hex')],
     ['Ice into Dusk', preset('Tapestry 7 ', 'Ice'), preset('Tapestry 7 ', 'Dusk')],
     ['Tapestry 3 into its preset', look('Tapestry 3'), preset('Tapestry 3', 'Green stars on red circles')],
     ['Tapestry 1 into Tapestry 7', look('Tapestry 1'), look('Tapestry 7 ')],
@@ -275,8 +275,8 @@ describe('the morph', () => {
   const reordered = update(look('Remix - Square into hex'), (d) => d.levels.push(d.levels.shift()!))
   const ends: [string, Scene, Scene][] = [
     ...pairs.slice(0, 4),
-    ['Branching cells into Tapestry 7', look('Remix - Branching cells'), look('Tapestry 7 ')],
-    ['Tapestry 7 into Branching cells', look('Tapestry 7 '), look('Remix - Branching cells')],
+    ['Patchwork quilt into Tapestry 7', look('Patchwork quilt'), look('Tapestry 7 ')],
+    ['Tapestry 7 into Patchwork quilt', look('Tapestry 7 '), look('Patchwork quilt')],
     ['Square into hex into its reorder', look('Remix - Square into hex'), reordered],
     ['Hypnotic rings into Soak stain', look('Hypnotic rings'), look('Soak stain')],
     ['Marching ants into Metaballs', look('Shapes - Marching ants'), look('Shapes - Metaballs')],
@@ -314,8 +314,7 @@ describe('the morph', () => {
 
   it.each([
     ['Remix - Square into hex', 'hexA'],
-    ['Remix - Pinwheel crosses', 'wheel'],
-    ['Remix - Branching cells', 'sqA'],
+    ['Patchwork quilt', 'brick'],
     ['Cells - Mirror tiles', 'tile'],
     ['Cells - Ripples', 'pond'],
     ['Remix - Kaleidoscope pond', 'glass'],
@@ -693,7 +692,7 @@ describe('halftone', { timeout: 60_000 }, () => {
     halftone({ grid, pitch: grid === 'lattice' ? 6 : 40, reach: 0.05, ...o })
 
   it.each(GRIDS)('draws halftone dots on a %s grid finite and not blank', async (grid) => {
-    const mandala = look('Lattice - Mandala')
+    const mandala = preset('Halftone - Mandala press', 'Lace')
     const px = await drawn(dotted(mandala, 'petals', ofGrid(grid, { pitch: grid === 'lattice' ? 7 : 48 })))
     const { finite, mean, spread } = stats(px)
     expect(finite).toBe(true)

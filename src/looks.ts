@@ -1,7 +1,7 @@
 // The built-in looks: four Tapestries made through the level chain, the bank's twenty remixing them, then older remixes,
-// then the deco family's fills and its halftones.
+// then the deco family's fills and its halftones, then the two made for the music.
 // Periods are in clock units, one a second at the default 60 bpm; angles are in degrees. Each is wired to the music
-// (music.ts wire) but the one made for it, wired its own way.
+// (music.ts wire) but the two made for it, each wired its own way.
 import { stopsFromCosine } from './colour'
 import { update } from './motion'
 import { blend, wire } from './music'
@@ -855,6 +855,8 @@ export const LOOKS: Scene[] = [
         at: 0,
         speed: 1,
         cellSpread: 0.5,
+        // a square screen at rest (amount 0), for Newsprint to press
+        halftone: halftone({ amount: 0, grid: 'square', pitch: 48, turn: 45, fade: 0, size: 1.1, reach: 0.1 }),
       }),
     ],
     rings: { value: 6, play: [4, 8] },
@@ -875,6 +877,10 @@ export const LOOKS: Scene[] = [
       mod('slide', 'cos', 16, [['levels[wall].lattice.e2[0]', 0.25]]),
       mod('bulge', 'cos', 21, [['levels[wall].variations[1].weight', 0.3]]),
       mod('shade', 'cos', 37, [['palette.radius', 0.3]]),
+    ],
+    presets: [
+      // the bricks pressed into newsprint dots at 45°
+      { name: 'Newsprint', values: { 'levels[wall].halftone.amount': 1 } },
     ],
   }),
   scene({
@@ -1032,6 +1038,19 @@ export const LOOKS: Scene[] = [
       mod('seep', 'ramp', 80, [['background.seep', 0.5]]),
       mod('bite', 'cos', 23, [['levels[marks].variants[0].shape.form', 0.2]]),
       mod('turn', 'cos', 61, [['levels[marks].cell.turn', 40]]),
+    ],
+    presets: [
+      // the soak's pool size and pigments
+      {
+        name: 'Pools',
+        values: {
+          'background.scale': 2,
+          'background.edge': 0.8,
+          'background.at[0]': 0.3,
+          'background.at[1]': 0.95,
+          'levels[marks].affine.scale': 0.6,
+        },
+      },
     ],
   }),
   scene({
@@ -1324,24 +1343,6 @@ export const LOOKS: Scene[] = [
     ],
   }),
   scene({
-    name: 'Remix - Pinwheel crosses',
-    levels: [
-      level('wheel', { scale: 0.7, e2: HEX, by: 'parity', cellTurn: 15, shape: star(6, 3, 0.45), at: 0.05 }),
-      level('cross', { scale: 2, turn: { value: 45, play: [30, 60] }, shape: spokes(4, 0.45), at: 0.4 }),
-      level('hex', { scale: 2, e2: HEX, shape: star(6, 2, 0.4), at: 0.75 }),
-    ],
-    line: 'smooth',
-    width: { value: 0.012, spread: 0.01 },
-    falloff: 1,
-    palette: 'warm',
-    radius: { value: 0.4, play: [0.2, 0.7] },
-    modulators: [
-      mod('pinwheel', 'beat', 24, [['levels[wheel].cell.turn', 30]], { harmonics: [3, 2] }),
-      mod('cross', 'tri', 7, [['levels[cross].variants[0].shape.r', 0.15]]),
-      mod('hue', 'cos', 40, [['palette.hue', 40]]),
-    ],
-  }),
-  scene({
     name: 'Remix - Swirled lattice',
     levels: [
       level('sw', {
@@ -1363,41 +1364,6 @@ export const LOOKS: Scene[] = [
       mod('swirl', 'cos', 20, [['levels[sw].variations[1].weight', 0.3]]),
       mod('spin', 'ramp', 120, [['levels[sw].affine.turn', 180]]),
       mod('hue', 'cos', 33, [['palette.hue', 60]]),
-    ],
-  }),
-  scene({
-    name: 'Remix - Branching cells',
-    zoom: { value: 0.9, play: [0.7, 1.2] },
-    levels: [
-      level('root', {
-        scale: 0.55,
-        turn: { value: 45, play: [30, 60] },
-        variants: [
-          {
-            share: 0.5,
-            shape: star(4, 2, 0.48, { twist: 45 }),
-            below: [
-              level('hexA', { scale: 1.8, turn: 30, e2: HEX, shape: star(6, 3, 0.45), at: 0.3 }),
-              level('hexB', { scale: R3, turn: 30, e2: HEX, shape: star(6, 2, 0.4), at: 0.45 }),
-            ],
-          },
-          {
-            share: 0.5,
-            shape: star(4, 2, 0.48, { twist: 45 }),
-            below: [
-              level('sqA', { scale: 2.2, shape: spokes(4, 0.45), at: 0.7 }),
-              level('sqB', { scale: 2, turn: 45, shape: star(4, 2, 0.4), at: 0.85 }),
-            ],
-          },
-        ],
-        at: 0,
-      }),
-    ],
-    width: 0.003,
-    modulators: [
-      mod('share', 'cos', 23, [['levels[root].variants[0].share', 0.4]]),
-      mod('size', 'cos', 13, [['levels[root].variants[1].below[sqA].variants[0].shape.r', 0.15]]),
-      mod('hue', 'ramp', 45, [['palette.hue', 180]]),
     ],
   }),
   scene({
@@ -1436,17 +1402,6 @@ export const LOOKS: Scene[] = [
     ],
     presets: [
       {
-        name: 'Square',
-        values: {
-          'levels[base].lattice.e2[0]': 0,
-          'levels[base].lattice.e2[1]': 1,
-          'levels[nest1].lattice.e2[0]': 0,
-          'levels[nest1].lattice.e2[1]': 1,
-          'levels[nest1].affine.scale': Math.SQRT2,
-          'levels[nest1].affine.turn': 45,
-        },
-      },
-      {
         name: 'Hex',
         values: {
           'levels[base].lattice.e2[0]': 0.5,
@@ -1459,45 +1414,7 @@ export const LOOKS: Scene[] = [
       },
     ],
   }),
-  scene({
-    name: 'Remix - Breathing lattice',
-    levels: linked('b', 4, {
-      scale: { value: 1.57, spread: 0.2 },
-      turn: 37.5,
-      e2: [0.25, 0.933],
-      shape: star(6, { value: 2.5, play: [1.3, 4] }, 0.42, { twist: 30 }),
-      at: { value: 0, spread: 1 },
-      speed: 0.7,
-    }),
-    rings: 3,
-    drift: 0.6,
-    width: 0.003,
-    palette: 'dusk',
-    macros: [
-      {
-        id: 'lattice',
-        name: 'Lattice',
-        value: 0.5,
-        // square at 0 and hex at 1, each end the look's value and a half-width either side
-        targets: [
-          { knob: 'levels[b1].lattice.e2[0]', from: 0, to: 0.5 },
-          { knob: 'levels[b1].lattice.e2[1]', from: 1, to: 0.866 },
-          { knob: 'levels[b1].affine.scale', from: 1.411, to: 1.729 },
-          { knob: 'levels[b1].affine.turn', from: 45, to: 30 },
-        ],
-      },
-    ],
-    modulators: [
-      mod('lattice', 'cos', 24, [
-        ['levels[b1].lattice.e2[0]', 0.25, 0.4],
-        ['levels[b1].lattice.e2[1]', -0.067, 0.4],
-        ['levels[b1].affine.turn', 7.5, 0.4],
-      ]),
-      mod('character', 'tri', 17, [['levels[b1].variants[0].shape.m', 1.2, 0.8]]),
-      mod('hue', 'ramp', 80, [['palette.hue', 180]]),
-    ],
-  }),
-  // ---- the lattices: brick, triangles, polar, log-polar, fold, Voronoi, Truchet, the rhombic arc ----
+  // ---- the lattices: triangles, log-polar, fold, Voronoi, the rhombic arc ----
   scene({
     name: 'Lattice - Rhombic walk',
     // e2 walks the arc from square to hex, (sin a, cos a) for a from 0 to 30°, fitted with cos φ and cos 2φ
@@ -1527,34 +1444,6 @@ export const LOOKS: Scene[] = [
     ],
   }),
   scene({
-    name: 'Lattice - Brick bond',
-    zoom: 1.1,
-    levels: [
-      // bricks a cell long and half a cell high, two squares to each, the odd courses shifted from stack to
-      // running bond and back
-      level('wall', { scale: 1.3, lattice: 'brick', e2: [0.25, 0.5], shape: star(4, 2, 0.3, { twist: 45 }), at: 0 }),
-      level('pair', {
-        scale: 2,
-        offset: [0.5, 0],
-        shape: star(4, 2, 0.36, { twist: 45, round: 0.15 }),
-        at: 0.3,
-        cellSpread: 0.3,
-      }),
-      level('course', { scale: 2, lattice: 'brick', e2: [0.25, 0.7], shape: star(4, 2, 0.2, { twist: 45 }), at: 0.6 }),
-    ],
-    line: 'smooth',
-    width: { value: 0.03, spread: -0.012 },
-    falloff: { value: 1.5, play: [1.1, 1.8] },
-    palette: 'ember',
-    radius: { value: 0.25, play: [0.1, 0.5] },
-    modulators: [
-      mod('bond', 'cos', 16, [['levels[wall].lattice.e2[0]', 0.25]], { phase: 0.5 }),
-      mod('stretch', 'tri', 22, [['levels[course].lattice.e2[1]', 0.2]]),
-      mod('size', 'cos', 9, [['levels[pair].variants[0].shape.r', 0.08]]),
-      mod('hue', 'cos', 41, [['palette.hue', 40]]),
-    ],
-  }),
-  scene({
     name: 'Lattice - Triangle gears',
     zoom: 1.3,
     levels: linked('tri', 3, {
@@ -1577,35 +1466,6 @@ export const LOOKS: Scene[] = [
       mod('gears', 'beat', 30, [['levels[tri1].cell.turn', 60]], { harmonics: [3, 2] }),
       mod('character', 'tri', 13, [['levels[tri1].variants[0].shape.m', 0.7]]),
       mod('hue', 'ramp', 70, [['palette.hue', 180]]),
-    ],
-  }),
-  scene({
-    name: 'Lattice - Mandala',
-    zoom: 0.55,
-    levels: [
-      level('petals', {
-        lattice: 'polar',
-        sectors: 12,
-        e2: [0.25, 0.9],
-        shape: star(6, 3, 0.4, { round: 0.2 }),
-        at: 0,
-        speed: 0.6,
-      }),
-      level('lace', { scale: 2.6, turn: 30, e2: HEX, shape: star(6, 2, 0.42, { twist: 30 }), at: 0.4 }),
-      level('seed', { scale: R3, turn: 30, e2: HEX, shape: star(6, 4, 0.4), at: 0.7 }),
-    ],
-    rings: { value: 2, play: [1, 4] },
-    drift: { value: 0.3, play: [0.1, 0.6] },
-    radialWeight: 0.15,
-    width: { value: 0.004, spread: 0.004 },
-    palette: 'dusk',
-    radius: 0.3,
-    modulators: [
-      mod('spin', 'ramp', 240, [['frame.turn', 180]]),
-      mod('stagger', 'cos', 32, [['levels[petals].lattice.e2[0]', 0.25]]),
-      mod('rings', 'cos', 21, [['levels[petals].lattice.e2[1]', 0.15]]),
-      mod('character', 'tri', 15, [['levels[seed].variants[0].shape.m', 1.5]]),
-      mod('hue', 'cos', 60, [['palette.hue', 60]]),
     ],
   }),
   scene({
@@ -1660,38 +1520,6 @@ export const LOOKS: Scene[] = [
       mod('reach', 'tri', 29, [['levels[k1].lattice.e2[1]', 0.25]]),
       mod('character', 'cos', 11, [['levels[k1].variants[0].shape.m', 1]]),
       mod('hue', 'ramp', 90, [['palette.hue', 180]]),
-    ],
-  }),
-  scene({
-    name: 'Lattice - Truchet',
-    zoom: 0.8,
-    // each hex cell turns its triangle either way by a hash of its id: up or down at 30°, and the turn
-    // sways between 15° and 45° so the tiles never all line up
-    levels: [
-      level('tiles', {
-        scale: 1.4,
-        turn: 30,
-        e2: HEX,
-        by: 'hash',
-        cellTurn: 30,
-        shape: star(3, 2, 0.55, { round: 0.1 }),
-        at: 0,
-        speed: 0.6,
-      }),
-      level('weave', { scale: R3, turn: 30, e2: HEX, by: 'hash', cellTurn: 30, shape: star(3, 2, 0.5), at: 0.5 }),
-    ],
-    rings: 2,
-    drift: { value: 0.3, play: [0.1, 0.6] },
-    radialWeight: 0.2,
-    width: { value: 0.005, spread: 0.003 },
-    falloff: 1.3,
-    palette: 'ice',
-    radius: { value: 0.3, play: [0.1, 0.6] },
-    modulators: [
-      mod('sway', 'cos', 32, [['levels[tiles].cell.turn', 15]]),
-      mod('weave', 'tri', 27, [['levels[weave].cell.turn', 15]], { phase: 0.5 }),
-      mod('round', 'cos', 13, [['levels[tiles].variants[0].shape.round', 0.1]]),
-      mod('hue', 'ramp', 50, [['palette.hue', 180]]),
     ],
   }),
   scene({
@@ -1757,9 +1585,19 @@ export const LOOKS: Scene[] = [
         shape: star(8, 3, 0.45),
         at: 0,
         speed: 0.5,
+        // a fill at rest (amount 0), for Stained glass to light
+        fill: fill({ amount: 0, line: 1, tone: 0.3, alternate: 0.5 }),
       }),
       level('tracery', { scale: 2.2, lattice: 'fold', e2: [0.2, 0.7], shape: star(4, 2.5, 0.25), at: 0.35 }),
-      level('glass', { scale: 2.4, lattice: 'triangle', e2: HEX, by: 'parity', cellTurn: 60, shape: star(3, 2, 0.2) }),
+      level('glass', {
+        scale: 2.4,
+        lattice: 'triangle',
+        e2: HEX,
+        by: 'parity',
+        cellTurn: 60,
+        shape: star(3, 2, 0.2),
+        fill: fill({ amount: 0, line: 1, tone: 0.5, alternate: 0.25 }),
+      }),
     ],
     width: { value: 0.004, spread: 0.002 },
     falloff: { value: 1.1, play: [0.8, 1.4] },
@@ -1769,6 +1607,13 @@ export const LOOKS: Scene[] = [
       mod('turn', 'cos', 45, [['levels[rose].cell.turn', 20]]),
       mod('reach', 'cos', 27, [['levels[tracery].lattice.e2[1]', 0.15]]),
       mod('hue', 'ramp', 110, [['palette.hue', 180]]),
+    ],
+    presets: [
+      // fills under kept lines outside the deco palettes: the window's glass lit
+      {
+        name: 'Stained glass',
+        values: { 'levels[rose].fill.amount': 0.55, 'levels[glass].fill.amount': 0.45, 'line.width': 0.006 },
+      },
     ],
   }),
   scene({
@@ -1804,6 +1649,71 @@ export const LOOKS: Scene[] = [
       mod('zoom', 'ramp', 30, [['levels[arms].affine.turn', 180]]),
       mod('jitter', 'cos', 25, [['levels[cells].lattice.jitter', 0.3]]),
       mod('hue', 'cos', 64, [['palette.hue', 90]]),
+    ],
+  }),
+  scene({
+    name: 'Remix - Kaleidoscope pond',
+    zoom: 1.1,
+    // mirror tiles above, ripples within them, coloured by the orbit trap: every new part of the Cell step and
+    // colour at once, with play ranges wide enough that Mutate (R) keeps finding new ones
+    levels: [
+      level('glass', {
+        scale: { value: 1.2, play: [0.9, 1.6] },
+        turn: { value: 0, play: [-20, 20] },
+        vary: [
+          ['linear', 1],
+          ['butterfly', { value: 0, play: [0, 0.4] }],
+        ],
+        by: 'mirror',
+        shape: shape('vesica', 0.5, { value: 0.45, play: [0.2, 0.8] }, { twist: { value: 30, play: [0, 60] } }),
+        at: 0,
+        speed: 0.3,
+      }),
+      level('ripple', {
+        scale: { value: 2, play: [1.6, 2.6] },
+        e2: HEX,
+        by: 'ring',
+        cellTurn: { value: 10, play: [-30, 30] },
+        cellPhase: { value: 0.1, play: [-0.25, 0.25] },
+        shape: star(6, { value: 2, play: [1.5, 4] }, 0.45, { round: { value: 0.5, play: [0, 1] } }),
+        at: 0.5,
+        speed: 0.3,
+      }),
+    ],
+    rings: { value: 2, play: [1, 4] },
+    drift: { value: 0.8, play: [0.3, 1.5] },
+    width: { value: 0.0035, spread: 0.002 },
+    falloff: 1.3,
+    palette: 'rainbow',
+    radius: 0.1,
+    trap: { weight: { value: 2.2, play: [1, 3.5] }, size: { value: 0.2, play: [0, 0.5] } },
+    modulators: [
+      mod('wing', 'cos', 28, [['levels[glass].variations[1].weight', 0.15]]),
+      mod('trap', 'tri', 33, [['palette.trap.size', 0.15]]),
+      mod('hue', 'cos', 70, [['palette.hue', 90]]),
+    ],
+    macros: [
+      {
+        id: 'depth',
+        name: 'depth',
+        value: 0.5,
+        targets: [
+          { knob: 'levels[ripple].affine.scale', from: 1.6, to: 2.6 },
+          { knob: 'contour.rings', from: 1, to: 4 },
+        ],
+      },
+    ],
+    presets: [
+      // the butterfly variation, which the look's mover takes to 0.15 at most
+      {
+        name: 'Wings',
+        values: {
+          'levels[glass].variations[1].weight': 0.35,
+          'levels[glass].variants[0].shape.form': 0.7,
+          'levels[glass].variants[0].shape.twist': 60,
+          'palette.trap.size': 0.45,
+        },
+      },
     ],
   }),
   // ---- shapes and lines: iq's shapes, joins, corners and onions, spill, screen lines and dots ----
@@ -2073,27 +1983,62 @@ export const LOOKS: Scene[] = [
       mod('hue', 'cos', 36, [['palette.hue', 90]]),
     ],
   }),
+  // iq's shapes no other look draws (rhombus, trapezoid, parallelogram, capsule; horseshoe and cut disk below),
+  // laid as parquet: each cell picks its piece by share and turns by a hash, filled in bands under its line
   scene({
-    name: 'Remix - Dotted hexes',
-    zoom: 1.4,
-    levels: linked('d', 3, {
-      scale: { value: 1.56, play: [1.35, 1.75] },
-      turn: 30,
-      e2: HEX,
-      shape: star(6, { value: 3.5, play: [1.01, 6] }, 0.35),
-      at: { value: 0, spread: 1 },
-      speed: 0.3,
-    }),
-    line: 'dots',
-    dots: { count: { value: 24, spread: -12 }, size: 0.3, crawl: 0.5 },
-    width: { value: 0.012, spread: 0.012 },
-    falloff: 0.5,
+    name: 'Shapes - Parquet',
+    zoom: 1.1,
+    levels: [
+      level('tiles', {
+        scale: 1.4,
+        turn: 30,
+        e2: HEX,
+        by: 'hash',
+        cellTurn: 60,
+        variants: [
+          { share: 0.25, shape: shape('rhombus', 0.45, 0.58) },
+          { share: 0.25, shape: shape('trapezoid', 0.42, 0.5) },
+          { share: 0.25, shape: shape('parallelogram', 0.42, 0.5) },
+          { share: 0.25, shape: shape('capsule', 0.42, 0.35) },
+        ],
+        at: 0,
+        speed: 0.8,
+        cellSpread: 0.4,
+        fill: fill({ amount: 0.8, line: 1, bands: 4, step: 0.08 }),
+      }),
+      level('inlay', {
+        scale: R3,
+        turn: 30,
+        e2: HEX,
+        variants: [
+          { share: 0.5, shape: shape('horseshoe', 0.3, 0.5) },
+          { share: 0.5, shape: shape('cutDisk', 0.3, 0.4) },
+        ],
+        at: 0.5,
+        speed: 0.6,
+      }),
+    ],
+    line: 'smooth',
+    width: { value: 0.008, spread: -0.004 },
+    falloff: 1,
+    palette: 'warm',
     radius: 0.2,
+    gamma: 1.4,
     modulators: [
-      mod('nest', 'cos', 36, [['levels[d1].affine.scale', 0.17]], { phase: 0.5 }),
-      mod('character', 'tri', 15, [['levels[d1].variants[0].shape.m', 2.5]], { phase: 0.25 }),
-      mod('dash', 'cos', 20, [['line.dots.size', 0.35]]),
-      mod('hue', 'cos', 60, [['palette.hue', 180]]),
+      mod('turn', 'beat', 24, [['levels[tiles].cell.turn', 30]], { harmonics: [3, 2] }),
+      mod('open', 'cos', 17, [['levels[inlay].variants[0].shape.form', 0.25]]),
+      mod('hue', 'cos', 45, [['palette.hue', 40]]),
+    ],
+    presets: [
+      {
+        name: 'Capsules',
+        values: {
+          'levels[tiles].variants[0].share': 0,
+          'levels[tiles].variants[1].share': 0,
+          'levels[tiles].variants[2].share': 0,
+          'levels[tiles].variants[3].share': 1,
+        },
+      },
     ],
   }),
   // ---- the Cell step's ring and mirror, orbit-trap colour and the rest of flam3 ----
@@ -2234,7 +2179,6 @@ export const LOOKS: Scene[] = [
         name: 'Ring trap',
         values: { 'palette.trap.size': 0.4, 'palette.trap.weight': 2, 'levels[o1].affine.scale': 1.4, 'frame.zoom': 1 },
       },
-      palettePreset('Rainbow', 'rainbow'),
     ],
   }),
   scene({
@@ -2271,10 +2215,6 @@ export const LOOKS: Scene[] = [
       mod('hue', 'cos', 40, [['palette.hue', 50]]),
     ],
     presets: [
-      {
-        name: 'Disc',
-        values: { 'levels[warp].variations[1].weight': 0, 'levels[warp].variations[2].weight': 1 },
-      },
       {
         name: 'Spiral',
         values: {
@@ -2334,10 +2274,6 @@ export const LOOKS: Scene[] = [
           'levels[fn].affine.scale': 1,
         },
       },
-      {
-        name: 'Round trip',
-        values: { 'levels[fn].variations[0].weight': 0.4, 'levels[fn].variations[3].weight': 0.4 },
-      },
     ],
   }),
   scene({
@@ -2375,104 +2311,95 @@ export const LOOKS: Scene[] = [
       mod('character', 'tri', 13, [['levels[root].variants[0].shape.m', 1]]),
       mod('hue', 'cos', 45, [['palette.hue', 40]]),
     ],
-    presets: [
-      { name: 'Ex', values: { 'levels[root].variations[1].weight': 0.4, 'levels[root].variations[0].weight': 0.6 } },
-      { name: 'Bent', values: { 'levels[root].variations[2].weight': 0.6 } },
-    ],
+    presets: [{ name: 'Bent', values: { 'levels[root].variations[2].weight': 0.6 } }],
   }),
+  // flam3's variations no other look draws, four that read at a glance (scry's starburst, cross's X, the
+  // hyperbolic's lens and loonie's ring), on Hearts and discs' chain; its presets dial between them
   scene({
-    name: 'Remix - Kaleidoscope pond',
-    zoom: 1.1,
-    // mirror tiles above, ripples within them, coloured by the orbit trap: every new part of the Cell step and
-    // colour at once, with play ranges wide enough that Mutate (R) keeps finding new ones
+    name: 'flam3 - Starburst',
+    zoom: 1.2,
     levels: [
-      level('glass', {
-        scale: { value: 1.2, play: [0.9, 1.6] },
-        turn: { value: 0, play: [-20, 20] },
+      level('warp', {
+        scale: { value: 1.2, play: [0.8, 1.6] },
         vary: [
-          ['linear', 1],
-          ['butterfly', { value: 0, play: [0, 0.4] }],
+          ['linear', { value: 0.2, play: [0, 0.5] }],
+          ['scry', { value: 0.8, play: [0, 1] }],
+          ['cross', { value: 0, play: [0, 1] }],
+          ['hyperbolic', { value: 0, play: [0, 1] }],
+          ['loonie', { value: 0, play: [0, 1] }],
         ],
-        by: 'mirror',
-        shape: shape('vesica', 0.5, { value: 0.45, play: [0.2, 0.8] }, { twist: { value: 30, play: [0, 60] } }),
-        at: 0,
-        speed: 0.3,
-      }),
-      level('ripple', {
-        scale: { value: 2, play: [1.6, 2.6] },
         e2: HEX,
-        by: 'ring',
-        cellTurn: { value: 10, play: [-30, 30] },
-        cellPhase: { value: 0.1, play: [-0.25, 0.25] },
-        shape: star(6, { value: 2, play: [1.5, 4] }, 0.45, { round: { value: 0.5, play: [0, 1] } }),
-        at: 0.5,
-        speed: 0.3,
+        shape: star(6, 2, 0.42, { twist: 30 }),
+        at: 0,
+        speed: 0.5,
+        cellSpread: 0.3,
       }),
+      level('seeds', { scale: R3, turn: 30, e2: HEX, shape: star(6, 3, 0.4), at: 0.4 }),
+      level('dust', { scale: R3, turn: 30, e2: HEX, shape: star(6, 2, 0.35, { twist: 30 }), at: 0.8 }),
     ],
-    rings: { value: 2, play: [1, 4] },
-    drift: { value: 0.8, play: [0.3, 1.5] },
-    width: { value: 0.0035, spread: 0.002 },
+    width: 0.0025,
     falloff: 1.3,
-    palette: 'rainbow',
-    radius: 0.1,
-    trap: { weight: { value: 2.2, play: [1, 3.5] }, size: { value: 0.2, play: [0, 0.5] } },
+    units: 'screen',
+    palette: 'ember',
+    radius: 0.2,
     modulators: [
-      mod('wing', 'cos', 28, [['levels[glass].variations[1].weight', 0.15]]),
-      mod('trap', 'tri', 33, [['palette.trap.size', 0.15]]),
-      mod('hue', 'cos', 70, [['palette.hue', 90]]),
+      mod('beat', 'cos', 16, [['levels[warp].variations[1].weight', 0.15]]),
+      mod('spin', 'ramp', 60, [['levels[warp].affine.turn', 180]]),
+      mod('hue', 'cos', 40, [['palette.hue', 50]]),
     ],
-    macros: [
+    presets: [
+      { name: 'Cross', values: { 'levels[warp].variations[1].weight': 0, 'levels[warp].variations[2].weight': 0.8 } },
+      { name: 'Lens', values: { 'levels[warp].variations[1].weight': 0, 'levels[warp].variations[3].weight': 0.8 } },
       {
-        id: 'depth',
-        name: 'depth',
-        value: 0.5,
-        targets: [
-          { knob: 'levels[ripple].affine.scale', from: 1.6, to: 2.6 },
-          { knob: 'contour.rings', from: 1, to: 4 },
-        ],
+        name: 'Loonie',
+        values: {
+          'levels[warp].variations[1].weight': 0,
+          'levels[warp].variations[4].weight': 0.8,
+          'levels[warp].variations[0].weight': 0.4,
+        },
       },
     ],
   }),
-  update(
-    scene({
-      name: 'Music - On the beat',
-      zoom: 1.5,
-      // made for a song: the floor's cells step a turn on each beat, the lights flash and fall back, the bands
-      // move the small things and the tone blends the night palette into the day one; with no music it drifts
-      levels: [
-        level('floor', {
-          scale: 1.6,
-          e2: HEX,
-          by: 'parity',
-          cellTurn: { value: 0, play: [-60, 60] },
-          shape: star(6, { value: 2.5, play: [1.5, 5] }, 0.48, { round: 0.15 }),
-          at: 0,
-          speed: 0.4,
-        }),
-        level('lights', {
-          scale: 2,
-          shape: star(4, 2, { value: 0.42, play: [0.3, 0.5] }, { twist: 45 }),
-          at: 0.5,
-          speed: 0.3,
-          cellSpread: 0.2,
-        }),
-      ],
-      rings: 2,
-      drift: 0.4,
-      width: 0.004,
-      radius: 0.3,
-      modulators: [
-        mod('step', 'steps', 4, [['levels[floor].cell.turn', 45]], { steps: [0, 0.33, 0.67, 1], listen: 'beats' }),
-        mod('flash', 'ramp', 1, [['levels[lights].variants[0].shape.r', -0.06]], { listen: 'beats' }),
-        mod('bass', 'cos', 1, [['line.width', 0.004]], { glide: 0.05, listen: 'bass' }),
-        mod('mids', 'cos', 1, [['contour.drift', 0.8]], { glide: 0.1, listen: 'mid' }),
-        mod('wobble', 'cos', 1, [['levels[floor].variants[0].shape.m', 0.6]], { glide: 0.08, listen: 'highmid' }),
-        mod('sway', 'cos', 32, [['frame.turn', 10]]),
-      ],
-      presets: [palettePreset('Night', 'dusk'), palettePreset('Day', 'ice')],
-    }),
-    (d) => blend(d, 0, 1),
-  ),
+  // four more of flam3's, the plane bent to a horizon: the exponential's floor, secant2's barrel, cosine's bands
+  // and the horseshoe's rosette
+  scene({
+    name: 'flam3 - Horizons',
+    zoom: 1.2,
+    levels: [
+      level('warp', {
+        scale: { value: 1.2, play: [0.8, 1.6] },
+        vary: [
+          ['linear', { value: 0.2, play: [0, 0.5] }],
+          ['exponential', { value: 0, play: [0, 1] }],
+          ['secant2', { value: 0.8, play: [0, 1] }],
+          ['cosine', { value: 0, play: [0, 1] }],
+          ['horseshoe', { value: 0, play: [0, 1] }],
+        ],
+        e2: HEX,
+        shape: star(6, 2, 0.42, { twist: 30 }),
+        at: 0,
+        speed: 0.5,
+        cellSpread: 0.3,
+      }),
+      level('seeds', { scale: R3, turn: 30, e2: HEX, shape: star(6, 3, 0.4), at: 0.4 }),
+      level('dust', { scale: R3, turn: 30, e2: HEX, shape: star(6, 2, 0.35, { twist: 30 }), at: 0.8 }),
+    ],
+    width: 0.0025,
+    falloff: 1.3,
+    units: 'screen',
+    palette: 'forest',
+    radius: 0.2,
+    modulators: [
+      mod('flow', 'ramp', 24, [['levels[warp].affine.offset[1]', 1]]),
+      mod('beat', 'cos', 16, [['levels[warp].variations[2].weight', 0.15]]),
+      mod('hue', 'cos', 40, [['palette.hue', 50]]),
+    ],
+    presets: [
+      { name: 'Floor', values: { 'levels[warp].variations[2].weight': 0, 'levels[warp].variations[1].weight': 0.8 } },
+      { name: 'Bands', values: { 'levels[warp].variations[2].weight': 0, 'levels[warp].variations[3].weight': 0.8 } },
+      { name: 'Rosette', values: { 'levels[warp].variations[2].weight': 0, 'levels[warp].variations[4].weight': 0.8 } },
+    ],
+  }),
   // the deco family: fills in metal palettes, each level its own colour at 0 with no radius, so only the fill's bands,
   // metal and alternate move round the palette
   scene({
@@ -2493,8 +2420,22 @@ export const LOOKS: Scene[] = [
     drift: 0.3,
     palette: 'gold',
     radius: 0,
+    // a radial field at rest (depth 0), for Rising sun to step
+    field: { kind: 'radial', angle: k(0), centre: [k(0), k(0)], scale: k(1), depth: k(0), steps: 4 },
     gamma: 1,
     modulators: [mod('sway', 'cos', 32, [['levels[rays].affine.turn', 7.5]])],
+    presets: [
+      // the fill's ramp, and a fill short of solid
+      {
+        name: 'Halo',
+        values: { 'levels[rays].fill.ramp': 0.6, 'levels[rays].fill.amount': 0.85, 'levels[rays].fill.bands': 6 },
+      },
+      // the rays stepped ring by ring by the radial field, the sun low
+      {
+        name: 'Rising sun',
+        values: { 'palette.field.depth': 0.25, 'frame.origin[1]': 0.9, 'palette.field.centre[1]': 0.9 },
+      },
+    ],
   }),
   // overlapping fans in front order, as brick bond lays them
   scene({
@@ -2537,8 +2478,27 @@ export const LOOKS: Scene[] = [
     drift: 0.25,
     palette: stops(DECO),
     radius: 0,
+    // a linear field at rest (depth 0), for Tide to sweep
+    field: { kind: 'linear', angle: k(90), centre: [k(0), k(0)], scale: k(1), depth: k(0), steps: 4, atCells: true },
     gamma: 1,
     modulators: [mod('swell', 'cos', 30, [['levels[scale].variants[0].shape.r', 0.04]])],
+    presets: [
+      // the rows of waves a tone darker row by row by the linear field, in the sea's blues
+      {
+        name: 'Tide',
+        values: {
+          ...Object.fromEntries(
+            [
+              [0.25, 0.08, 255],
+              [0.55, 0.12, 235],
+              [0.85, 0.06, 200],
+              [0.95, 0.02, 90],
+            ].flatMap((lch, i) => lch.map((v, j) => [`palette.stops[${i}].lch[${j}]`, v])),
+          ),
+          'palette.field.depth': 0.6,
+        },
+      },
+    ],
   }),
   // bevelled squares in metal, the light swinging round them
   scene({
@@ -2557,6 +2517,17 @@ export const LOOKS: Scene[] = [
     radius: 0,
     gamma: 1,
     modulators: [mod('sun', 'cos', 32, [['levels[z].fill.light', 40]])],
+    presets: [
+      // the copper metal, in finer steps
+      {
+        name: 'Copper steps',
+        values: {
+          ...palettePreset('Copper steps', 'copper').values,
+          'levels[z].fill.bands': 8,
+          'levels[z].fill.step': 0.1,
+        },
+      },
+    ],
   }),
   scene({
     name: 'Deco - Chevron frieze',
@@ -2577,7 +2548,7 @@ export const LOOKS: Scene[] = [
     gamma: 1,
     modulators: [mod('march', 'ramp', 24, [['levels[v].affine.offset[0]', 0.5]])],
   }),
-  // Lattice - Truchet in gold metal, its lines kept over the fills
+  // the Truchet lattice in gold metal, its lines kept over the fills
   scene({
     name: 'Deco - Gilded Truchet',
     zoom: 0.8,
@@ -2622,6 +2593,21 @@ export const LOOKS: Scene[] = [
         ['levels[weave].fill.light', 35],
       ]),
     ],
+    presets: [
+      // Lattice - Truchet, merged in: unfilled in the ice palette, its colours as they were but for its hue ramp
+      {
+        name: 'Ice',
+        values: {
+          ...palettePreset('Ice', 'ice').values,
+          'levels[tiles].fill.amount': 0,
+          'levels[weave].fill.amount': 0,
+          'palette.radius': 0.3,
+          'levels[tiles].colour.speed': 0.6,
+          'levels[weave].colour.at': 0.5,
+          'levels[weave].colour.speed': 0.5,
+        },
+      },
+    ],
   }),
   // side-on ziggurats in brick bond, stepped back as a skyscraper's setbacks are
   scene({
@@ -2641,6 +2627,10 @@ export const LOOKS: Scene[] = [
     radius: 0,
     gamma: 1,
     modulators: [mod('sun', 'cos', 32, [['levels[zig].fill.light', 40]])],
+    presets: [
+      // the silver metal
+      palettePreset('Silver', 'silver'),
+    ],
   }),
   // Deco - Fan bond in the deco stops, each fan one colour pair of four by a noise field read at its cell, which
   // holds still: a stepped field that moved would hop whole fans, a blink
@@ -2673,8 +2663,12 @@ export const LOOKS: Scene[] = [
     },
     gamma: 1,
     modulators: [mod('open', 'cos', 24, [['levels[fan].variants[0].shape.form', 0.04]])],
+    presets: [
+      // the noise field finer and deeper, so the four pairs scatter fan by fan
+      { name: 'Patchwork', values: { 'palette.field.scale': 2.5, 'palette.field.depth': 1 } },
+    ],
   }),
-  // the halftones: Lattice - Mandala with its petals pressed into dots on their own lattice, the lace filled in bands
+  // the halftones: a polar mandala with its petals pressed into dots on their own lattice, the lace filled in bands
   scene({
     name: 'Halftone - Mandala press',
     zoom: 0.55,
@@ -2711,6 +2705,23 @@ export const LOOKS: Scene[] = [
       mod('character', 'tri', 15, [['levels[seed].variants[0].shape.m', 1.5]]),
       mod('hue', 'cos', 60, [['palette.hue', 60]]),
     ],
+    presets: [
+      // the lattice halftone finer and fuller
+      {
+        name: 'Coarse press',
+        values: {
+          'levels[petals].halftone.pitch': 3.5,
+          'levels[petals].halftone.size': 1.15,
+          'levels[petals].halftone.fade': 0,
+          'levels[lace].fill.amount': 0.4,
+        },
+      },
+      // Lattice - Mandala, merged in: its halftone and fill at 0, the same picture
+      {
+        name: 'Lace',
+        values: { 'levels[petals].halftone.amount': 0, 'levels[lace].fill.amount': 0, 'levels[lace].fill.line': 1 },
+      },
+    ],
   }),
   // Tapestry 1 as LED rings: the halftone's amount spread over the link group from 0, so the leader stays lines and
   // the deeper three turn into hex dots on the screen, each as dim as it is small
@@ -2733,6 +2744,100 @@ export const LOOKS: Scene[] = [
       mod('breathe', 'cos', 119, [['levels[sq1].affine.scale', 0.5]]),
       mod('size', 'tri', 17, [['levels[sq1].variants[0].shape.r', 0.4]]),
       mod('gain', 'cos', 69, [['contour.radialWeight', 2]]),
+    ],
+    presets: [
+      // the hex screen's pitch, size and turn, at one setting on its one look
+      {
+        name: 'Stadium',
+        values: {
+          'levels[sq1].halftone.pitch': 40,
+          'levels[sq1].halftone.size': 1.1,
+          'levels[sq1].halftone.fade': 0.35,
+          'levels[sq1].halftone.turn': 30,
+        },
+      },
+    ],
+  }),
+  // ---- made for the music, each wired its own way ----
+  update(
+    scene({
+      name: 'Music - On the beat',
+      zoom: 1.5,
+      // made for a song: the floor's cells step a turn on each beat, the lights flash and fall back, the bands
+      // move the small things and the tone blends the night palette into the day one; with no music it drifts
+      levels: [
+        level('floor', {
+          scale: 1.6,
+          e2: HEX,
+          by: 'parity',
+          cellTurn: { value: 0, play: [-60, 60] },
+          shape: star(6, { value: 2.5, play: [1.5, 5] }, 0.48, { round: 0.15 }),
+          at: 0,
+          speed: 0.4,
+        }),
+        level('lights', {
+          scale: 2,
+          shape: star(4, 2, { value: 0.42, play: [0.3, 0.5] }, { twist: 45 }),
+          at: 0.5,
+          speed: 0.3,
+          cellSpread: 0.2,
+        }),
+      ],
+      rings: 2,
+      drift: 0.4,
+      width: 0.004,
+      radius: 0.3,
+      modulators: [
+        mod('step', 'steps', 4, [['levels[floor].cell.turn', 45]], { steps: [0, 0.33, 0.67, 1], listen: 'beats' }),
+        mod('flash', 'ramp', 1, [['levels[lights].variants[0].shape.r', -0.06]], { listen: 'beats' }),
+        mod('bass', 'cos', 1, [['line.width', 0.004]], { glide: 0.05, listen: 'bass' }),
+        mod('mids', 'cos', 1, [['contour.drift', 0.8]], { glide: 0.1, listen: 'mid' }),
+        mod('wobble', 'cos', 1, [['levels[floor].variants[0].shape.m', 0.6]], { glide: 0.08, listen: 'highmid' }),
+        mod('sway', 'cos', 32, [['frame.turn', 10]]),
+      ],
+      presets: [palettePreset('Night', 'dusk'), palettePreset('Day', 'ice')],
+    }),
+    (d) => blend(d, 0, 1),
+  ),
+  // the music no other look hears: the loudness (level), the drive and the sub, low, low-mid and air bands, each
+  // pushing its own part of a pond of drops; with no music it drifts, as On the beat does
+  scene({
+    name: 'Music - Pulse',
+    background: { ...background('gradient', 0.1, [0.02, 0.5]), turn: k(90) },
+    levels: [
+      level('drops', {
+        scale: 1.3,
+        lattice: 'voronoi',
+        e2: HEX,
+        jitter: { value: 0.85, play: [0.6, 1] },
+        shape: star(6, 2, 0.05, { round: 1 }),
+        at: 0.4,
+        speed: 0.6,
+        cellSpread: 0.3,
+      }),
+      level('sparks', { scale: 2.2, turn: 30, e2: HEX, weight: 0.7, shape: star(4, 1.4, 0.06), at: 0.8, speed: 0.6 }),
+    ],
+    rings: 2,
+    drift: -1,
+    line: 'smooth',
+    units: 'screen',
+    width: 0.008,
+    falloff: 1.2,
+    palette: stops([
+      [0.55, 0.25, 330],
+      [0.85, 0.15, 60],
+      [0.75, 0.17, 200],
+      [0.6, 0.22, 290],
+    ]),
+    radius: 0.2,
+    modulators: [
+      mod('sub', 'cos', 1, [['levels[drops].variants[0].shape.r', 0.12]], { glide: 0.06, listen: 'sub' }),
+      mod('level', 'cos', 1, [['contour.rings', 4]], { glide: 0.2, listen: 'level' }),
+      mod('drive', 'cos', 1, [['contour.drift', -2]], { glide: 0.3, listen: 'drive' }),
+      mod('low', 'cos', 1, [['levels[drops].lattice.jitter', 0.1]], { glide: 0.2, listen: 'low' }),
+      mod('lowmid', 'cos', 1, [['palette.hue', 40]], { glide: 0.5, listen: 'lowmid' }),
+      mod('air', 'cos', 1, [['levels[sparks].variants[0].shape.r', 0.1]], { glide: 0.04, listen: 'air' }),
+      mod('pan', 'cos', 60, [['frame.origin[1]', 0.5]]),
     ],
   }),
 ]
