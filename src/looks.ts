@@ -2717,7 +2717,7 @@ export const LOOKS: Scene[] = [
       mod('hue', 'cos', 60, [['palette.hue', 60]]),
     ],
     presets: [
-      // the lattice halftone finer and fuller
+      // the lattice halftone coarser and fuller
       {
         name: 'Coarse press',
         values: {
