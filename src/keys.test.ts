@@ -293,7 +293,9 @@ describe('a typed value', () => {
 describe('H', () => {
   it('H hides the UI and shows it again, and Tab does not', async () => {
     const hidden = () => page.$eval('.app', (el) => el.classList.contains('hidden'))
-    const hints = () => page.$eval('.bar .keys', (el) => el.textContent)
+    const hints = () => page.$eval('.keys', (el) => el.textContent)
+    // the keys, behind ?
+    await page.click('.bar .help')
     expect(await hints()).toMatch(/^H hides · Tab live knobs · Enter types · /)
     await page.keyboard.press('h')
     expect(await hidden()).toBe(true)

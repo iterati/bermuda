@@ -179,11 +179,12 @@ describe('undocking', () => {
       bar: getComputedStyle(document.querySelector('.bar')!).position,
       margin: getComputedStyle(document.body).margin,
       button: document.querySelector('.bar button[title^="undock"]')?.textContent,
-      keys: document.querySelector('.bar .keys')?.textContent,
     }))
     expect(stage).toMatchObject({ app: 'app stage', monitor: 1280, bar: 'absolute', margin: '0px' })
     expect(stage.button).toBe('⇲ docked out')
-    expect(stage.keys).toContain('F play · U undock · O autopilot')
+    // the keys, behind ?
+    await popup.click('.bar .help')
+    expect(await popup.$eval('.keys', (el) => el.textContent)).toContain('F play · U undock · O autopilot')
   }, 60_000)
 
   it('⇱ undock opens it too, and pressed again focuses the one open', async () => {
@@ -400,7 +401,11 @@ describe('undocking', () => {
       await page.keyboard.press(key)
       await page.waitForSelector(`.app.${view} ${ready}`)
       expect(await page.$eval(UNDOCK, (el) => [el.textContent, el.checkVisibility()])).toEqual(['⇱ undock', true])
-      if (view === 'direct') expect(await page.$eval('.bar .keys', (el) => el.textContent)).toContain('U undock')
+      if (view === 'direct') {
+        await page.click('.bar .help')
+        expect(await page.$eval('.keys', (el) => el.textContent)).toContain('U undock')
+        await page.click('.bar .help')
+      }
       // not with Ctrl held
       await page.keyboard.down('Control')
       await page.keyboard.press('u')

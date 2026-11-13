@@ -1,10 +1,9 @@
 // The hand fader from scene A to scene B: which side the controls edit, the fader itself drawn as each depth's
-// window of it, the edge's stagger and direction, and the pair as one file.
+// window of it, and the edge's stagger and direction.
 import { useMemo } from 'react'
 import { depthWindow, morphSize } from '../morph'
-import { parseFader, type Edge, type Fader as Pair, type Scene } from '../scene'
+import type { Edge, Scene } from '../scene'
 import { Slider } from './Knob'
-import { download } from './Looks'
 import type { Side } from './Picture'
 
 type Props = {
@@ -17,28 +16,13 @@ type Props = {
   onEdge: (edge: Edge) => void
   onSwap: () => void
   onCopy: () => void
-  onPair: (pair: Pair) => void
-  onError: (message: string) => void
   pickup?: string // a MIDI fader waiting to pick the fader up, and where to move it
 }
 
 const W = 1000
 const ROW = 5
 
-export function Fader({
-  pair,
-  side,
-  fader,
-  edge,
-  onSide,
-  onFader,
-  onEdge,
-  onSwap,
-  onCopy,
-  onPair,
-  onError,
-  pickup,
-}: Props) {
+export function Fader({ pair, side, fader, edge, onSide, onFader, onEdge, onSwap, onCopy, pickup }: Props) {
   const { depth } = useMemo(() => morphSize(pair.a, pair.b), [pair])
   const height = Math.max(depth, 1) * ROW + 6
   const set = (e: React.PointerEvent<SVGSVGElement>) => {
@@ -124,32 +108,6 @@ export function Fader({
           <button className="mini" title={`put a copy of the edited scene on ${other}`} onClick={onCopy}>
             copy to {other}
           </button>
-          <button
-            className="mini"
-            title="download A, B, the fader and the edge as one JSON file"
-            onClick={() =>
-              download(`${pair.a.name} to ${pair.b.name}`, { a: pair.a, b: pair.b, at: fader, edge } satisfies Pair)
-            }
-          >
-            export pair
-          </button>
-          <label className="mini file">
-            import pair
-            <input
-              type="file"
-              accept=".json,application/json"
-              onChange={async (e) => {
-                const file = e.target.files?.[0]
-                e.target.value = ''
-                if (!file) return
-                try {
-                  onPair(parseFader(await file.text()))
-                } catch (err) {
-                  onError(`${file.name}: ${(err as Error).message}`)
-                }
-              }}
-            />
-          </label>
         </span>
       </div>
     </div>

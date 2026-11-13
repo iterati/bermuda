@@ -1,5 +1,5 @@
 // The looks: the built-in ones and the ones saved in this browser, each with its presets under it,
-// plus saving, and files in and out.
+// plus saving, and files in and out. Its play part is the looks and their presets to load, alone.
 import { useState } from 'react'
 import { capturePreset } from '../motion'
 import { parseScene, type Scene } from '../scene'
@@ -12,6 +12,7 @@ type Props = {
   onSave: () => void
   onDelete: (name: string) => void
   onError: (message: string) => void
+  part?: 'play'
 }
 
 // a value downloaded as a JSON file named after name
@@ -23,68 +24,72 @@ export function download(name: string, value: unknown) {
   URL.revokeObjectURL(a.href)
 }
 
-export function Looks({ looks, saved, onLoad, onSave, onDelete, onError }: Props) {
+export function Looks({ looks, saved, onLoad, onSave, onDelete, onError, part }: Props) {
   const { scene, edit } = useCtl()
   const [presetName, setPresetName] = useState('')
   return (
     <div className="panel-block">
       <div className="block-title">
         <span>Looks</span>
-        <span className="actions">
-          <button className="mini" title="save this look in the browser (S)" onClick={onSave}>
-            save look
-          </button>
+        {!part && (
+          <span className="actions">
+            <button className="mini" title="save this look in the browser (S)" onClick={onSave}>
+              save look
+            </button>
+            <button
+              className="mini"
+              title="download this look as a JSON file"
+              onClick={() => download(scene.name, scene)}
+            >
+              export
+            </button>
+            <label className="mini file">
+              import
+              <input
+                type="file"
+                accept=".json,application/json"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0]
+                  e.target.value = ''
+                  if (!file) return
+                  try {
+                    onLoad(parseScene(await file.text()))
+                  } catch (err) {
+                    onError(`${file.name}: ${(err as Error).message}`)
+                  }
+                }}
+              />
+            </label>
+          </span>
+        )}
+      </div>
+      {!part && (
+        <div className="preset-save">
+          <input
+            placeholder="preset name"
+            value={presetName}
+            onChange={(e) => setPresetName(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation()
+              if (e.key === 'Enter' && presetName) {
+                edit((d) => d.presets.push(capturePreset(d, presetName)))
+                setPresetName('')
+              }
+            }}
+          />
           <button
             className="mini"
-            title="download this look as a JSON file"
-            onClick={() => download(scene.name, scene)}
-          >
-            export
-          </button>
-          <label className="mini file">
-            import
-            <input
-              type="file"
-              accept=".json,application/json"
-              onChange={async (e) => {
-                const file = e.target.files?.[0]
-                e.target.value = ''
-                if (!file) return
-                try {
-                  onLoad(parseScene(await file.text()))
-                } catch (err) {
-                  onError(`${file.name}: ${(err as Error).message}`)
-                }
-              }}
-            />
-          </label>
-        </span>
-      </div>
-      <div className="preset-save">
-        <input
-          placeholder="preset name"
-          value={presetName}
-          onChange={(e) => setPresetName(e.target.value)}
-          onKeyDown={(e) => {
-            e.stopPropagation()
-            if (e.key === 'Enter' && presetName) {
+            disabled={!presetName}
+            title="keep every knob's value as a preset under this look"
+            onClick={() => {
               edit((d) => d.presets.push(capturePreset(d, presetName)))
               setPresetName('')
-            }
-          }}
-        />
-        <button
-          className="mini"
-          disabled={!presetName}
-          title="keep every knob's value as a preset under this look"
-          onClick={() => {
-            edit((d) => d.presets.push(capturePreset(d, presetName)))
-            setPresetName('')
-          }}
-        >
-          + preset
-        </button>
-      </div>
+            }}
+          >
+            + preset
+          </button>
+        </div>
+      )}
       <ol className="looks">
         {looks.map((look, i) => {
           const current = look.name === scene.name
@@ -96,7 +101,7 @@ export function Looks({ looks, saved, onLoad, onSave, onDelete, onError }: Props
                   {i < 10 && <kbd>{(i + 1) % 10}</kbd>}
                   {look.name}
                 </button>
-                {saved.has(look.name) && (
+                {!part && saved.has(look.name) && (
                   <button className="mini" title="delete from the browser" onClick={() => onDelete(look.name)}>
                     ×
                   </button>
@@ -109,7 +114,7 @@ export function Looks({ looks, saved, onLoad, onSave, onDelete, onError }: Props
                       <button className="link" onClick={() => onLoad(current ? scene : look, j)}>
                         {p.name}
                       </button>
-                      {current && (
+                      {!part && current && (
                         <button className="mini" onClick={() => edit((d) => d.presets.splice(j, 1))}>
                           ×
                         </button>

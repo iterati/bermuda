@@ -5,7 +5,8 @@
 // picture alone with the bank over it: every change there rides a timed transition, the fader run from the side
 // showing to the other with the change loaded on it, and the autopilot walks the bank. A song, the microphone or
 // a tab, once heard, sets the clock's tempo and lands Play's transitions on its beats. Key I shows the frame-time
-// readout over the picture in every view.
+// readout over the picture in every view. ⚙ or G opens the setup sheet over Stage, Edit or Decks: MIDI, the looks'
+// saving and files, the bank's management and the pair's files; ? shows the keys.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { director, missingKeys, pruneTimeline, type Shot } from './direct'
@@ -55,6 +56,7 @@ import {
   notch,
   parseBank,
   parseControls,
+  parseFader,
   parseScene,
   parseTimeline,
   resolve,
@@ -64,6 +66,7 @@ import {
   type Bank as BankShape,
   type Controls,
   type Edge,
+  type Fader as Pair,
   type MidiTarget,
   type Scene,
   type Timeline,
@@ -79,7 +82,7 @@ import { Fader } from './ui/Fader'
 import { FrameTime, type Frames } from './ui/FrameTime'
 import { wheelTurn } from './ui/Knob'
 import { KnobDetail } from './ui/KnobDetail'
-import { Looks } from './ui/Looks'
+import { download, Looks } from './ui/Looks'
 import { Midi } from './ui/Midi'
 import { Macros, Modulators } from './ui/Motion'
 import { Music } from './ui/Music'
@@ -165,7 +168,9 @@ function timelineRefusal(next: Timeline, before: Timeline | null, looks: Scene[]
 const other = (side: Side): Side => (side === 'a' ? 'b' : 'a')
 
 // the Stage's right column, one block at a time
-const TABS = ['Music', 'Motion', 'Macros', 'MIDI', 'Bank'] as const
+const TABS = ['Music', 'Motion', 'Macros', 'Bank'] as const
+// the setup sheet's pages
+const SETUP = ['MIDI', 'Looks', 'Bank', 'Files'] as const
 
 export function App() {
   const [initial] = useState(() =>
@@ -195,6 +200,9 @@ export function App() {
   const [shown, setShown] = useState(scene)
   const [mode, setMode] = useState<View | 'play' | 'direct'>('stage')
   const [hidden, setHidden] = useState(false)
+  // the setup sheet's page open, in Stage, Edit and Decks; and whether the keys show
+  const [setup, setSetup] = useState<(typeof SETUP)[number] | null>(null)
+  const [keys, setKeys] = useState(false)
   // the controls window the UI is undocked into, this one keeping the picture alone, and its copy of the picture;
   // and the document the UI is in
   const [undocked, setUndocked] = useState<Window | null>(null)
@@ -504,6 +512,8 @@ export function App() {
       setQueue([])
       if (document.fullscreenElement) void document.exitFullscreen()
     }
+    // the setup sheet is Stage's, Edit's and Decks'
+    if (next === 'play' || next === 'direct') setSetup(null)
     setMode(next)
   }
   // the controls into their own window, from a click or key, styled as this one; once open, it comes to the front.
@@ -825,7 +835,9 @@ export function App() {
       else if (mode === 'direct') {
         // Direct takes the song's keys itself
         if (e.key === 't' || e.key === 'Escape') toMode('stage')
-      } else if (e.key === 'Enter') {
+      } else if ((e.key === 'g' || e.key === 'G') && mode !== 'play' && !e.metaKey && !e.ctrlKey)
+        setSetup((p) => (p ? null : 'MIDI'))
+      else if (e.key === 'Enter') {
         // the value of the focused knob, or of the strip macro Tab is on, typed in its field; a button keeps its Enter
         const el = doc.activeElement as HTMLElement | null
         if (el !== doc.body && !el?.matches('.knob')) return
@@ -874,6 +886,8 @@ export function App() {
       else if ((e.key === 'm' || e.key === 'M') && focused && HAS_MIDI) learnMidi({ knob: focused })
       else if (e.key === 'Escape' && mode === 'play') toMode('stage')
       else if (e.key === 'Escape') {
+        // a control learning keeps the setup sheet open, its learning cancelled
+        if (!learningNow) setSetup(null)
         setFocus(null)
         setLearning(null)
         setArmed(null)
@@ -915,7 +929,8 @@ export function App() {
     return () => el.removeEventListener('wheel', onWheel)
   })
 
-  const looksPanel = (
+  // the Looks block whole, or its play part
+  const looksPanel = (part?: 'play') => (
     <Looks
       looks={looks}
       saved={new Set(saved.map((s) => s.name))}
@@ -928,12 +943,14 @@ export function App() {
         prune(next)
       }}
       onError={setError}
+      part={part}
     />
   )
   // where Play is, and where it goes next
   const current = run ? entries[run.to] : entries[side]
   const next = queue[0] ?? (auto.on ? planned : undefined)
-  const bankPanel = (
+  // the Bank block whole, or its play or setup part
+  const bankPanel = (part?: 'play' | 'setup') => (
     <Bank
       bank={bank}
       looks={looks}
@@ -948,6 +965,7 @@ export function App() {
       onAdd={add}
       onStep={autopilot}
       onError={setError}
+      part={part}
     />
   )
 
@@ -962,17 +980,6 @@ export function App() {
       onEdge={setEdge}
       onSwap={swap}
       onCopy={copy}
-      onPair={(f) => {
-        const why = refusal(f)
-        if (why) return setError(why)
-        Object.assign(lives.a, newLive())
-        Object.assign(lives.b, newLive())
-        setPair({ a: f.a, b: f.b })
-        setTurned({ a: new Set(), b: new Set() })
-        setFader(f.at)
-        setEdge(f.edge)
-      }}
-      onError={setError}
       pickup={
         controls.fader && waiting(controls.fader, fader, positions)
           ? `MIDI fader waiting: move it to ${Math.round(fader * 100)}% to pick up`
@@ -993,6 +1000,75 @@ export function App() {
       fader={fader}
       onControls={saveControls}
     />
+  )
+  // the setup sheet: what is set up once, off the play surface, a page at a time
+  const sheet = setup && (
+    <aside className="panel setup-sheet">
+      <div className="setup-nav">
+        <b>Setup</b>
+        {SETUP.map((x) => (
+          <button key={x} className={setup === x ? 'on' : ''} onClick={() => setSetup(x)}>
+            {x}
+          </button>
+        ))}
+        <button className="mini" onClick={() => setSetup(null)} title="Esc">
+          ✕ close
+        </button>
+      </div>
+      <div className="setup-body">
+        {setup === 'MIDI' && midiBlock}
+        {setup === 'Looks' && looksPanel()}
+        {setup === 'Bank' && bankPanel('setup')}
+        {setup === 'Files' && (
+          <div className="panel-block">
+            <div className="block-title">
+              <span>Files</span>
+            </div>
+            <div className="files">
+              <span>A, B and the fader</span>
+              <button
+                className="mini"
+                title="download A, B, the fader and the edge as one JSON file"
+                onClick={() =>
+                  download(`${pair.a.name} to ${pair.b.name}`, { a: pair.a, b: pair.b, at: fader, edge } satisfies Pair)
+                }
+              >
+                export pair
+              </button>
+              <label className="mini file">
+                import pair
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0]
+                    e.target.value = ''
+                    if (!file) return
+                    try {
+                      const f = parseFader(await file.text())
+                      const why = refusal(f)
+                      if (why) return setError(why)
+                      Object.assign(lives.a, newLive())
+                      Object.assign(lives.b, newLive())
+                      setPair({ a: f.a, b: f.b })
+                      setTurned({ a: new Set(), b: new Set() })
+                      setFader(f.at)
+                      setEdge(f.edge)
+                    } catch (err) {
+                      setError(`${file.name}: ${(err as Error).message}`)
+                    }
+                  }}
+                />
+              </label>
+            </div>
+            <div className="dim">
+              this look&apos;s files are in Looks, the bank&apos;s in Bank; Direct keeps the timeline&apos;s and the
+              video&apos;s.
+            </div>
+          </div>
+        )}
+      </div>
+    </aside>
   )
 
   const cls = `app ${mode}${hidden ? ' hidden' : ''}`
@@ -1085,20 +1161,34 @@ export function App() {
           >
             mutate
           </button>
+          <button
+            className={`mini${setup ? ' on' : ''}`}
+            onClick={() => setSetup((p) => (p ? null : 'MIDI'))}
+            title="setup: MIDI, the looks' saving and presets, the bank's management, the pair's files (G)"
+          >
+            ⚙ setup
+          </button>
+          <button className={`mini help${keys ? ' on' : ''}`} onClick={() => setKeys((k) => !k)} title="the keys">
+            ?
+          </button>
+        </header>
+      )}
+      {mode !== 'play' && keys && (
+        <div className="keys panel dim">
           {mode === 'direct' ? (
-            <span className="dim keys">
+            <>
               H hides · Space play · Home rewinds · wheel zooms · shift-drag the waveform loops · double-click adds a
               key · U undock · T or Esc to Stage
-            </span>
+            </>
           ) : (
-            <span className="dim keys">
+            <>
               H hides · Tab live knobs · Enter types · E edit · D decks · T direct · Space pause · 1-0 looks · [ ]
-              presets · ← → chips · ↑ ↓ knob · PgDn PgUp strip page · M MIDI learn · S save · P preset · A B side · , .
-              fader · X swap · L loop · R mutate · C roll chip · ⇧C roll look · F play · U undock · O autopilot · N next
-              · I readout
-            </span>
+              presets · ← → chips · ↑ ↓ knob · PgDn PgUp strip page · M MIDI learn · G setup · S save · P preset · A B
+              side · , . fader · X swap · L loop · R mutate · C roll chip · ⇧C roll look · F play · U undock · O
+              autopilot · N next · I readout
+            </>
           )}
-        </header>
+        </div>
       )}
       {error && (
         <div className="error panel" onClick={() => setError(undefined)}>
@@ -1128,7 +1218,7 @@ export function App() {
             stage
           </button>
         </div>
-        {bankPanel}
+        {bankPanel()}
       </aside>
     ) : mode === 'stage' ? (
       <>
@@ -1147,11 +1237,10 @@ export function App() {
           {tab === 'Music' && musicBlock}
           {tab === 'Motion' && <Modulators />}
           {tab === 'Macros' && <Macros />}
-          {tab === 'MIDI' && midiBlock}
           {tab === 'Bank' && (
             <>
-              {looksPanel}
-              {bankPanel}
+              {looksPanel('play')}
+              {bankPanel('play')}
             </>
           )}
         </aside>
@@ -1205,9 +1294,8 @@ export function App() {
                 {musicBlock}
                 <Modulators />
                 <Macros />
-                {midiBlock}
-                {looksPanel}
-                {bankPanel}
+                {looksPanel()}
+                {bankPanel()}
               </aside>
             )}
           </div>
@@ -1246,10 +1334,9 @@ export function App() {
           {musicBlock}
           <Modulators />
           <Macros />
-          {midiBlock}
         </div>
-        <div className="panel">{looksPanel}</div>
-        <div className="panel">{bankPanel}</div>
+        <div className="panel">{looksPanel()}</div>
+        <div className="panel">{bankPanel()}</div>
       </aside>
     )
   // Direct's place, after the bar and the error panel, in the window the UI is in
@@ -1258,6 +1345,7 @@ export function App() {
       {top}
       <div ref={dockDirect} />
       {views}
+      {sheet}
     </>
   )
   const aspect = mode === 'direct' ? video.width / video.height : undefined

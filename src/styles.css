@@ -111,16 +111,22 @@ button {
 .bar > * {
   flex: none;
 }
-.bar > .keys {
-  flex: 1 1 0;
-  min-width: 0;
-  text-align: right;
-}
-.keys {
+.bar > .help {
   margin-left: auto;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+.bar > .mini.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* the keys, behind ?, under the bar's right end */
+.keys {
+  position: absolute;
+  top: 58px;
+  right: 10px;
+  max-width: 560px;
+  padding: 8px 12px;
+  z-index: 4;
+  background: rgba(10, 12, 18, 0.94);
 }
 .error {
   position: absolute;
@@ -132,6 +138,59 @@ button {
   color: #ffb4b4;
   z-index: 4;
   cursor: pointer;
+}
+
+/* the setup sheet */
+.setup-sheet {
+  position: absolute;
+  top: 58px;
+  right: 10px;
+  bottom: 10px;
+  width: 620px;
+  display: flex;
+  z-index: 3;
+  background: rgba(10, 12, 18, 0.94);
+}
+.setup-nav {
+  flex: none;
+  width: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 8px;
+  border-right: 1px solid var(--edge);
+}
+.setup-nav > b {
+  margin-bottom: 6px;
+  color: var(--accent);
+}
+.setup-nav button {
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 5px 8px;
+  color: var(--dim);
+}
+.setup-nav button.on {
+  border-color: var(--edge);
+  color: var(--text);
+  background: rgba(127, 216, 255, 0.12);
+}
+.setup-nav .mini {
+  margin-top: auto;
+}
+.setup-body {
+  flex: 1;
+  overflow: auto;
+  padding: 10px 12px;
+}
+.files {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 6px 8px;
+  align-items: center;
+  margin: 6px 0 10px;
 }
 
 /* Stage: everything floats over the picture */
@@ -1287,7 +1346,7 @@ kbd {
 /* Direct: the picture framed as the export will be, the timeline along the bottom */
 /* the bar's look, clock and loop are Stage's scene's, which Direct does not draw; undock stays */
 .direct .bar > .look-title,
-.direct .bar > .mini:not(.undock),
+.direct .bar > .mini:not(.undock, .help),
 .direct .bar > .num,
 .direct .bar > .check {
   display: none;

@@ -230,12 +230,20 @@ describe('a drag', () => {
   const pause = () => new Promise((r) => setTimeout(r, 200))
 
   it('a press or drag on the macro slider, a Bank slider and the stagger leaves its value, and the wheel turns it', async () => {
-    for (const [where, pick] of [
-      ['Macros', 'macro'],
-      ['Bank', 'busy'],
-      [undefined, 'stagger'],
+    for (const [open, pick] of [
+      [() => tab('Macros'), 'macro'],
+      // busy is in the setup sheet's Bank page
+      [
+        async () => {
+          await page.keyboard.press('g')
+          await page.$$eval('.setup-nav button', (els) => els.find((b) => b.textContent === 'Bank')!.click())
+        },
+        'busy',
+      ],
+      // the sheet closed, off the fader
+      [() => page.keyboard.press('g'), 'stagger'],
     ] as const) {
-      if (where) await tab(where)
+      await open()
       const { value, x, y, w } = await slider(pick)
       // a click well off the thumb, then a drag along it
       await page.mouse.click(x + w / 3, y)
