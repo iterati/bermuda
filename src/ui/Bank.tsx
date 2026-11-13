@@ -56,7 +56,7 @@ export function Bank({ bank, looks, current, next, onBank, onGo, onAdd, onStep, 
   const play = part !== 'setup'
   const setup = part !== 'play'
   const auto = bank.autopilot
-  const setAuto = (part: Partial<BankShape['autopilot']>) => onBank({ ...bank, autopilot: { ...auto, ...part } })
+  const setAuto = (to: Partial<BankShape['autopilot']>) => onBank({ ...bank, autopilot: { ...auto, ...to } })
   const n = bank.scenes.length
   const at = (i: number) => {
     const a = -Math.PI / 2 + (2 * Math.PI * i) / n

@@ -1344,7 +1344,7 @@ kbd {
 }
 
 /* Direct: the picture framed as the export will be, the timeline along the bottom */
-/* the bar's look, clock and loop are Stage's scene's, which Direct does not draw; undock stays */
+/* the bar's look, clock and loop are Stage's scene's, which Direct does not draw; undock and ? stay */
 .direct .bar > .look-title,
 .direct .bar > .mini:not(.undock, .help),
 .direct .bar > .num,

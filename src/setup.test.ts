@@ -181,6 +181,14 @@ describe('the setup sheet', () => {
     await page.evaluate(() => document.querySelectorAll<HTMLButtonElement>('.stage .right .look-name')[2].click())
     await pause()
     expect(await page.$eval('.look-title', (el) => (el as HTMLInputElement).value)).toBe(LOOKS[2].name)
+    const other = LOOKS.findIndex((l, i) => i > 0 && i !== 2 && l.presets.length)
+    await page.evaluate(
+      (i) =>
+        document.querySelectorAll('.stage .right ol.looks > li')[i].querySelector<HTMLButtonElement>('.link')!.click(),
+      other,
+    )
+    await pause()
+    expect(await page.$eval('.look-title', (el) => (el as HTMLInputElement).value)).toBe(LOOKS[other].name)
     // and the ×s are in the sheet's Looks
     await page.keyboard.press('1')
     await page.keyboard.press('g')
