@@ -1,11 +1,12 @@
 // The Perform strip, the Stage's own: 8 big knobs, the look's macros and then the picked chip's top knobs, a page
 // of 8 at a time. Slot n is always place n, an empty one kept as an empty place, so a controller's encoder n is
-// slot n on every page of every look.
+// slot n on every page of every look. Beside them the pager, the page's dice, the macro learn and more.
 import { useMemo } from 'react'
 import { knobsOf, type MidiTarget } from '../scene'
-import { labelOf, useCtl } from './controls'
+import { Dice, labelOf, useCtl } from './controls'
 import { Knob } from './Knob'
 import { MapTag } from './Midi'
+import { MacroLearn } from './Motion'
 
 type Props = {
   slots: (MidiTarget | undefined)[]
@@ -13,9 +14,10 @@ type Props = {
   pages: number
   onPage: (by: 1 | -1) => void
   onMore: () => void
+  onMacros: () => void // opens Macros, as the macro learn arms a new macro
 }
 
-export function Perform({ slots, page, pages, onPage, onMore }: Props) {
+export function Perform({ slots, page, pages, onPage, onMore, onMacros }: Props) {
   const { scene } = useCtl()
   const all = useMemo(() => knobsOf(scene), [scene])
   return (
@@ -55,6 +57,8 @@ export function Perform({ slots, page, pages, onPage, onMore }: Props) {
             </button>
           </span>
         )}
+        <Dice at={slots.flatMap((t) => (t && 'knob' in t ? [t.knob] : []))} what="this page" label="⚄ page" />
+        <MacroLearn onOpen={onMacros} />
         <button className="mini" title="every knob of the picked chip" onClick={onMore}>
           more ▸
         </button>

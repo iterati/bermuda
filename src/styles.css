@@ -316,8 +316,14 @@ button {
 .live-block {
   margin: 4px 0 10px;
 }
-.live-head {
+/* the head's line: its count, and the chip's dice at its right */
+.live-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 4px;
+}
+.live-head {
   font-size: 12.5px;
 }
 .all-toggle {
@@ -408,7 +414,8 @@ button {
 .app.console > .bottom {
   grid-row: 3;
 }
-/* the Perform strip: 8 big knobs, each in its own place, an empty one kept; the pager and more beside them */
+/* the Perform strip: 8 big knobs, each in its own place, an empty one kept; beside them a column of the pager, the
+   page's dice, the macro learn and more, inside the slots' height */
 .perform {
   display: flex;
   align-items: center;
@@ -444,7 +451,7 @@ button {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 6px;
+  gap: 5px;
 }
 .pager {
   display: inline-flex;

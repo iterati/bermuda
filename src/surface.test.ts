@@ -9,13 +9,17 @@ import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import { createServer, type ViteDevServer } from 'vite'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { LOOKS } from './looks'
-import { allLevels, chipKnobs, knobKind, strip, type Controls } from './scene'
+import { allLevels, chipKnobs, knobKind, knobsOf, resolve, strip, type Controls, type Scene } from './scene'
 
 let server: ViteDevServer
 let browser: Browser
 let page: Page
 
-// a fake MIDI access with one controller, as pads.test.ts's
+// what the fake controller puts on the main window: send() delivers a message as a plugged-in controller would, and
+// ready() says the app is hearing it
+type Fake = { send: (...bytes: number[]) => void; ready: () => boolean }
+
+// a fake MIDI access with one controller, as map.test.ts's
 const fakeController = () => {
   type Port = { name: string; state: string; onmidimessage: ((e: { data: Uint8Array; target: Port }) => void) | null }
   const input: Port = { name: 'Fake knobs', state: 'connected', onmidimessage: null }
@@ -28,6 +32,11 @@ const fakeController = () => {
     configurable: true,
     value: () => Promise.resolve(access),
   })
+  const fake: Fake = {
+    send: (...bytes) => input.onmidimessage?.({ data: new Uint8Array(bytes), target: input }),
+    ready: () => !!input.onmidimessage,
+  }
+  Object.assign(window, { fake })
 }
 
 beforeAll(async () => {
@@ -68,6 +77,13 @@ const STRIP = strip(t1, FIRST)
   .map((t) => ('knob' in t ? t.knob : t.macro))
 const KNOB = strip(t1, FIRST).flatMap((t) => ('knob' in t ? [t.knob] : []))[0]
 const TURN = `levels[${FIRST}].affine.turn`
+// the knobs with a play range: of the strip's first page, of the first level and of the whole look
+const RANGED = knobsOf(t1).filter((k) => k.knob.play)
+const PAGE_RANGED = RANGED.filter((k) => STRIP.includes(k.address)).map((k) => k.address)
+const CHIP_RANGED = chipKnobs(t1, FIRST)
+  .filter((k) => k.knob.play)
+  .map((k) => k.address)
+const LOOK_RANGED = RANGED.map((k) => k.address)
 // the picker row's entries, in order
 const PICKER = [
   'Looks',
@@ -106,6 +122,85 @@ async function seed(controls: Controls) {
   await page.reload()
   await page.waitForSelector('.knob', { timeout: 55_000 })
 }
+// a CC moved on the controller's channel 1, once the app hears it
+async function cc(control: number, value = 64) {
+  await page.waitForFunction(() => (window as unknown as { fake: Fake }).fake.ready(), { polling: 100 })
+  await page.evaluate((c, v) => (window as unknown as { fake: Fake }).fake.send(0xb0, c, v), control, value)
+  await pause()
+}
+// the look as the app has it, saved by S (which locks it against the dice) and read back from the browser
+async function kept(p: Page = page) {
+  await p.keyboard.press('s')
+  await pause()
+  return page.evaluate(() => (JSON.parse(localStorage.getItem('bermuda.looks')!) as Scene[]).at(-1)!)
+}
+// the app opened again on Tapestry 1, with nothing saved
+async function fresh() {
+  await page.evaluate(() => localStorage.removeItem('bermuda.looks'))
+  await page.reload()
+  await page.waitForSelector('.knob', { timeout: 55_000 })
+}
+// the knobs of a look that are not where Tapestry 1 has them, and those of them outside their play range
+const moved = (scene: Scene) =>
+  knobsOf(t1)
+    .filter((k) => resolve(scene, k.address)!.value !== k.knob.value)
+    .map((k) => k.address)
+const outside = (scene: Scene) =>
+  RANGED.filter(({ address, knob: { play } }) => {
+    const v = resolve(scene, address)!.value
+    return v < play![0] || v > play![1]
+  }).map((k) => k.address)
+// the wheel turned up over a knob, by notches
+async function wheel(selector: string, n = 5, p: Page = page) {
+  const r = await p.$eval(selector, (el) => el.getBoundingClientRect().toJSON() as DOMRect)
+  await p.mouse.move(r.x + r.width / 2, r.y + r.height / 2)
+  for (let i = 0; i < n; i++) {
+    await p.mouse.wheel({ deltaY: -100 })
+    await pause(100)
+  }
+  await pause()
+}
+// each dice shown, by where it is: its text, title and whether it is disabled
+const dice = (p: Page = page) =>
+  p.$$eval('.dice', (els) =>
+    els
+      .filter((el) => el.checkVisibility())
+      .map((el) => ({
+        where: el.closest('.bar')
+          ? 'bar'
+          : el.closest('.perform-side')
+            ? 'strip'
+            : el.closest('.live-line')
+              ? 'live head'
+              : el.closest('.group-title')
+                ? 'chip title'
+                : 'row',
+        text: el.textContent,
+        title: el.getAttribute('title'),
+        disabled: (el as HTMLButtonElement).disabled,
+      })),
+  )
+// the strip's side, top to bottom, the macro learn's text and whether it is armed, and whether every macro's own
+// learn in the panel is disabled
+const side = (p: Page = page) =>
+  p.evaluate(() => {
+    const s = document.querySelector('.perform-side')!
+    const learn = [...s.querySelectorAll('button')].find((b) => b.textContent!.startsWith('●'))!
+    const own = [...document.querySelectorAll<HTMLButtonElement>('.context .mod-head button')].filter(
+      (b) => b.textContent === 'learn',
+    )
+    return {
+      parts: [...s.children].map((el) => (el as HTMLElement).innerText.replace(/\s+/g, ' ').trim()),
+      learn: [learn.textContent, learn.getAttribute('title'), learn.classList.contains('armed')],
+      own: own.length ? own.every((b) => b.disabled) : null,
+    }
+  })
+const LEARN_TITLE = 'macro learn by example: arm, move the knobs it should move, press again'
+const NOTE = 'a new macro: move knobs, by hand or MIDI, then press ● again by the strip'
+const note = (p: Page = page) =>
+  p.evaluate(() => document.querySelector('.context .block-title + .armed-note')?.textContent ?? null)
+const roll = (what: string) => `roll ${what}: each knob with a play range to anywhere inside it`
+const LOCKED = 'a saved look is locked: rename it to roll'
 // a button or modulator chip, by where it is and how its shown text starts, pressed as a hand would
 async function press(within: string, text: string, p: Page = page) {
   for (const b of await p.$$(`${within} button, ${within} .chip-mod`))
@@ -169,14 +264,14 @@ const box = (selector: string) =>
 describe('the play surface', () => {
   it('the Stage at rest: the bar with ♪, the slim fader, and one bottom deck of the picker row, the strip and the pads; no left chain, no tabs and no context panel', async () => {
     await seed(RIG)
-    // ♪ in the bar, after mutate
+    // ♪ in the bar, after mutate and ⚄ look
     expect(
       await page.$eval('.bar button[title^="the music"]', (el) => [
         el.textContent,
         el.getAttribute('title'),
         el.previousElementSibling!.textContent,
       ]),
-    ).toEqual(['♪ song / mic', 'the music: a song, the microphone or a tab, and what it hears', 'mutate'])
+    ).toEqual(['♪ song / mic', 'the music: a song, the microphone or a tab, and what it hears', '⚄ look'])
     // the slim fader: one row of A, the fader, B, the %, ⇄ swap, copy to B and edge ▸, the pickup line under it
     const fader = await page.evaluate(() => {
       const top = document.querySelector('.app > section.panel.top')!
@@ -424,6 +519,193 @@ describe('the play surface', () => {
     expect(await page.$$('.bar button[title^="the music"]')).toEqual([])
   }, 60_000)
 
+  it("the dice sit where the play surface puts them: ⚄ look in the bar after mutate, ⚄ chip by the panel's live head, ⚄ at a row's end and in a chip's title, and ⚄ page by the strip, each rolling its own knobs inside their play ranges", async () => {
+    // ⚄ look after mutate, before ♪
+    expect(
+      await page.$eval('.bar .dice', (el) => [
+        el.previousElementSibling!.textContent!.trim(),
+        el.textContent,
+        el.nextElementSibling!.textContent,
+      ]),
+    ).toEqual(['mutate', '⚄ look', '♪ song / mic'])
+    // ⚄ page and ● macro learn under the pager, more ▸ under them, inside the slots' height
+    expect(await side()).toMatchObject({
+      parts: ['◂ page 1/2 ▸', '⚄ page', '● macro learn', 'more ▸'],
+      learn: ['● macro learn', LEARN_TITLE, false],
+    })
+    const [slot, strip] = await Promise.all([box('.perform .slot'), box('.perform-side')])
+    expect(strip.top).toBeGreaterThanOrEqual(slot.top)
+    expect(strip.bottom).toBeLessThanOrEqual(slot.bottom)
+    // ⚄ chip on the live head's line, at its right, the head holding its count alone
+    await press('.picker', FIRST)
+    expect(
+      await page.$eval('.context .live-line', (el) => {
+        const [head, d] = [el.querySelector('.live-head')!, el.querySelector(':scope > .dice')!]
+        return [head.textContent, d.textContent, el.getBoundingClientRect().right - d.getBoundingClientRect().right]
+      }),
+    ).toEqual([expect.stringMatching(/^live \d+ · in the chip's order$/), '⚄ chip', 0])
+    await press('.context', '▸ the whole chip')
+    const shown = await dice()
+    expect(shown.filter((d) => d.where !== 'row')).toEqual([
+      { where: 'bar', text: '⚄ look', title: roll('the whole look'), disabled: false },
+      { where: 'strip', text: '⚄ page', title: roll('this page'), disabled: false },
+      { where: 'live head', text: '⚄ chip', title: roll('this chip'), disabled: false },
+      { where: 'chip title', text: '⚄', title: roll('this chip'), disabled: false },
+    ])
+    expect(shown.filter((d) => d.where === 'row').length).toBeGreaterThan(0)
+    for (const d of shown.filter((d) => d.where === 'row'))
+      expect(d).toEqual({ where: 'row', text: '⚄', title: roll('this row'), disabled: false })
+    // each rolls its own knobs with a play range, each inside it, and leaves the rest as they were
+    for (const [open, button, rolled] of [
+      [async () => {}, () => press('.perform-side', '⚄ page'), PAGE_RANGED],
+      [() => press('.picker', FIRST), () => press('.context .live-line', '⚄ chip'), CHIP_RANGED],
+      [async () => {}, () => press('.bar', '⚄ look'), LOOK_RANGED],
+      [
+        async () => {
+          await press('.picker', FIRST)
+          await press('.context', '▸ the whole chip')
+        },
+        () => page.click('.context .group-title > .dice'),
+        CHIP_RANGED,
+      ],
+    ] as const) {
+      await fresh()
+      await open()
+      await button()
+      await pause()
+      const look = await kept()
+      expect(moved(look).sort()).toEqual([...rolled].sort())
+      expect(outside(look)).toEqual([])
+    }
+    // a row's: the knobs it shows with a play range, and none of another chip
+    await fresh()
+    await press('.picker', FIRST)
+    await press('.context', '▸ the whole chip')
+    const row = await page.$$eval('.context .group .row', (rows) => {
+      const r = rows.find((el) => el.querySelector(':scope > .dice'))!
+      r.querySelector<HTMLElement>(':scope > .dice')!.click()
+      return [...r.querySelectorAll<HTMLElement>('.knob[data-knob]')].map((el) => el.dataset.knob!)
+    })
+    await pause()
+    const look = await kept()
+    const ranged = row.filter((a) => CHIP_RANGED.includes(a))
+    expect(ranged.length).toBeGreaterThan(0)
+    expect(moved(look)).toEqual(expect.arrayContaining(ranged))
+    for (const a of moved(look)) expect(CHIP_RANGED).toContain(a)
+    expect(outside(look)).toEqual([])
+  }, 120_000)
+
+  it('a look saved in this browser locks every dice, ⚄ look reading 🔒, and C and ⇧C roll nothing', async () => {
+    await page.keyboard.press('s')
+    await pause()
+    await press('.picker', FIRST)
+    await press('.context', '▸ the whole chip')
+    const shown = await dice()
+    expect(shown.map((d) => d.where).filter((w, i, all) => all.indexOf(w) === i)).toEqual([
+      'bar',
+      'strip',
+      'live head',
+      'chip title',
+      'row',
+    ])
+    expect(shown.find((d) => d.where === 'bar')!.text).toBe('⚄ look 🔒')
+    for (const d of shown) expect(d, d.where).toMatchObject({ title: LOCKED, disabled: true })
+    await page.evaluate(() => (document.activeElement as HTMLElement).blur())
+    await page.keyboard.press('c')
+    await page.keyboard.press('C')
+    await pause()
+    expect(moved(await kept())).toEqual([])
+  }, 60_000)
+
+  it('● macro learn by the strip arms a new macro and opens Macros; knobs moved by hand and by an encoder, then ● again, keep them as a new macro at 1, on the strip; Esc disarms and adds none, and so does ● again with nothing moved', async () => {
+    await seed(RIG)
+    const id = `macro${t1.macros.length + 1}`
+    const macros = () =>
+      page.$$eval('.perform .knob[data-macro]', (els) => els.map((el) => (el as HTMLElement).dataset.macro))
+    expect(await macros()).toEqual(t1.macros.map((m) => m.id))
+    await press('.perform-side', '● macro learn')
+    expect(await panel()).toMatchObject({ head: 'macros', blocks: ['Macros'] })
+    expect(await note()).toBe(NOTE)
+    // armed: the strip's button to keep it, every macro's own learn disabled
+    expect(await side()).toMatchObject({ learn: ['● press to keep', LEARN_TITLE, true], own: true })
+    // the first page's knob by the wheel, and its last slot's by encoder 8
+    const last = STRIP.at(-1)!
+    expect(last).not.toBe(KNOB)
+    await wheel(`.perform .knob[data-knob="${KNOB}"]`)
+    await cc(8, 20)
+    await page.mouse.move(400, 300)
+    await press('.perform-side', '● press to keep')
+    await pause()
+    expect(await side()).toMatchObject({ learn: ['● macro learn', LEARN_TITLE, false], own: false })
+    expect(await note()).toBeNull()
+    // the new macro, named as + macro would, at 1, its two knobs from where they were to where they are, on the strip
+    expect(await macros()).toEqual([...t1.macros.map((m) => m.id), id])
+    expect(await page.$eval(`.perform .knob[data-macro="${id}"] .knob-label`, (el) => el.textContent)).toBe(
+      `Macro ${t1.macros.length + 1}`,
+    )
+    expect(await visible('.context .mod')).toBe(t1.macros.length + 1)
+    const look = await kept()
+    const was = (a: string) => resolve(t1, a)!.value
+    const now = (a: string) => resolve(look, a)!.value
+    expect(moved(look).sort()).toEqual([KNOB, last].sort())
+    expect(look.macros.at(-1)).toEqual({
+      id,
+      name: `Macro ${t1.macros.length + 1}`,
+      value: 1,
+      targets: knobsOf(t1)
+        .filter((k) => k.address === KNOB || k.address === last)
+        .map((k) => ({ knob: k.address, from: was(k.address), to: now(k.address) })),
+    })
+    // Esc disarms and adds none, the knob left where it was moved
+    await fresh()
+    await press('.perform-side', '● macro learn')
+    await wheel(`.perform .knob[data-knob="${KNOB}"]`)
+    await page.keyboard.press('Escape')
+    await pause()
+    expect(await side()).toMatchObject({ learn: ['● macro learn', LEARN_TITLE, false] })
+    expect(await macros()).toEqual(t1.macros.map((m) => m.id))
+    const escaped = await kept()
+    expect(moved(escaped)).toEqual([KNOB])
+    expect(escaped.macros).toEqual(t1.macros)
+    // and ● again with nothing moved
+    await fresh()
+    await press('.perform-side', '● macro learn')
+    await press('.perform-side', '● press to keep')
+    await pause()
+    expect(await side()).toMatchObject({ learn: ['● macro learn', LEARN_TITLE, false], own: false })
+    expect(await macros()).toEqual(t1.macros.map((m) => m.id))
+    expect((await kept()).macros).toEqual(t1.macros)
+  }, 120_000)
+
+  it('● macro learn by the strip keeps into the macro whose own learn armed it', async () => {
+    const [first] = t1.macros
+    await press('.picker', 'Macros')
+    await page.$$eval('.context .mod .mod-head button', (els) => els.find((el) => el.textContent === 'learn')!.click())
+    await pause()
+    // armed by its own learn: the strip's button keeps it, no new macro's line
+    expect(await side()).toMatchObject({ learn: ['● press to keep', LEARN_TITLE, true] })
+    expect(await note()).toBeNull()
+    expect(await page.$eval('.context .mod.armed .macro-name', (el) => (el as HTMLInputElement).value)).toBe(first.name)
+    await wheel(`.perform .knob[data-knob="${TURN}"]`)
+    await page.mouse.move(400, 300)
+    await press('.perform-side', '● press to keep')
+    await pause()
+    expect(await side()).toMatchObject({ learn: ['● macro learn', LEARN_TITLE, false], own: false })
+    expect(await visible('.context .mod.armed')).toBe(0)
+    const look = await kept()
+    expect(moved(look)).toEqual([TURN])
+    expect(look.macros.length).toBe(t1.macros.length)
+    // the turned knob a new target, the earlier ones taking where they are as their to, the macro at 1
+    expect(look.macros[0]).toEqual({
+      ...first,
+      value: 1,
+      targets: [
+        ...first.targets.map((t) => ({ ...t, to: resolve(look, t.knob)!.value })),
+        { knob: TURN, from: resolve(t1, TURN)!.value, to: resolve(look, TURN)!.value },
+      ],
+    })
+  }, 60_000)
+
   it("edge ▸ opens stagger and deep first in the panel, and they set the edge as the fader's own did", async () => {
     // the fader's depth bars, which the edge lays out
     const bars = () =>
@@ -599,4 +881,53 @@ describe('the play surface', () => {
     expect(await panel(popup)).toMatchObject({ head: second, detail: 'no knob focused' })
     await popup.close()
   }, 60_000)
+
+  it('undocked, ⚄ chip, ⚄ page and ● macro learn are in the console and work there', async () => {
+    const before = new Set(browser.targets())
+    await page.keyboard.press('u')
+    const target = await browser.waitForTarget((t) => !before.has(t) && t.type() === 'page', { timeout: 10_000 })
+    const popup = (await target.page())!
+    await popup.setViewport({ width: 1280, height: 800 })
+    await popup.waitForSelector('.context .live-row')
+    expect((await dice(popup)).map((d) => [d.where, d.text])).toEqual([
+      ['bar', '⚄ look'],
+      ['strip', '⚄ page'],
+      ['live head', '⚄ chip'],
+    ])
+    expect(await side(popup)).toMatchObject({
+      parts: ['◂ page 1/2 ▸', '⚄ page', '● macro learn', 'more ▸'],
+      learn: ['● macro learn', LEARN_TITLE, false],
+    })
+    // ● macro learn there opens Macros there, and keeps a knob turned there as a new macro
+    await press('.perform-side', '● macro learn', popup)
+    expect(await panel(popup)).toMatchObject({ head: 'macros', blocks: ['Macros'] })
+    expect(await note(popup)).toBe(NOTE)
+    await wheel(`.perform .knob[data-knob="${TURN}"]`, 5, popup)
+    await popup.mouse.move(800, 300)
+    await press('.perform-side', '● press to keep', popup)
+    await pause()
+    const id = `macro${t1.macros.length + 1}`
+    expect(await visible(`.perform .knob[data-macro="${id}"]`, popup)).toBe(1)
+    // ⚄ page rolls the page's knobs with a play range there, and ⚄ chip the chip's
+    await press('.perform-side', '⚄ page', popup)
+    await pause()
+    let look = await kept(popup)
+    expect(look.macros.at(-1)!.targets.map((t) => t.knob)).toEqual([TURN])
+    expect(moved(look).sort()).toEqual([TURN, ...PAGE_RANGED].sort())
+    await popup.close()
+    await fresh()
+    const again = new Set(browser.targets())
+    await page.keyboard.press('u')
+    const next = (await (
+      await browser.waitForTarget((t) => !again.has(t) && t.type() === 'page', { timeout: 10_000 })
+    ).page())!
+    await next.setViewport({ width: 1280, height: 800 })
+    await next.waitForSelector('.context .live-row')
+    await press('.context .live-line', '⚄ chip', next)
+    await pause()
+    look = await kept(next)
+    expect(moved(look).sort()).toEqual([...CHIP_RANGED].sort())
+    expect(outside(look)).toEqual([])
+    await next.close()
+  }, 120_000)
 })

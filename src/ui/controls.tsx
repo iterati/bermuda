@@ -80,7 +80,8 @@ export type Ctl = {
   armed: Armed | null // the macro learning by example, and the scene as it was armed
   arm: (armed: Armed | null) => void
 }
-export type Armed = { id: string; before: Scene }
+// fresh: a new macro, made only when kept, as the strip's macro learn arms it
+export type Armed = { id: string; before: Scene; fresh: boolean }
 // a knob or macro typed, and the knob it types in, of the two a knob on the strip and in the context panel has
 export type Typing = MidiTarget & { el: Element }
 export const CtlContext = createContext<Ctl | null>(null)
@@ -193,7 +194,7 @@ function Extra({ label, at, has, set }: { label: string; at: Address; has: boole
 
 // A roll of the knobs at these addresses, each to anywhere inside its play range; a look saved in this browser is
 // locked against it.
-export function Dice({ at, what }: { at: Address[]; what: string }) {
+export function Dice({ at, what, label }: { at: Address[]; what: string; label: string }) {
   const { scene, edit, locked } = useCtl()
   const ranged = at.some((a) => resolve(scene, a)!.play)
   return (
@@ -209,7 +210,7 @@ export function Dice({ at, what }: { at: Address[]; what: string }) {
       }
       onClick={() => edit((d) => dice(d, at, Math.random))}
     >
-      ⚄
+      {label}
     </button>
   )
 }
@@ -230,7 +231,7 @@ const Group = ({
     <div className="group">
       <div className="group-title">
         <span>{title}</span>
-        <Dice at={chipKnobs(scene, chip).map((k) => k.address)} what="this chip" />
+        <Dice at={chipKnobs(scene, chip).map((k) => k.address)} what="this chip" label="⚄" />
         {actions}
       </div>
       <div className="group-body">{children}</div>
@@ -275,7 +276,9 @@ function Row({ title, knobs, children }: { title?: string; knobs: [string, Addre
           {open ? '−' : tiers ? `off ${hidden.length}` : `+${hidden.length}`}
         </button>
       )}
-      {knobs.some(([, at]) => resolve(scene, at)!.play) && <Dice at={knobs.map(([, at]) => at)} what="this row" />}
+      {knobs.some(([, at]) => resolve(scene, at)!.play) && (
+        <Dice at={knobs.map(([, at]) => at)} what="this row" label="⚄" />
+      )}
     </div>
   )
 }
@@ -290,8 +293,9 @@ export function labelOf(all: readonly KnobAt[], address: Address) {
 }
 
 // The Stage's context panel on a chip, under the knob's detail: its live knobs in the chip's order, each on the
-// strip's page showing (slots) tagged with its encoder, then the way to the whole chip, its every row and its menus
-// and buttons: closed each time the panel turns to the chip from closed or another view, kept as the chip changes.
+// strip's page showing (slots) tagged with its encoder, the chip's dice at the head's right, then the way to the
+// whole chip, its every row and its menus and buttons: closed each time the panel turns to the chip from closed or
+// another view, kept as the chip changes.
 export function LiveBlock({ chip, slots }: { chip: string; slots: readonly (MidiTarget | undefined)[] }) {
   const { scene, liveKnobs, offKnobs } = useCtl()
   const [whole, setWhole] = useState(false)
@@ -302,8 +306,11 @@ export function LiveBlock({ chip, slots }: { chip: string; slots: readonly (Midi
   return (
     <>
       <div className="live-block">
-        <div className="live-head">
-          <b>live {live.length}</b> <span className="dim">· in the chip&apos;s order</span>
+        <div className="live-line">
+          <div className="live-head">
+            <b>live {live.length}</b> <span className="dim">· in the chip&apos;s order</span>
+          </div>
+          <Dice at={knobs.map((k) => k.address)} what="this chip" label="⚄ chip" />
         </div>
         <div className="row live-row">
           {live.map(({ address }) => (

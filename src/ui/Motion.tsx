@@ -1,12 +1,12 @@
 // The modulators and macros. A modulator is one line, its chip to drag onto any knob, its editor opened under it
 // by a click on the line (the Stage's context panel shows one alone, its editor open); a macro's slider moves all its
 // knobs at once. Either can listen to the music: a modulator to its beats or a feature, a macro to a feature. A macro
-// learns by example: arm it, move knobs, press learn again.
+// learns by example: arm it, move knobs, press learn again; the strip's macro learn does it for a new macro.
 import { useState, type MouseEvent, type ReactNode } from 'react'
 import { prune } from '../edit'
 import { detunePeriods, learnMacro, setMacro, wave } from '../motion'
 import { blend } from '../music'
-import { clamp, FEATURES, hardRange, LISTENS, resolve, WAVES, type Modulator } from '../scene'
+import { clamp, FEATURES, hardRange, LISTENS, resolve, WAVES, type Macro, type Modulator } from '../scene'
 import { Choice, Num, useCtl } from './controls'
 import { MOD_DRAG, short, Slider } from './Knob'
 import { MidiLearn } from './Midi'
@@ -245,6 +245,41 @@ export function Modulators({ only, onAdd }: { only?: string; onAdd?: (id: string
   )
 }
 
+// The next macro + macro adds and the strip's macro learn makes: the first free macro<n>, named Macro <n>.
+const newMacro = (macros: readonly Macro[]): Macro => {
+  let n = macros.length + 1
+  while (macros.some((m) => m.id === `macro${n}`)) n++
+  return { id: `macro${n}`, name: `Macro ${n}`, value: 0, targets: [] }
+}
+
+// The strip's macro learn: pressed, it arms a new macro and opens Macros (onOpen); pressed again, it keeps the knobs
+// moved since into it, made only then and only if one moved, or into the macro whose own learn armed it.
+export function MacroLearn({ onOpen }: { onOpen: () => void }) {
+  const { scene, edit, armed, arm } = useCtl()
+  return (
+    <button
+      className={`mini${armed ? ' armed' : ''}`}
+      title="macro learn by example: arm, move the knobs it should move, press again"
+      onClick={() => {
+        if (!armed) {
+          arm({ id: newMacro(scene.macros).id, before: scene, fresh: true })
+          return onOpen()
+        }
+        edit((d) => {
+          if (!armed.fresh) return learnMacro(d, armed.id, armed.before)
+          const m = newMacro(d.macros)
+          d.macros.push(m)
+          learnMacro(d, m.id, armed.before)
+          if (!m.targets.length) d.macros.pop()
+        })
+        arm(null)
+      }}
+    >
+      {armed ? '● press to keep' : '● macro learn'}
+    </button>
+  )
+}
+
 export function Macros() {
   const { scene, live, edit, focus, setFocus, armed, arm } = useCtl()
   const pairs = scene.presets.flatMap((_, i) => scene.presets.flatMap((_, j) => (i === j ? [] : [[i, j]])))
@@ -272,20 +307,14 @@ export function Macros() {
               ))}
             </select>
           )}
-          <button
-            className="mini"
-            onClick={() =>
-              edit((d) => {
-                let n = d.macros.length + 1
-                while (d.macros.some((m) => m.id === `macro${n}`)) n++
-                d.macros.push({ id: `macro${n}`, name: `Macro ${n}`, value: 0, targets: [] })
-              })
-            }
-          >
+          <button className="mini" onClick={() => edit((d) => d.macros.push(newMacro(d.macros)))}>
             + macro
           </button>
         </span>
       </div>
+      {armed?.fresh && (
+        <div className="armed-note">a new macro: move knobs, by hand or MIDI, then press ● again by the strip</div>
+      )}
       {scene.macros.map((m) => (
         <div className={`mod${armed?.id === m.id ? ' armed' : ''}`} key={m.id}>
           <div className="mod-head macro-head">
@@ -316,7 +345,7 @@ export function Macros() {
               title="move the knobs this macro should drive, then press learn again"
               onClick={() => {
                 if (armed) edit((d) => learnMacro(d, armed.id, armed.before))
-                arm(armed ? null : { id: m.id, before: scene })
+                arm(armed ? null : { id: m.id, before: scene, fresh: false })
               }}
             >
               learn

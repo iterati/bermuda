@@ -678,9 +678,13 @@ export function App() {
       : 'macro' in learning && !scene.macros.some((m) => m.id === learning.macro))
       ? null
       : learning
-  // a macro armed on the other side or another look, or one an edit took away, is disarmed
+  // a macro armed on the other side or another look, or one an edit took away, is disarmed, and so is a new one
+  // once a macro has its id
   const armedNow =
-    armed && armed.side === side && armed.before.name === scene.name && scene.macros.some((m) => m.id === armed.id)
+    armed &&
+    armed.side === side &&
+    armed.before.name === scene.name &&
+    scene.macros.some((m) => m.id === armed.id) !== armed.fresh
       ? armed
       : null
   // the context panel closes once the modulator it shows is gone, and stays closed when one of its id comes back
@@ -1166,7 +1170,6 @@ export function App() {
             value={scene.name}
             onChange={(e) => e.target.value && edit((d) => (d.name = e.target.value))}
           />
-          <Dice at={knobsOf(scene).map((k) => k.address)} what="the whole look" />
           <span className="seg">
             <button
               className={mode === 'stage' ? 'on' : ''}
@@ -1255,6 +1258,11 @@ export function App() {
           >
             mutate
           </button>
+          <Dice
+            at={knobsOf(scene).map((k) => k.address)}
+            what="the whole look"
+            label={locked ? '⚄ look 🔒' : '⚄ look'}
+          />
           {mode === 'stage' && (
             <button
               className={`mini${opened === 'music' ? ' on' : ''}`}
@@ -1366,7 +1374,14 @@ export function App() {
               +
             </AddModulator>
           </div>
-          <Perform slots={slots} page={page} pages={pages} onPage={turnPage} onMore={() => setContext('chip')} />
+          <Perform
+            slots={slots}
+            page={page}
+            pages={pages}
+            onPage={turnPage}
+            onMore={() => setContext('chip')}
+            onMacros={() => setContext('macros')}
+          />
           {/* the controller's buttons under the strip's slots, and its fader under the pager */}
           {HAS_MIDI && (
             <div className="pads-row">
