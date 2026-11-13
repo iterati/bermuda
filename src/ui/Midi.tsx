@@ -98,7 +98,7 @@ export function Midi({ connected, inputs, pressed, onConnect, looks, controls, f
               ◎ map (M): click a knob or macro, then move a control; or focus a knob and press M
             </span>
           )}
-          {scene.midi?.map((m) => {
+          {scene.midi?.map((m, i) => {
             const at = positions.get(keyOf('cc', m.channel, m.control, m.device))
             const to = positionOf(scene, m)
             return (
@@ -119,7 +119,7 @@ export function Midi({ connected, inputs, pressed, onConnect, looks, controls, f
                       checked={!!m.pickup}
                       onChange={(e) =>
                         edit((d) => {
-                          const x = d.midi!.find((x) => same(x, m))!
+                          const x = d.midi![i]
                           if (e.target.checked) x.pickup = true
                           else delete x.pickup
                         })
@@ -127,7 +127,14 @@ export function Midi({ connected, inputs, pressed, onConnect, looks, controls, f
                     />
                     fader
                   </label>
-                  <button className="mini" onClick={() => edit((d) => unmap(d, m))}>
+                  <button
+                    className="mini"
+                    onClick={() =>
+                      edit((d) => {
+                        d.midi!.splice(i, 1)
+                      })
+                    }
+                  >
                     ×
                   </button>
                 </span>
@@ -383,8 +390,8 @@ const padName = (t: TriggerTarget, looks: Scene[]) =>
       : VIEW_NAMES[t.mode]
 
 // A pad: the button b, lit as its LED is, pulsing while its target learns, and with its note's tag when it has one;
-// titled idle when it has no button, and starting a row of its grid when row is on. Pressed, it gives its target, or undefined if it has none. A learned pad is a
-// control a controller can drive, for MIDI map mode.
+// titled idle when it has no button, and starting a row of its grid when row is on. Pressed, it gives its target, or
+// undefined if it has none. A learned pad is a control a controller can drive, for MIDI map mode.
 type PadProps = {
   looks: Scene[]
   lit: (t: TriggerTarget) => boolean

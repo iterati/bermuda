@@ -676,11 +676,22 @@ describe('two controllers at once', () => {
       fader: { channel: 1, control: 9, pickup: true, device: 'X-TOUCH MINI' },
       strip: [{ channel: 1, control: 9, index: 0, device: 'DJ2GO2' }],
     })
-    // a target learning again moves to the controller that learned it, the other's mappings staying
+    // a target learning again on one controller takes a control there too, the other's mapping of it staying
     learned(state, { knob: 'frame.zoom' }, () => send.xt(0xb0, 2, 0))
     expect(state.scene.midi).toEqual([
+      { channel: 1, control: 1, device: 'DJ2GO2', knob: 'frame.zoom' },
       { channel: 1, control: 1, device: 'X-TOUCH MINI', knob: 'frame.turn' },
       { channel: 1, control: 2, device: 'X-TOUCH MINI', knob: 'frame.zoom' },
+    ])
+    send.dj(0xb0, 1, 127)
+    expect(at(state.scene, 'frame.zoom')).toBe(1)
+    send.xt(0xb0, 2, 0)
+    expect(at(state.scene, 'frame.zoom')).toBe(0)
+    // and again on the same one moves it there
+    learned(state, { knob: 'frame.zoom' }, () => send.xt(0xb0, 3, 0))
+    expect(state.scene.midi!.filter((x) => 'knob' in x && x.knob === 'frame.zoom')).toEqual([
+      { channel: 1, control: 1, device: 'DJ2GO2', knob: 'frame.zoom' },
+      { channel: 1, control: 3, device: 'X-TOUCH MINI', knob: 'frame.zoom' },
     ])
   })
 
@@ -754,6 +765,36 @@ describe('two controllers at once', () => {
       vi.advanceTimersByTime(ECHO_MS)
       expect(sent.dj).toEqual([[0x91, 9, 1]])
       expect(sent.xt).toEqual([[0x91, 9, 1]])
+      stop()
+    })
+
+    it("sends one with no device to each controller but one with its own mapping on the control, and the other's turn", () => {
+      const look = squareToHex()
+      look.midi = [
+        { channel: 1, control: 5, knob: 'frame.zoom' },
+        { channel: 1, control: 5, device: 'X-TOUCH MINI', knob: 'frame.turn' },
+        { channel: 1, control: 6, macro: 'lattice' },
+      ]
+      const { access, send, sent } = fakePair()
+      const { state, stop } = play(setKnob(setKnob(look, 'frame.zoom', 8), 'frame.turn', 0), 'frame', access)
+      send.dj(0xb0, 64, 0)
+      send.xt(0xb0, 64, 0)
+      vi.advanceTimersByTime(ECHO_MS)
+      const turn = Math.round(at(state.scene, 'frame.turn') * 127)
+      expect(sent.dj).toEqual([
+        [0xb0, 5, 127],
+        [0xb0, 6, 64],
+      ])
+      expect(sent.xt).toEqual([
+        [0xb0, 5, turn],
+        [0xb0, 6, 64],
+      ])
+      // the DJ2GO2 turning the macro: the X-Touch's ring follows it, the DJ2GO2's hand holding its own
+      sent.dj.length = sent.xt.length = 0
+      send.dj(0xb0, 6, 127)
+      vi.advanceTimersByTime(HOLD_MS * 2)
+      expect(sent.dj).toEqual([])
+      expect(sent.xt).toEqual([[0xb0, 6, 127]])
       stop()
     })
   })

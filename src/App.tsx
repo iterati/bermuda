@@ -799,8 +799,8 @@ export function App() {
           }
           const key = keyOf('cc', m.channel, m.number, m.device)
           const last = at.get(key)
-          // a mapping with no device's position is its control's last on any controller
           at.set(key, m.value)
+          // a mapping with no device's position is its control's last on any controller
           at.set(keyOf('cc', m.channel, m.number), m.value)
           const ab = controls.fader && hearsControl(controls.fader, m)
           // only a fader's position is shown, while it waits to pick up

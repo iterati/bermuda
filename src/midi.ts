@@ -36,17 +36,20 @@ export const HOLD_MS = 250 // a control a hand moves is not sent its value for t
 // a control's key, on its device's controller or, with none, on any
 export const keyOf = (kind: 'cc' | 'note', channel: number, number: number, device?: string) =>
   `${kind} ${channel}/${number}${device === undefined ? '' : `@${device}`}`
+// the controller a key is on, or undefined for one on any
 const deviceOf = (key: string) => (key.includes('@') ? key.slice(key.indexOf('@') + 1) : undefined)
 
 // Hear every input of the access, inputs plugged in later too, and keep sending the controllers the messages
-// read() gives, each once it changes. A key's with a device goes only to the output of that name, its controller's
-// own port; one with none to the outputs named as an input that has sent something: a controller's own port, never
-// other gear or a through port that would play them back. Returns the hang-up.
+// read() gives, each to each output once it changes there. A key's with a device goes only to the output of that
+// name, its controller's own port, plugged in; one with none to the outputs named as an input that has sent
+// something (a controller's own port, never other gear or a through port that would play them back) but those with
+// their own key on the control, which wins. Returns the hang-up.
 export function attach(
   access: MIDIAccess,
   read: () => Map<string, number[]>,
   on: { message: (m: Message) => void; inputs: (names: string[]) => void },
 ) {
+  // what each output was last sent on each key, and when its hand last moved it, by key and output
   const sent = new Map<string, string>()
   const moved = new Map<string, number>()
   const heard = new Set<string>()
@@ -59,12 +62,11 @@ export function attach(
     const channel = (status & 0x0f) + 1
     const kind = (status & 0xf0) === 0xb0 ? 'cc' : (status & 0xe0) === 0x80 ? 'note' : undefined
     if (!kind) return
-    const key = keyOf(kind, channel, number, device)
-    // the same control on any controller, a mapping with no device's
-    const any = keyOf(kind, channel, number)
+    // the control on its own controller's key and on any's, a mapping with no device's
+    const keys = [keyOf(kind, channel, number, device), keyOf(kind, channel, number)].map((k) => `${k} > ${device}`)
     if (kind === 'cc') {
       // a turned encoder holds the value it sent
-      for (const k of [key, any]) {
+      for (const k of keys) {
         sent.set(k, String([...data]))
         moved.set(k, performance.now())
       }
@@ -72,7 +74,7 @@ export function attach(
       return
     }
     // a button pressed or let go may have set its own LED, so it is sent its state again; a press is a note on
-    for (const k of [key, any]) sent.delete(k)
+    for (const k of keys) sent.delete(k)
     if ((status & 0xf0) === 0x90 && value > 0) on.message({ kind, channel, number, value: value / 127, device })
   }
   const plug = () => {
@@ -87,15 +89,19 @@ export function attach(
   const echo = setInterval(() => {
     const now = performance.now()
     const outputs = [...access.outputs.values()].filter((o) => o.state === 'connected')
-    const anyOutputs = outputs.filter((o) => heard.has(o.name!))
-    for (const [key, bytes] of read()) {
-      if (sent.get(key) === String(bytes) || now - (moved.get(key) ?? -Infinity) < HOLD_MS) continue
+    const shown = read()
+    for (const [key, bytes] of shown) {
       const device = deviceOf(key)
-      const to = device === undefined ? anyOutputs : outputs.filter((o) => o.name === device)
-      // a controller not plugged in or not heard yet is sent it once it is
-      if (!to.length) continue
-      sent.set(key, String(bytes))
-      for (const output of to) output.send(bytes)
+      const to =
+        device === undefined
+          ? outputs.filter((o) => heard.has(o.name!) && !shown.has(`${key}@${o.name}`))
+          : outputs.filter((o) => o.name === device)
+      for (const output of to) {
+        const at = `${key} > ${output.name}`
+        if (sent.get(at) === String(bytes) || now - (moved.get(at) ?? -Infinity) < HOLD_MS) continue
+        sent.set(at, String(bytes))
+        output.send(bytes)
+      }
     }
   }, ECHO_MS)
   return () => {
@@ -166,19 +172,22 @@ export const takes = (position: number, last: number | undefined, value: number)
 export const waiting = (map: Control, position: number, positions: ReadonlyMap<string, number>) =>
   !!map.pickup && !near(position, positions.get(keyOf('cc', map.channel, map.control, map.device)))
 
+// whether a mapping is the controller's a message came from, or any controller's
+const mine = (x: { device?: string }, m: Played) => x.device === undefined || x.device === m.device
+
 // Map a control change to a target, on its controller, on a draft: the old mappings that hear the control and the
-// target's go; another controller's mappings stay.
+// target's on that controller go; another controller's mappings stay, so a target may take one control on each.
 export function learn(draft: Scene, t: MidiTarget, m: Message) {
   draft.midi = [
-    ...(draft.midi ?? []).filter((x) => !hearsControl(x, m) && !same(x, t)),
+    ...(draft.midi ?? []).filter((x) => !hearsControl(x, m) && !(same(x, t) && mine(x, m))),
     { channel: m.channel, control: m.number, device: m.device, ...t },
   ]
 }
 
 // The triggers with a note mapped to a target, on its controller: the old triggers that hear the note and the
-// target's go.
+// target's on that controller go, another controller's staying.
 export const learnTrigger = (triggers: Trigger[], t: TriggerTarget, m: Message): Trigger[] => [
-  ...triggers.filter((x) => !hearsNote(x, m) && !same(x, t)),
+  ...triggers.filter((x) => !hearsNote(x, m) && !(same(x, t) && mine(x, m))),
   { channel: m.channel, note: m.number, device: m.device, ...t },
 ]
 
@@ -263,7 +272,8 @@ export function echoes(
 
 // The pads to draw, a grid a controller: each controller plugged in (inputs), heard from or with a button learned on
 // it, the plugged in first, each grid the notes it has sent and its learned buttons' notes, by channel and note;
-// and last, when there are any, a grid of the buttons with no device, which any controller presses.
+// and last, when there are any, a grid of the buttons with no device, which any controller presses (never shown as
+// unplugged).
 export type Grid = { device?: string; plugged: boolean; pads: { channel: number; note: number }[] }
 export function grids(inputs: readonly string[], heard: readonly Pressed[], buttons: readonly Trigger[]): Grid[] {
   const pads = (on: { channel: number; note: number }[]) =>
