@@ -477,10 +477,12 @@ export const LOOKS: Scene[] = [
   // ---- the bank's twenty: each takes an idea and remixes it with others ----
   scene({
     name: 'Hypnotic rings',
-    // one cell as wide as the screen: a star's echo rings run out round the centre, a polar grid of pies over them
+    // one cell as wide as the screen: a star's echo rings run out round the centre, a polar grid of pies over them;
+    // where the zoom breathes out past the cell's edges, the cells mirror, so the rings and pies fold back there
     levels: [
       level('target', {
         scale: 0.3,
+        by: 'mirror',
         shape: star(5, { value: 1.6, play: [1.2, 2.2] }, 0.08, { round: 0.3 }),
         at: 0,
         speed: 0.5,
