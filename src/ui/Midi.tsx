@@ -260,7 +260,7 @@ export function MidiLearning({ looks }: { looks: Scene[] }) {
 
 // What drives a target, if anything: a knob's or macro's CC on the look, the A/B fader's and a strip slot's CC, a
 // button's note.
-export function driver(scene: Scene, controls: Controls, t: Learning) {
+function driver(scene: Scene, controls: Controls, t: Learning) {
   if ('knob' in t || 'macro' in t) return mappingOf(scene, t)
   if ('fader' in t) return controls.fader
   if ('strip' in t) return controls.strip?.find((x) => x.index === t.strip)
@@ -281,12 +281,12 @@ export function MapTag({ target }: { target: Learning }) {
 }
 
 // A knob's or a macro's control, in MIDI map mode: its mapping to drop (amber while its fader waits to pick up), else
-// a learn button.
+// a learn button. Without Web MIDI there is no map mode, so a mapping a look brings shows, to drop.
 export function MidiLearn({ target }: { target: MidiTarget }) {
   const { scene, edit, learning, learn, positions, mapping } = useCtl()
   const map = mappingOf(scene, target)
   const on = !!learning && same(learning, target)
-  if (!mapping) return null
+  if (!mapping && (HAS_MIDI || !map)) return null
   if (map)
     return (
       <span className="pair">

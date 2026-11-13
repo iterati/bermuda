@@ -944,7 +944,8 @@ export function App() {
     return () => el.removeEventListener('wheel', onWheel)
   })
   // in MIDI map mode a press on a control a controller can drive arms its learn, or cancels it if it is the one
-  // learning, and does nothing else: it reaches no control and focuses nothing
+  // learning, and does nothing else: it reaches no control and focuses nothing, and neither does a drag over it (the
+  // fader's) or a double-click (a knob's typing)
   useEffect(() => {
     if (!mapping) return
     const el = app.current!
@@ -957,7 +958,7 @@ export function App() {
       const t = JSON.parse(on.getAttribute('data-learn')!) as Learning
       learnMidi(learningNow && same(learningNow, t) ? null : t)
     }
-    const presses = ['pointerdown', 'mousedown', 'click', 'dblclick']
+    const presses = ['pointerdown', 'pointermove', 'click', 'dblclick']
     for (const type of presses) el.addEventListener(type, onPress, true)
     return () => presses.forEach((type) => el.removeEventListener(type, onPress, true))
   })

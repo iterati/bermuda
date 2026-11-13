@@ -1137,6 +1137,7 @@ kbd {
   outline: 1.5px dashed rgba(140, 255, 190, 0.55);
   outline-offset: 2px;
 }
+/* inside, as the bar's segments clip what leaves them */
 .mapping .seg [data-learn] {
   outline-offset: -2px;
 }

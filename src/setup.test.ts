@@ -258,7 +258,7 @@ describe('the setup sheet', () => {
     await page.click(strip)
     expect(await page.$eval(strip, (el) => el.textContent)).toBe('turn an encoder…')
     // the learning line is under the bar, not in the sheet
-    expect(await page.$('.app > .midi-learning')).not.toBe(null)
+    expect(await page.$eval('.app > .midi-learning span', (el) => el.textContent)).toBe('turn the encoder for slot 1')
     expect(await page.$('.setup-body .midi-learning')).toBe(null)
     await page.keyboard.press('Escape')
     expect(await page.$('.midi-learning')).toBe(null)

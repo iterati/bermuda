@@ -130,7 +130,8 @@ async function press(within: string, text: string, p: Page = page) {
 const tab = (name: string) => press('.tabs', name)
 const lookName = (i: number) => `.stage .right ol.looks > li:nth-child(${i + 1}) .look-name`
 const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem('bermuda.midi') ?? '{}') as Controls)
-// what the app shows: the view, the strip's page, the fader, the look, a strip knob's value and the focus
+// what the app shows: the view, the strip's page, the fader, the look, a strip knob's value, the focus (the app's
+// and the browser's, on nothing) and a typing field
 const showing = () =>
   page.evaluate((k) => {
     const app = document.querySelector('.app')!
@@ -141,7 +142,7 @@ const showing = () =>
       look: document.querySelector<HTMLInputElement>('.look-title')!.value,
       value: document.querySelector(`.knob[data-knob="${k}"] .knob-value`)?.textContent,
       focused: document.querySelectorAll('.knob.focused').length,
-      active: document.activeElement?.tagName,
+      blurred: document.activeElement === document.body,
       typing: !!document.querySelector('.knob-type'),
     }
   }, KNOB)
@@ -168,6 +169,14 @@ describe('MIDI map mode', () => {
     await page.keyboard.press('m')
     await page.keyboard.press('Escape')
     expect(await mapState()).toEqual(OFF)
+    // it and the setup sheet open together, and Esc ends both
+    await page.keyboard.press('g')
+    await page.keyboard.press('m')
+    expect(await mapState()).toEqual(ON)
+    expect(await page.$('.setup-sheet')).not.toBe(null)
+    await page.keyboard.press('Escape')
+    expect(await mapState()).toEqual(OFF)
+    expect(await page.$('.setup-sheet')).toBe(null)
     // not with Ctrl or Cmd held
     for (const held of ['Control', 'Meta'] as const) {
       await page.keyboard.down(held)
@@ -293,8 +302,18 @@ describe('MIDI map mode', () => {
 
   it('in map mode a press on a control arms its learn and changes nothing else, and a press on the one learning cancels it', async () => {
     await tab('Bank')
+    await page.evaluate(() => (document.activeElement as HTMLElement).blur())
     const before = await showing()
-    expect(before).toMatchObject({ view: 'stage', page: 'page 1/2', fader: '0%', look: t1.name, focused: 0 })
+    expect(before).toEqual({
+      view: 'stage',
+      page: 'page 1/2',
+      fader: '0%',
+      look: t1.name,
+      value: before.value,
+      focused: 0,
+      blurred: true,
+      typing: false,
+    })
     await page.keyboard.press('m')
     for (const [what, words] of [
       [knob(KNOB), `move a control for ${KNOB_NAME}`],
@@ -313,6 +332,15 @@ describe('MIDI map mode', () => {
       expect(await line()).toBe(BANNER)
       expect(await showing()).toEqual(before)
     }
+    // a drag along the fader moves it no more
+    const bar = (await (await page.$('svg.fader'))!.boundingBox())!
+    await page.mouse.move(bar.x + bar.width * 0.2, bar.y + bar.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(bar.x + bar.width * 0.8, bar.y + bar.height / 2, { steps: 5 })
+    await page.mouse.up()
+    expect(await line()).toBe('move a control for the A/B fader')
+    expect(await showing()).toEqual(before)
+    await page.click('svg.fader')
     // the knob learning pulses, and another press moves the learn to what it is on
     await page.click(knob(KNOB))
     expect(await page.$eval(knob(KNOB), (el) => el.classList.contains('learning'))).toBe(true)
@@ -323,6 +351,7 @@ describe('MIDI map mode', () => {
     await page.click(knob(KNOB), { count: 2 })
     expect(await showing()).toEqual(before)
     await tab('Macros')
+    await page.evaluate(() => (document.activeElement as HTMLElement).blur())
     const slider = () => page.$eval('.macro-slider', (el) => (el as HTMLInputElement).valueAsNumber)
     const value = await slider()
     const box = (await (await page.$('.macro-slider'))!.boundingBox())!
@@ -336,6 +365,12 @@ describe('MIDI map mode', () => {
       await pause(100)
     }
     expect((await showing()).value).not.toBe(before.value)
+    // and the keys still reach the app: Esc cancels the learning, then ends map mode
+    expect((await showing()).blurred).toBe(true)
+    await page.keyboard.press('Escape')
+    expect(await line()).toBe(BANNER)
+    await page.keyboard.press('Escape')
+    expect(await mapState()).toEqual(OFF)
   }, 60_000)
 
   it('a knob and a macro pressed in map mode learn the next control moved, and the A/B fader, a page, a view and a look the next one moved or pressed', async () => {
@@ -509,6 +544,11 @@ describe('MIDI map mode', () => {
     await page.click(knob(KNOB))
     expect(await page.$eval(knob(KNOB), (el) => el.classList.contains('focused'))).toBe(true)
     expect(await line()).toBe(null)
+    // a double-click types its value
+    await page.click(knob(KNOB), { count: 2 })
+    expect((await showing()).typing).toBe(true)
+    await page.keyboard.press('Escape')
+    expect((await showing()).typing).toBe(false)
     await page.click('.pager button[title^="the next page"]')
     expect((await showing()).page).toBe('page 2/2')
     await page.click('svg.fader')
