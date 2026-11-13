@@ -383,7 +383,8 @@ describe('undocking', () => {
       }),
     )
     expect(covered).toEqual([])
-    // the looks to play, which scroll, and a look loads from them
+    // the looks to play, every folder opened, which scroll, and a look loads from them
+    await popup.click('.console-looks ::-p-text(open all)')
     expect(await popup.$$eval('.console-looks .look-name', (els) => els.length)).toBe(LOOKS.length)
     expect(await popup.$eval('.console-looks', (el) => el.scrollHeight > el.clientHeight)).toBe(true)
     await popup.$$eval('.console-looks .look-name', (els) => (els[2] as HTMLElement).click())

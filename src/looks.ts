@@ -1,5 +1,6 @@
-// The built-in looks: four Tapestries made through the level chain, the bank's twenty remixing them, then older remixes,
-// then the deco family's fills and its halftones, then the two made for the music.
+// The built-in looks in their folders: Neon ornament, four Tapestries made through the level chain and the bank's twenty
+// remixing them; Tracery, Shapes and Fractal, older remixes; Deco, the deco family's fills and its halftones; and
+// Music, the two made for the music.
 // Periods are in clock units, one a second at the default 60 bpm; angles are in degrees. Each is wired to the music
 // (music.ts wire) but the two made for it, each wired its own way.
 import { stopsFromCosine } from './colour'
@@ -317,7 +318,8 @@ function defaults(look: Scene): Macro[] {
   })
 }
 
-export const LOOKS: Scene[] = [
+// ---- the folders' looks, each folder in the order its list shows them ----
+const NEON_ORNAMENT: Scene[] = [
   scene({
     name: 'Tapestry 1 - Rainbow hex rings',
     zoom: 1.78,
@@ -1312,6 +1314,8 @@ export const LOOKS: Scene[] = [
       mod('peel', 'cos', 7, [['levels[film].variants[0].shape.onion', 0.03]]),
     ],
   }),
+]
+const TRACERY: Scene[] = [
   // ---- remixes across levels ----
   scene({
     name: 'Remix - Square into hex',
@@ -1723,6 +1727,8 @@ export const LOOKS: Scene[] = [
       },
     ],
   }),
+]
+const SHAPES: Scene[] = [
   // ---- shapes and lines: iq's shapes, joins, corners and onions, spill, screen lines and dots ----
   scene({
     name: "Shapes - iq's garden",
@@ -2051,6 +2057,8 @@ export const LOOKS: Scene[] = [
       },
     ],
   }),
+]
+const FRACTAL: Scene[] = [
   // ---- the Cell step's ring and mirror, orbit-trap colour and the rest of flam3 ----
   scene({
     name: 'Cells - Ripples',
@@ -2411,6 +2419,8 @@ export const LOOKS: Scene[] = [
       { name: 'Rosette', values: { 'levels[warp].variations[2].weight': 0, 'levels[warp].variations[4].weight': 0.8 } },
     ],
   }),
+]
+const DECO_LOOKS: Scene[] = [
   // the deco family: fills in metal palettes, each level its own colour at 0 with no radius, so only the fill's bands,
   // metal and alternate move round the palette
   scene({
@@ -2769,6 +2779,8 @@ export const LOOKS: Scene[] = [
       },
     ],
   }),
+]
+const MUSIC: Scene[] = [
   // ---- made for the music, each wired its own way ----
   update(
     scene({
@@ -2852,14 +2864,27 @@ export const LOOKS: Scene[] = [
     ],
   }),
 ]
-  .map((look) => (look.modulators.some((m) => m.listen) ? look : update(look, wire)))
-  // the default macros come before wire()'s tone macro, which holds the hue
-  .map((look) =>
-    update(look, (d) => {
-      const tone = d.macros.findIndex((m) => m.id === 'music-tone')
-      d.macros.splice(tone < 0 ? d.macros.length : tone, 0, ...defaults(d))
-    }),
-  )
+
+// a look as the app has it: wired to the music, but the ones made for it, and given its default macros, which come
+// before wire()'s tone macro, which holds the hue
+const built = (look: Scene) =>
+  update(look.modulators.some((m) => m.listen) ? look : update(look, wire), (d) => {
+    const tone = d.macros.findIndex((m) => m.id === 'music-tone')
+    d.macros.splice(tone < 0 ? d.macros.length : tone, 0, ...defaults(d))
+  })
+
+// The looks list's folders, each a name and its looks in order; Mine, the looks saved in the browser under a name
+// no built-in has, comes after them
+export const FOLDERS: { name: string; looks: Scene[] }[] = [
+  { name: 'Neon ornament', looks: NEON_ORNAMENT.map(built) },
+  { name: 'Tracery', looks: TRACERY.map(built) },
+  { name: 'Shapes', looks: SHAPES.map(built) },
+  { name: 'Fractal', looks: FRACTAL.map(built) },
+  { name: 'Deco', looks: DECO_LOOKS.map(built) },
+  { name: 'Music', looks: MUSIC.map(built) },
+]
+// The built-in looks, folder by folder: keys 1-0 and the MIDI slots count through the whole list
+export const LOOKS: Scene[] = FOLDERS.flatMap((f) => f.looks)
 
 // The built-in bank: the four Tapestries and the twenty round the ring, each next to the ones it morphs into
 // best, and linked to the two or three of those.

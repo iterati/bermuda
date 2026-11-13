@@ -140,6 +140,7 @@ describe('the setup sheet', () => {
     await open('Looks')
     expect(await titles('.setup-body')).toEqual(['Looks'])
     expect(await has('.setup-body', LOOKS_SETUP)).toEqual(every(LOOKS_SETUP, true))
+    await page.click('.setup-body ::-p-text(open all)')
     expect(await page.$$eval('.setup-body .look-name', (els) => els.length)).toBe(LOOKS.length)
     await open('Bank')
     expect(await titles('.setup-body')).toEqual(['Bank'])
@@ -166,6 +167,7 @@ describe('the setup sheet', () => {
     await pick('Looks')
     const context = '.context'
     expect(await titles(context)).toEqual(['Looks', 'Bank'])
+    await page.click(`${context} ::-p-text(open all)`)
     expect(await page.$$eval(`${context} .look-name`, (els) => els.length)).toBe(LOOKS.length)
     expect(await page.$$(`${context} .presets .link`)).not.toEqual([])
     expect(await has(context, [...LOOKS_SETUP, ...BANK_SETUP, '×'])).toEqual(

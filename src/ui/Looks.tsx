@@ -1,6 +1,9 @@
-// The looks: the built-in ones and the ones saved in this browser, each with its presets under it,
-// plus saving, and files in and out. Its play part is the looks and their presets to load, alone.
+// The looks: the built-in ones in their folders, then Mine, the ones saved in this browser under a name no built-in
+// has, each look with its presets under it, plus saving, and files in and out. Its play part is the looks and their
+// presets to load, alone. Each folder opens and closes, the playing look's opening itself; the keys and MIDI slots
+// count through the whole list, open or closed.
 import { useState } from 'react'
+import { FOLDERS, LOOKS } from '../looks'
 import { capturePreset } from '../motion'
 import { parseScene, type Scene } from '../scene'
 import { useCtl } from './controls'
@@ -25,13 +28,40 @@ export function download(name: string, value: unknown) {
   URL.revokeObjectURL(a.href)
 }
 
+const MINE = 'Mine'
+// a look's name in its folder: without its family (Deco - Seigaiha is Seigaiha), but the Tapestries' whole
+const short = (name: string) => (name.startsWith('Tapestry ') ? name : name.replace(/^[^-]+ - /, ''))
+const counted = (n: number, what: string) => `${n} ${what}${n === 1 ? '' : 's'}`
+
 export function Looks({ looks, saved, onLoad, onSave, onDelete, onError, part }: Props) {
   const { scene, edit } = useCtl()
   const [presetName, setPresetName] = useState('')
+  const folders = [
+    ...FOLDERS.map((f) => ({ name: f.name, looks: looks.filter((l) => f.looks.some((b) => b.name === l.name)) })),
+    { name: MINE, looks: looks.filter((l) => !LOOKS.some((b) => b.name === l.name)) },
+  ].filter((f) => f.looks.length)
+  const folderOf = (name: string) => folders.find((f) => f.looks.some((l) => l.name === name))?.name
+  const [open, setOpen] = useState(() => new Set([folderOf(scene.name)]))
+  // the playing look's folder opens as it comes to play
+  const [playing, setPlaying] = useState(scene.name)
+  if (playing !== scene.name) {
+    setPlaying(scene.name)
+    setOpen(new Set(open).add(folderOf(scene.name)))
+  }
+  // the playing look's presets as it has them now
+  const presetsOf = (look: Scene) => (look.name === scene.name ? scene.presets : look.presets)
   return (
     <div className="panel-block">
       <div className="block-title">
         <span>Looks</span>
+        <span className="folding">
+          <button className="mini" onClick={() => setOpen(new Set(folders.map((f) => f.name)))}>
+            open all
+          </button>
+          <button className="mini" onClick={() => setOpen(new Set())}>
+            close all
+          </button>
+        </span>
         {!part && (
           <span className="actions">
             <button className="mini" title="save this look in the browser (S)" onClick={onSave}>
@@ -91,49 +121,75 @@ export function Looks({ looks, saved, onLoad, onSave, onDelete, onError, part }:
           </button>
         </div>
       )}
-      <ol className="looks">
-        {looks.map((look, i) => {
-          const current = look.name === scene.name
-          const presets = current ? scene.presets : look.presets
-          return (
-            <li key={look.name} className={current ? 'current' : ''}>
-              <div className="look">
-                <button
-                  className="look-name"
-                  data-learn={JSON.stringify({ slot: i })}
-                  onClick={() => onLoad(look)}
-                  title={i < 10 ? `key ${(i + 1) % 10}` : ''}
-                >
-                  {i < 10 && <kbd>{(i + 1) % 10}</kbd>}
-                  {look.name}
-                  <MapTag target={{ slot: i }} />
-                </button>
-                {!part && saved.has(look.name) && (
-                  <button className="mini" title="delete from the browser" onClick={() => onDelete(look.name)}>
-                    ×
-                  </button>
-                )}
-              </div>
-              {presets.length > 0 && (
-                <ul className="presets">
-                  {presets.map((p, j) => (
-                    <li key={j}>
-                      <button className="link" onClick={() => onLoad(current ? scene : look, j)}>
-                        {p.name}
-                      </button>
-                      {!part && current && (
-                        <button className="mini" onClick={() => edit((d) => d.presets.splice(j, 1))}>
-                          ×
+      {folders.map((f) => {
+        const shown = open.has(f.name)
+        const presetCount = f.looks.reduce((n, look) => n + presetsOf(look).length, 0)
+        return (
+          <div key={f.name}>
+            <button
+              className={`folder${shown ? ' open' : ''}`}
+              onClick={() => {
+                const next = new Set(open)
+                if (!next.delete(f.name)) next.add(f.name)
+                setOpen(next)
+              }}
+            >
+              <span className="folder-arrow">{shown ? '▾' : '▸'}</span>
+              {f.name}
+              <span className="folder-count">
+                {counted(f.looks.length, 'look')}
+                {presetCount > 0 && ` · ${counted(presetCount, 'preset')}`}
+              </span>
+            </button>
+            {shown && (
+              <ol className="looks">
+                {f.looks.map((look) => {
+                  const i = looks.indexOf(look)
+                  const current = look.name === scene.name
+                  const presets = presetsOf(look)
+                  return (
+                    <li key={look.name} className={current ? 'current' : ''}>
+                      <div className="look">
+                        <button
+                          className="look-name"
+                          data-learn={JSON.stringify({ slot: i })}
+                          onClick={() => onLoad(look)}
+                          title={i < 10 ? `key ${(i + 1) % 10}` : ''}
+                        >
+                          {i < 10 && <kbd>{(i + 1) % 10}</kbd>}
+                          {f.name === MINE ? look.name : short(look.name)}
+                          <MapTag target={{ slot: i }} />
                         </button>
+                        {!part && saved.has(look.name) && (
+                          <button className="mini" title="delete from the browser" onClick={() => onDelete(look.name)}>
+                            ×
+                          </button>
+                        )}
+                      </div>
+                      {presets.length > 0 && (
+                        <ul className="presets">
+                          {presets.map((p, j) => (
+                            <li key={j}>
+                              <button className="link" onClick={() => onLoad(current ? scene : look, j)}>
+                                {p.name}
+                              </button>
+                              {!part && current && (
+                                <button className="mini" onClick={() => edit((d) => d.presets.splice(j, 1))}>
+                                  ×
+                                </button>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
                       )}
                     </li>
-                  ))}
-                </ul>
-              )}
-            </li>
-          )
-        })}
-      </ol>
+                  )
+                })}
+              </ol>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }

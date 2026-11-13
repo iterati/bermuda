@@ -1166,6 +1166,46 @@ button {
 .preset-save input {
   flex: 1;
 }
+/* open all and close all, right, before the block's actions */
+.folding {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+}
+.folding + .actions {
+  margin-left: 8px;
+}
+/* a folder's head: its arrow, its name and what it holds, its looks under it while it is open */
+.folder {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 3px 8px;
+  text-align: left;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+}
+.folder:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.folder-arrow {
+  width: 10px;
+  font-size: 10px;
+  color: var(--dim);
+}
+.folder-count {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: normal;
+  color: var(--dim);
+}
+.folder.open + .looks {
+  margin: 4px 0 6px;
+}
 .looks {
   list-style: none;
   margin: 0;

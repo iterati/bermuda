@@ -307,11 +307,8 @@ describe('the tiers', () => {
     expect(off.length).toBeGreaterThan(1)
     // the look with the most off knobs, from the looks in the panel, with a modulator to drop
     await press('.picker', 'Looks')
-    await page.$$eval(
-      '.context .look-name',
-      (els, name) => (els.find((el) => el.textContent!.includes(name)) as HTMLElement).click(),
-      MOST.name,
-    )
+    await press('.context', 'open all')
+    await page.click(`.context .look-name[data-learn='${JSON.stringify({ slot: LOOKS.indexOf(MOST) })}']`)
     await pause()
     expect(await page.$eval('.look-title', (el) => (el as HTMLInputElement).value)).toBe(MOST.name)
     if (!MOST.modulators.length) await page.click('.picker > button[title="+ modulator"]')

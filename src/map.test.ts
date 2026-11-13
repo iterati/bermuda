@@ -276,8 +276,9 @@ describe('MIDI map mode', () => {
     // the knob and the macro their look's CC, in their corner
     expect(await page.$eval(`${knob(KNOB)} .knob-midi`, (el) => el.textContent)).toBe('cc21')
     expect(await page.$eval(`${macro(MACRO)} .knob-midi`, (el) => el.textContent)).toBe('cc22')
-    // the looks, by their place
+    // the looks, by their place, every folder opened
     await pick('Looks')
+    await press('.context', 'open all')
     const looks = await page.$$eval('.context .look-name', (els) =>
       els.map((el) => [
         el.getAttribute('data-learn'),

@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import { createServer, type ViteDevServer } from 'vite'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { LOOKS } from './looks'
+import { FOLDERS, LOOKS } from './looks'
 import { allLevels, chipKnobs, knobKind, knobsOf, resolve, strip, type Controls, type Scene } from './scene'
 
 let server: ViteDevServer
@@ -485,7 +485,8 @@ describe('the play surface', () => {
     await press('.picker', 'Looks')
     expect(await panel()).toMatchObject({ head: 'looks and bank', blocks: ['Looks', 'Bank'] })
     expect(await on()).toEqual(['Looks'])
-    // the looks' names and presets, the graph, autopilot and next ›
+    // the looks' names and presets, every folder opened, the graph, autopilot and next ›
+    await press('.context', 'open all')
     expect(await visible('.context .look-name')).toBe(LOOKS.length)
     expect(await visible('.context .presets .link')).toBeGreaterThan(0)
     expect(await visible('.context .graph, .context .bank .hint')).toBe(2)
@@ -517,6 +518,66 @@ describe('the play surface', () => {
     await page.keyboard.press('e')
     await page.waitForSelector('.app.edit')
     expect(await page.$$('.bar button[title^="the music"]')).toEqual([])
+  }, 60_000)
+
+  it("the looks are in their folders, each opening and closing, the playing look's opening itself, with open all and close all; the keys and slots count through the whole list, open or closed, and Mine, last, holds the looks saved under a name no built-in has", async () => {
+    // one look saved under a name of its own, and one under a built-in's, which stays in its folder
+    const deco = FOLDERS.find((f) => f.name === 'Deco')!.looks
+    await page.evaluate(
+      (saved) => localStorage.setItem('bermuda.looks', JSON.stringify(saved)),
+      [{ ...deco[0], name: 'My own look' }, deco[1]],
+    )
+    await page.reload()
+    await page.waitForSelector('.knob')
+    await press('.picker', 'Looks')
+    // each folder's head: its arrow, its name and what it holds; the playing look's folder alone is open
+    const heads = () =>
+      page.$$eval('.context .folder', (els) => els.map((el) => [el.textContent, el.classList.contains('open')]))
+    const counted = (n: number, what: string) => `${n} ${what}${n === 1 ? '' : 's'}`
+    const holds = (looks: Scene[]) => {
+      const presets = looks.reduce((n, l) => n + l.presets.length, 0)
+      return counted(looks.length, 'look') + (presets ? ` · ${counted(presets, 'preset')}` : '')
+    }
+    const folders = [...FOLDERS, { name: 'Mine', looks: [deco[0]] }]
+    const closed = folders.map((f) => [`▸${f.name}${holds(f.looks)}`, false])
+    expect(await heads()).toEqual([[`▾${FOLDERS[0].name}${holds(FOLDERS[0].looks)}`, true], ...closed.slice(1)])
+    // the looks' names as shown, without their keys, and the slots they learn
+    const shown = () =>
+      page.$$eval('.context .look-name', (els) =>
+        els.map((el) =>
+          [...el.childNodes]
+            .filter((n) => n.nodeType === Node.TEXT_NODE)
+            .map((n) => n.textContent)
+            .join(''),
+        ),
+      )
+    const slots = () =>
+      page.$$eval('.context .look-name', (els) => els.map((el) => JSON.parse(el.getAttribute('data-learn')!).slot))
+    const head = (name: string) =>
+      page.$$eval(
+        '.context .folder',
+        (els, name) => (els.find((el) => el.textContent!.slice(1).startsWith(name)) as HTMLElement).click(),
+        name,
+      )
+    // the Tapestries keep their whole names, Deco's looks lose their family's, and each keeps its place's slot
+    expect(await shown()).toEqual(FOLDERS[0].looks.map((l) => l.name))
+    await head('Deco')
+    await head(FOLDERS[0].name)
+    expect(await shown()).toEqual(deco.map((l) => l.name.slice(l.name.indexOf(' - ') + 3)))
+    expect(await slots()).toEqual(deco.map((l) => LOOKS.indexOf(l)))
+    // close all, and a key loads by its place in the whole list, its folder opening
+    await press('.context', 'close all')
+    expect(await heads()).toEqual(closed)
+    expect(await shown()).toEqual([])
+    await page.keyboard.press('5')
+    await pause()
+    expect(await page.$eval('.look-title', (el) => (el as HTMLInputElement).value)).toBe(LOOKS[4].name)
+    expect((await heads()).map(([, open]) => open)).toEqual(folders.map((_, i) => !i))
+    // open all: every look once, Mine last with its whole name
+    await press('.context', 'open all')
+    expect((await heads()).every(([, open]) => open)).toBe(true)
+    expect(await slots()).toEqual([...LOOKS.keys(), LOOKS.length])
+    expect((await shown()).at(-1)).toBe('My own look')
   }, 60_000)
 
   it("the dice sit where the play surface puts them: ⚄ look in the bar after mutate, ⚄ chip by the panel's live head, ⚄ at a row's end and in a chip's title, and ⚄ page by the strip, each rolling its own knobs inside their play ranges", async () => {
