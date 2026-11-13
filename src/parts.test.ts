@@ -1,12 +1,11 @@
 // The shader's parts: needs gives a scene the variation, shape and lattice kinds and the features it holds, by
-// presence, the same at every preset, dice and frame, and a morph both ends' and the morph's; the generator leaves
-// out each part not given and, with every part on, gives the app's three programs; the engine registry gives every
-// part to one engine, in PARTS' order. In WebGL2 (headless Chrome) the
-// core alone and every part on compile and draw, and every look and preset, and every bank link's middle, draws on a
-// program of only its own parts exactly as on the everything program, both from the renderer's cache. The cache
-// draws a scene's first frame on its own program, compiled then, or on the everything program while its own is not
-// ready; it warms the sets it is given in order, each once with a 1x1 draw, keys a program by its sorted parts and
-// gives its compile time.
+// presence, the same at every preset, dice and frame, and a morph both ends' and the morph's; the generator leaves out
+// each part not given and, with every part on, gives the app's three programs; the engine registry gives every part to
+// one engine, in PARTS' order. In WebGL2 (headless Chrome) the core alone and every part on compile and draw, and every
+// look and preset, and every bank link's middle, draws on a program of only its own parts exactly as on the everything
+// program, both from the renderer's cache. The cache draws a scene's first frame on its own program, compiled then, or
+// on the everything program while its own is not ready; it warms the sets it is given in order, each once with a 1x1
+// draw, keys a program by its sorted parts and gives its compile time.
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
