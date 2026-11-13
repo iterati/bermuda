@@ -536,6 +536,9 @@ describe('the play surface', () => {
     const [slot, strip] = await Promise.all([box('.perform .slot'), box('.perform-side')])
     expect(strip.top).toBeGreaterThanOrEqual(slot.top)
     expect(strip.bottom).toBeLessThanOrEqual(slot.bottom)
+    // the pager on one line, as tall as its buttons
+    const [pager, arrow] = await Promise.all([box('.perform-side .pager'), box('.perform-side .pager button')])
+    expect(pager.bottom - pager.top).toBe(arrow.bottom - arrow.top)
     // ⚄ chip on the live head's line, at its right, the head holding its count alone
     await press('.picker', FIRST)
     expect(
@@ -577,27 +580,35 @@ describe('the play surface', () => {
       expect(moved(look).sort()).toEqual([...rolled].sort())
       expect(outside(look)).toEqual([])
     }
-    // a row's: the knobs it shows with a play range, and none of another chip
+    // a row's: the knobs of its own with a play range, its off ones opened to show them all
     await fresh()
     await press('.picker', FIRST)
     await press('.context', '▸ the whole chip')
-    const row = await page.$$eval('.context .group .row', (rows) => {
-      const r = rows.find((el) => el.querySelector(':scope > .dice'))!
-      r.querySelector<HTMLElement>(':scope > .dice')!.click()
-      return [...r.querySelectorAll<HTMLElement>('.knob[data-knob]')].map((el) => el.dataset.knob!)
-    })
+    const ROW = '.context .group .row:has(> .dice)'
+    if (await page.$(`${ROW} > .fold`)) await page.click(`${ROW} > .fold`)
+    await pause()
+    const row = await page.$eval(ROW, (r) =>
+      [...r.querySelectorAll<HTMLElement>('.knob[data-knob]')].map((el) => el.dataset.knob!),
+    )
+    await page.click(`${ROW} > .dice`)
     await pause()
     const look = await kept()
-    const ranged = row.filter((a) => CHIP_RANGED.includes(a))
-    expect(ranged.length).toBeGreaterThan(0)
-    expect(moved(look)).toEqual(expect.arrayContaining(ranged))
-    for (const a of moved(look)) expect(CHIP_RANGED).toContain(a)
+    expect(moved(look).sort()).toEqual(row.filter((a) => CHIP_RANGED.includes(a)).sort())
+    expect(moved(look).length).toBeGreaterThan(0)
     expect(outside(look)).toEqual([])
   }, 120_000)
 
   it('a look saved in this browser locks every dice, ⚄ look reading 🔒, and C and ⇧C roll nothing', async () => {
-    await page.keyboard.press('s')
+    // unlocked, C rolls the picked chip and ⇧C the look, each saved by S after
+    await page.keyboard.press('c')
     await pause()
+    expect(moved(await kept()).sort()).toEqual([...CHIP_RANGED].sort())
+    await fresh()
+    await page.keyboard.press('C')
+    await pause()
+    const look = await kept()
+    expect(moved(look).sort()).toEqual([...LOOK_RANGED].sort())
+    // and saved, every dice is locked
     await press('.picker', FIRST)
     await press('.context', '▸ the whole chip')
     const shown = await dice()
@@ -614,7 +625,7 @@ describe('the play surface', () => {
     await page.keyboard.press('c')
     await page.keyboard.press('C')
     await pause()
-    expect(moved(await kept())).toEqual([])
+    expect(await kept()).toEqual(look)
   }, 60_000)
 
   it('● macro learn by the strip arms a new macro and opens Macros; knobs moved by hand and by an encoder, then ● again, keep them as a new macro at 1, on the strip; Esc disarms and adds none, and so does ● again with nothing moved', async () => {
@@ -908,12 +919,18 @@ describe('the play surface', () => {
     await pause()
     const id = `macro${t1.macros.length + 1}`
     expect(await visible(`.perform .knob[data-macro="${id}"]`, popup)).toBe(1)
-    // ⚄ page rolls the page's knobs with a play range there, and ⚄ chip the chip's
+    // ⚄ page rolls the knobs with a play range of the page as it shows there, the new macro first, and ⚄ chip the
+    // chip's
+    const shown = await popup.$$eval('.perform .knob[data-knob]', (els) =>
+      els.map((el) => (el as HTMLElement).dataset.knob!),
+    )
+    const ranged = LOOK_RANGED.filter((a) => shown.includes(a))
+    expect(ranged.length).toBeGreaterThan(0)
     await press('.perform-side', '⚄ page', popup)
     await pause()
     let look = await kept(popup)
     expect(look.macros.at(-1)!.targets.map((t) => t.knob)).toEqual([TURN])
-    expect(moved(look).sort()).toEqual([TURN, ...PAGE_RANGED].sort())
+    expect(moved(look).sort()).toEqual([TURN, ...ranged].sort())
     await popup.close()
     await fresh()
     const again = new Set(browser.targets())
