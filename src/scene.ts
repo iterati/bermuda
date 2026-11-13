@@ -312,6 +312,7 @@ export type Kind = {
   help: string // one line: what turning it does
   top?: true // a kind a player reaches for: it fills the Perform strip after the macros
   shows?: (scene: Scene, at: KnobAt) => boolean // false: dead under the scene's current settings
+  off?: string // with shows: one line, what the knob needs to do something, said where it shows dead
   rest?: number // the value at which it does nothing, the one level() and scene() give it (looks.ts)
 }
 // the echo rings can show: rings above 0, a spread on them, or a modulator or macro driving them
@@ -373,6 +374,7 @@ export const KINDS: Record<string, Kind> = {
     label: 'colour 2',
     help: "the gradient's far end and the soak's last pigment, a place round the palette; the soak's middle pool sits between",
     shows: (s) => s.background?.kind === 'gradient' || soaked(s),
+    off: 'needs a gradient or soak background',
   },
   'background.amount': {
     range: [0, 1],
@@ -385,24 +387,28 @@ export const KINDS: Record<string, Kind> = {
     label: 'turn',
     help: "the gradient's direction, in degrees",
     shows: (s) => s.background?.kind === 'gradient',
+    off: 'needs a gradient background',
   },
   'background.scale': {
     range: [0.1, 4],
     label: 'pool size',
     help: "how big the soak's pools are: each about half of it across, in screen heights",
     shows: soaked,
+    off: 'needs a soak background',
   },
   'background.edge': {
     range: [0, 1],
     label: 'edge',
     help: "how dark the stain gathers at each pool's edge, where the pigment pooled",
     shows: soaked,
+    off: 'needs a soak background',
   },
   'background.seep': {
     range: [0, 1],
     label: 'seep',
     help: 'where the stain has seeped to, round once from 0 to 1; put a ramp modulator on it to keep it moving',
     shows: soaked,
+    off: 'needs a soak background',
   },
   'frame.origin[0]': {
     range: [-4, 4],
@@ -491,6 +497,7 @@ export const KINDS: Record<string, Kind> = {
     label: 'ring phase',
     help: "shifts this level's echo rings by part of their spacing (0.5 a whole ring); flipped cells shift back, ring by how far out; needs rings",
     shows: ringsShow,
+    off: 'needs rings above 0',
     rest: 0,
   },
   'levels[].cell.spill': {
@@ -503,6 +510,7 @@ export const KINDS: Record<string, Kind> = {
     label: 'share',
     help: "how often cells pick this variant, against the shares of the level's other variants",
     shows: (_, at) => at.level!.level.variants.length > 1,
+    off: 'needs a second variant',
   },
   'levels[].variants[].shape.m': {
     range: [1.01, 16],
@@ -510,6 +518,7 @@ export const KINDS: Record<string, Kind> = {
     help: "the star's character: near 1 a sharp dual star, 2 a plain polygon, up to the point count for thin spokes",
     top: true,
     shows: (_, at) => at.level!.level.variants.some((v) => starM(v.shape, at)),
+    off: 'only a star shape reads m',
   },
   'levels[].variants[].shape.r': {
     range: [0.02, 2],
@@ -550,6 +559,7 @@ export const KINDS: Record<string, Kind> = {
     label: 'join m',
     help: "the joined star's character: near 1 a sharp dual star, 2 a plain polygon, up to the point count for thin spokes",
     shows: (_, at) => at.level!.level.variants.some((v) => starM(v.shape.join?.shape, at)),
+    off: 'only a star join reads m',
   },
   'levels[].variants[].shape.join.shape.r': {
     range: [0.02, 2],
@@ -629,48 +639,56 @@ export const KINDS: Record<string, Kind> = {
     label: 'tone',
     help: "moves the fill's colour round the palette from the line's: 0.5 is half way round",
     shows: fills(),
+    off: 'needs fill above 0',
   },
   'levels[].fill.bands': {
     range: [0, 48],
     label: 'bands',
     help: "stepped bands of colour in from the shape's edge, this many a cell unit, flowing as the echo rings drift",
     shows: fills(),
+    off: 'needs fill above 0',
   },
   'levels[].fill.step': {
     range: [-1, 1],
     label: 'step',
     help: 'how far round the palette each band steps from the one outside it; needs bands',
     shows: fills('bands'),
+    off: 'needs fill and bands above 0',
   },
   'levels[].fill.metal': {
     range: [0, 1],
     label: 'metal',
     help: 'two-tone metal: each facet lit or in shadow by its slope against the light; 0 flat paint, 1 the whole shadow',
     shows: fills(),
+    off: 'needs fill above 0',
   },
   'levels[].fill.light': {
     range: [-360, 360],
     label: 'light',
     help: 'where the light falls on the metal from, in degrees round the screen: the facets facing it are lit; needs metal',
     shows: fills('metal'),
+    off: 'needs fill and metal above 0',
   },
   'levels[].fill.shade': {
     range: [-1, 1],
     label: 'shade',
     help: "how far round the palette the metal's shadow side is from its lit side: on a metal palette 0.5 is its dark half",
     shows: fills('metal'),
+    off: 'needs fill and metal above 0',
   },
   'levels[].fill.ramp': {
     range: [0, 1],
     label: 'ramp',
     help: "softens the fill inward from the shape's edge over this far, in cell units: 0 a clean edge",
     shows: fills(),
+    off: 'needs fill above 0',
   },
   'levels[].fill.alternate': {
     range: [-1, 1],
     label: 'alternate',
     help: "moves every other cell's fill round the palette by this much, by its id's parity, as a sunburst's rays alternate",
     shows: fills(),
+    off: 'needs fill above 0',
   },
   'levels[].halftone.amount': {
     range: [0, 1],
@@ -682,30 +700,35 @@ export const KINDS: Record<string, Kind> = {
     label: 'pitch',
     help: "dots a cell on the lattice, dots up the screen on a screen, where a picture draws its first screened level's: a later one's is dead",
     shows: halftones('pitch'),
+    off: "needs halftone above 0; a screen reads only its first level's",
   },
   'levels[].halftone.size': {
     range: [0, 1.2],
     label: 'size',
     help: 'how big a dot grows where the level draws whole, against half the gap to the next dot: 1 just touches it',
     shows: halftones(),
+    off: 'needs halftone above 0',
   },
   'levels[].halftone.fade': {
     range: [0, 1],
     label: 'fade',
     help: 'dims each dot as far as it is small: 0 every dot as bright as the level, 1 a dot as dim as it is small',
     shows: halftones(),
+    off: 'needs halftone above 0',
   },
   'levels[].halftone.turn': {
     range: [-360, 360],
     label: 'turn',
     help: "turns the screen's dots round the picture, in degrees; a picture draws its first screened level's, so a later one's is dead",
     shows: halftones('turn'),
+    off: "needs a screen's halftone above 0, on its first level",
   },
   'levels[].halftone.reach': {
     range: [0, 0.5],
     label: 'reach',
     help: "how wide the level's line is read at each dot's centre, in line units, so dots near a line grow: 0 its own width",
     shows: halftones(),
+    off: 'needs halftone above 0',
   },
   'contour.rings': {
     range: [0, 24],
@@ -718,6 +741,7 @@ export const KINDS: Record<string, Kind> = {
     label: 'drift',
     help: 'how fast the echo rings flow in or out (the sign picks which), in radians a beat; needs rings',
     shows: ringsShow,
+    off: 'needs rings above 0',
     rest: 0,
   },
   'contour.radialWeight': {
@@ -737,6 +761,7 @@ export const KINDS: Record<string, Kind> = {
     label: 'falloff',
     help: "how softly a line fades at its edge: a glow's, smooth or dotted line's power, a band's soft edge; hard lines don't use it",
     shows: (scene) => scene.line.kind !== 'hard',
+    off: 'the line is hard',
     rest: 1.2,
   },
   'line.dots.count': {
@@ -744,18 +769,21 @@ export const KINDS: Record<string, Kind> = {
     label: 'dots',
     help: 'how many dots round each outline; between two whole counts the next dot fades in; needs dotted lines',
     shows: dotted,
+    off: 'needs the dots line',
   },
   'line.dots.size': {
     range: [0, 1],
     label: 'dot size',
     help: "each dot's length, a part of the gap to the next: near 0 round dots of the line's width, 1 a whole line; needs dotted lines",
     shows: dotted,
+    off: 'needs the dots line',
   },
   'line.dots.crawl': {
     range: [-8, 8],
     label: 'crawl',
     help: 'how fast the dots crawl round each outline (the sign picks which way), in dots a beat; needs dotted lines',
     shows: dotted,
+    off: 'needs the dots line',
   },
   'palette.stops[].lch[0]': {
     range: [0, 1],
@@ -811,24 +839,28 @@ export const KINDS: Record<string, Kind> = {
     label: 'angle',
     help: "the linear field's direction, in degrees: the colours sweep along it",
     shows: (s) => s.palette.field?.kind === 'linear' && fielded(s),
+    off: 'needs a linear field, with depth or radius off 0',
   },
   'palette.field.centre[0]': {
     range: [-4, 4],
     label: 'centre x',
     help: "where the colour field is centred, across: the radial field's rings round it, the sweep and the wash through it",
     shows: fielded,
+    off: "needs the field's depth or the palette's radius off 0",
   },
   'palette.field.centre[1]': {
     range: [-4, 4],
     label: 'centre y',
     help: "where the colour field is centred, up and down: the radial field's rings round it, the sweep and the wash through it",
     shows: fielded,
+    off: "needs the field's depth or the palette's radius off 0",
   },
   'palette.field.scale': {
     range: [0.1, 8],
     label: 'scale',
     help: "how fine the noise field's wash is: higher packs its patches smaller",
     shows: (s) => s.palette.field?.kind === 'noise' && fielded(s),
+    off: 'needs a noise field, with depth or radius off 0',
   },
   'palette.field.depth': {
     range: [-2, 2],

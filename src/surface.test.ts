@@ -2,7 +2,8 @@
 // the bar with ♪, the slim fader at the top, and one bottom deck of the picker row over the strip and the pads; a pick
 // (a chip, a knob, a modulator, the macros, the looks, the music, the edge) opens the context panel at the right on
 // it, ✕ or Esc closing it, the fader and the deck clear of it; Tab walks the strip, then the panel's live knobs, each
-// once. The panel keeps what it shows through the other views, and undocked the surface is in the controls window.
+// once. The panel keeps what it shows through the other views, and undocked the surface is the controls window's
+// console, its panel always open.
 import { execFileSync } from 'node:child_process'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import { createServer, type ViteDevServer } from 'vite'
@@ -223,13 +224,16 @@ describe('the play surface', () => {
     expect(await visible('.pads-row .hwpad')).toBe(16)
   }, 60_000)
 
-  it('a chip pressed in the picker row picks it and opens the context panel on its every knob, and more ▸ does too; ✕ and Esc close it', async () => {
+  it('a chip pressed in the picker row picks it and opens the context panel on its live knobs, the whole chip one press away, and more ▸ does too; ✕ and Esc close it', async () => {
     const second = t1.levels[1].id
     await press('.picker', second)
     expect(await page.$eval('.picker .chip.picked', (el) => (el as HTMLElement).innerText)).toBe(second)
-    expect(await panel()).toEqual({ head: second, blocks: [`Level ${second}`], detail: 'no knob focused' })
-    // every knob of the chip, as more showed it
+    expect(await panel()).toEqual({ head: second, blocks: [], detail: 'no knob focused' })
+    expect(await visible('.context .live-row .knob')).toBeGreaterThan(0)
+    // the chip's live knobs, and its every knob one press away, as more showed it
     await press('.picker', FIRST)
+    expect(await panel()).toMatchObject({ head: FIRST, blocks: [] })
+    await page.click('.context .all-toggle')
     expect(await panel()).toMatchObject({ head: FIRST, blocks: [`Level ${FIRST}`] })
     expect(await visible('.context .group .knob')).toBeGreaterThan(8)
     expect(await page.$eval('.context-head button', (el) => [el.textContent, el.getAttribute('title')])).toEqual([
@@ -240,7 +244,8 @@ describe('the play surface', () => {
     expect(await panel()).toBe(null)
     // more ▸ opens it on the picked chip, and Esc closes it
     await page.click('.perform-side button[title="every knob of the picked chip"]')
-    expect(await panel()).toMatchObject({ head: FIRST, blocks: [`Level ${FIRST}`] })
+    expect(await panel()).toMatchObject({ head: FIRST, blocks: [] })
+    expect(await page.$eval('.context .all-toggle', (el) => el.textContent)).toMatch(/^▸ the whole chip: /)
     await page.keyboard.press('Escape')
     expect(await panel()).toBe(null)
     // a chip of the fixed parts too, and the arrow keys pick the next one there
@@ -260,10 +265,10 @@ describe('the play surface', () => {
     await page.click(`.perform .knob[data-knob="${KNOB}"]`)
     expect(await panel()).toEqual({
       head: `${FIRST} › ${knobKind(KNOB).label}`,
-      blocks: [`Level ${FIRST}`],
+      blocks: [],
       detail: KNOB,
     })
-    expect((await box('.context .knob-slot')).bottom).toBeLessThanOrEqual((await box('.context .group')).top)
+    expect((await box('.context .knob-slot')).bottom).toBeLessThanOrEqual((await box('.context .live-block')).top)
     expect(await focused()).toEqual([KNOB])
     // another knob pressed in the panel takes the detail, and moves no knob
     const before = await box(`.context .knob[data-knob="${TURN}"]`)
@@ -574,19 +579,24 @@ describe('the play surface', () => {
       expect(await visible(s, popup), s).toBe(1)
     expect(await page.$$('.picker, .perform, section.top')).toEqual([])
     const second = t1.levels[1].id
+    // the console's panel, open on the picked chip from the first
+    expect(await panel(popup)).toMatchObject({ head: FIRST, blocks: [], detail: 'no knob focused' })
     await press('.picker', second, popup)
-    expect(await panel(popup)).toMatchObject({ head: second, blocks: [`Level ${second}`] })
+    expect(await panel(popup)).toMatchObject({ head: second, blocks: [] })
     expect(await page.$$('.context')).toEqual([])
-    // the panel keeps clear of the deck there too
-    const [deck, open] = await popup.evaluate(() =>
-      ['.app > section.bottom', '.context'].map((s) => document.querySelector(s)!.getBoundingClientRect().toJSON()),
+    // between the fader and the deck there, 10px from each, the three in one column right of the monitor
+    const [top, open, deck] = await popup.evaluate(() =>
+      ['.app > section.top', '.context', '.app > section.bottom'].map((s) =>
+        document.querySelector(s)!.getBoundingClientRect().toJSON(),
+      ),
     )
-    expect(Math.round(open.left - deck.right)).toBe(10)
-    // a strip knob pressed there shows its detail there, and Esc there closes it
+    expect([open.top - top.bottom, deck.top - open.bottom].map(Math.round)).toEqual([10, 10])
+    for (const r of [top, open, deck]) expect([r.left, r.right].map(Math.round)).toEqual([390, 1270])
+    // a strip knob pressed there shows its detail there, and Esc there brings the panel back to the chip
     await popup.click(`.perform .knob[data-knob="${KNOB}"]`)
     expect((await panel(popup))!.detail).toBe(KNOB)
     await popup.keyboard.press('Escape')
-    expect(await panel(popup)).toBe(null)
+    expect(await panel(popup)).toMatchObject({ head: second, detail: 'no knob focused' })
     await popup.close()
   }, 60_000)
 })

@@ -116,9 +116,11 @@ async function typeOn(address: string) {
   await page.keyboard.press('Enter')
   await page.waitForSelector('.knob-type')
 }
-// the context panel opened on the picked chip's every knob, beside the strip, by more ▸, the walk starting afresh
+// the context panel opened on the picked chip, beside the strip, by more ▸, and on its whole chip, the walk starting
+// afresh
 const toMore = async () => {
   await page.click('.perform-side button[title="every knob of the picked chip"]')
+  await page.click('.context .all-toggle')
   await page.waitForSelector('.context .group')
   await page.evaluate(() => (document.activeElement as HTMLElement).blur())
 }
@@ -148,7 +150,7 @@ describe('Tab', () => {
 
   it('Tab skips idle and dead knobs, and a knob turned joins the walk until a look is loaded', async () => {
     await toMore()
-    // every row opened, its folded knobs shown, the dead ones with them
+    // every row opened, its off knobs shown
     for (const fold of await page.$$('.stage .row .fold')) await fold.click()
     const dead = knobsOf(t1)
       .filter((at) => {

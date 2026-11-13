@@ -52,9 +52,11 @@ beforeEach(async () => {
 }, 60_000)
 
 const to = async (m: Mode) => {
-  // Stage's every knob of the picked chip, in the context panel, which scrolls, opened by more ▸
-  if (m === 'stage') await page.click('.perform-side button[title="every knob of the picked chip"]')
-  else await page.keyboard.press(m === 'edit' ? 'e' : 'd')
+  // Stage's every knob of the picked chip, in the context panel, which scrolls, opened by more ▸ and the whole chip
+  if (m === 'stage') {
+    await page.click('.perform-side button[title="every knob of the picked chip"]')
+    await page.click('.context .all-toggle')
+  } else await page.keyboard.press(m === 'edit' ? 'e' : 'd')
   await page.waitForSelector(`.${m} .knob`)
   mode = m
 }

@@ -27,6 +27,8 @@ import {
   folded,
   GRIDS,
   hardRange,
+  kindOf,
+  knobKind,
   LATTICES,
   knobsOf,
   LINES,
@@ -41,6 +43,7 @@ import {
   VARIATIONS,
   type Address,
   type Controls,
+  type KnobAt,
   type LatticeKind,
   type MidiTarget,
   type Level,
@@ -62,6 +65,8 @@ export type Ctl = {
   nudge: (t: MidiTarget, steps: number) => void
   set: (t: MidiTarget, value: number) => void // a value typed, clamped to the hard range (a macro's 0 to 1); turned
   liveKnobs: ReadonlySet<Address> // the knobs live to the hand (scene.ts liveKnob), the stops of Tab's walk
+  offKnobs: ReadonlySet<Address> // the knobs dead under the scene's settings, their kind's shows false
+  tiers: boolean // inside the Stage's context panel on a chip: its knobs live, idle (dimmed) or off (greyed, not turned)
   typing: Typing | null // the knob or macro whose value is being typed
   type: Dispatch<SetStateAction<Typing | null>>
   walk: (by: 1 | -1) => void // Tab's walk on to the next live knob on screen, or back to the one before
@@ -234,20 +239,22 @@ const Group = ({
 }
 
 // A row: its title, its menus, pad and buttons (children), then its knobs; the knobs that fold (dead, or at rest
-// and untouched) go into a +N at its end, which opens the row to show them. A focused knob never folds. A row with a
-// play range ends in its dice, which roll its knobs, folded ones too.
+// and untouched) go into a +N at its end, which opens the row to show them. A focused knob never folds. In the
+// Stage's context panel only the off ones fold, into an off N, each with its why, and the idle ones show. A row with
+// a play range ends in its dice, which roll its knobs, folded ones too.
 function Row({ title, knobs, children }: { title?: string; knobs: [string, Address][]; children?: ReactNode }) {
-  const { scene, focus } = useCtl()
+  const { scene, focus, tiers, offKnobs } = useCtl()
   const [open, setOpen] = useState(false)
   // the scene holds still between frames, while the live one moves
   const all = useMemo(() => knobsOf(scene), [scene])
-  const hidden = knobs.filter(
-    ([, at]) =>
-      at !== focus &&
-      folded(
-        scene,
-        all.find((k) => k.address === at)!,
-      ),
+  const hidden = knobs.filter(([, at]) =>
+    tiers
+      ? offKnobs.has(at)
+      : at !== focus &&
+        folded(
+          scene,
+          all.find((k) => k.address === at)!,
+        ),
   )
   return (
     <div className="row">
@@ -260,15 +267,61 @@ function Row({ title, knobs, children }: { title?: string; knobs: [string, Addre
         ))}
       {hidden.length > 0 && (
         <button
-          className="mini fold"
-          title={hidden.map(([label]) => label).join(' · ')}
+          className={`mini fold${tiers ? ' off' : ''}`}
+          title={hidden.map(([label, at]) => (tiers ? `${label}: ${knobKind(at).off}` : label)).join(' · ')}
           onClick={() => setOpen((o) => !o)}
         >
-          {open ? '−' : `+${hidden.length}`}
+          {open ? '−' : tiers ? `off ${hidden.length}` : `+${hidden.length}`}
         </button>
       )}
       {knobs.some(([, at]) => resolve(scene, at)!.play) && <Dice at={knobs.map(([, at]) => at)} what="this row" />}
     </div>
+  )
+}
+
+// A knob's name on the Perform strip and in the context panel's live row: its kind's label, and its variant's number
+// when its level has more than one.
+export function labelOf(all: readonly KnobAt[], address: Address) {
+  const { label } = knobKind(address)
+  const variants = all.find((k) => k.address === address)!.level?.level.variants.length ?? 0
+  if (!kindOf(address).startsWith('levels[].variants[]') || variants < 2) return label
+  return `${label} ${Number(/.*variants\[(\d+)\]/.exec(address)![1]) + 1}`
+}
+
+// The Stage's context panel on a chip, under the knob's detail: its live knobs in the chip's order, each on the
+// strip's page showing (slots) tagged with its encoder, then the way to the whole chip, its every row and its menus
+// and buttons, closed each time the panel turns to the chip.
+export function LiveBlock({ chip, slots }: { chip: string; slots: readonly (MidiTarget | undefined)[] }) {
+  const { scene, liveKnobs, offKnobs } = useCtl()
+  const [whole, setWhole] = useState(false)
+  const all = useMemo(() => knobsOf(scene), [scene])
+  const knobs = chipKnobs(scene, chip)
+  const live = knobs.filter((k) => liveKnobs.has(k.address))
+  const off = knobs.filter((k) => offKnobs.has(k.address)).length
+  return (
+    <>
+      <div className="live-block">
+        <div className="live-head">
+          <span>
+            <b>live {live.length}</b> <span className="dim">· in the chip&apos;s order</span>
+          </span>
+        </div>
+        <div className="row live-row">
+          {live.map(({ address }) => (
+            <Knob
+              key={address}
+              label={labelOf(all, address)}
+              at={address}
+              enc={slots.findIndex((t) => t && 'knob' in t && t.knob === address) + 1 || undefined}
+            />
+          ))}
+        </div>
+        <button className="all-toggle" onClick={() => setWhole((w) => !w)}>
+          {whole ? '▾' : '▸'} the whole chip: {knobs.length - live.length - off} idle, {off} off, its menus and buttons
+        </button>
+      </div>
+      {whole && <Section chip={chip} />}
+    </>
   )
 }
 
@@ -313,7 +366,7 @@ export function Section({ chip }: { chip: string }) {
 }
 
 function BackgroundSection() {
-  const { scene, edit } = useCtl()
+  const { scene, edit, tiers } = useCtl()
   const kind = scene.background?.kind ?? 'none'
   return (
     <Group title="Background" chip="background">
@@ -342,34 +395,49 @@ function BackgroundSection() {
           })
         }
       />
-      {kind !== 'none' && (
-        <>
-          <Knob label="colour" at="background.at[0]" />
-          {kind !== 'flat' && <Knob label="colour 2" at="background.at[1]" />}
-          <Knob label="amount" at="background.amount" />
-          {kind === 'gradient' && <Knob label="turn" at="background.turn" />}
-          {kind === 'soak' && (
-            <>
-              <Knob label="pool size" at="background.scale" />
-              <Knob label="edge" at="background.edge" />
-              <Knob label="seep" at="background.seep" />
-            </>
-          )}
-        </>
-      )}
+      {kind !== 'none' &&
+        (tiers ? (
+          // in the context panel every knob of it, those its kind leaves dead behind off N
+          <Row
+            knobs={[
+              ['colour', 'background.at[0]'],
+              ['colour 2', 'background.at[1]'],
+              ['amount', 'background.amount'],
+              ['turn', 'background.turn'],
+              ['pool size', 'background.scale'],
+              ['edge', 'background.edge'],
+              ['seep', 'background.seep'],
+            ]}
+          />
+        ) : (
+          <>
+            <Knob label="colour" at="background.at[0]" />
+            {kind !== 'flat' && <Knob label="colour 2" at="background.at[1]" />}
+            <Knob label="amount" at="background.amount" />
+            {kind === 'gradient' && <Knob label="turn" at="background.turn" />}
+            {kind === 'soak' && (
+              <>
+                <Knob label="pool size" at="background.scale" />
+                <Knob label="edge" at="background.edge" />
+                <Knob label="seep" at="background.seep" />
+              </>
+            )}
+          </>
+        ))}
     </Group>
   )
 }
 
 function LineSection() {
-  const { scene, edit } = useCtl()
+  const { scene, edit, tiers } = useCtl()
   return (
     <Group title="Line" chip="line">
       <Row
         knobs={[
           ['width', 'line.width'],
           ['falloff', 'line.falloff'],
-          ...(scene.line.kind === 'dots'
+          // the dots' knobs on a dotted line, and in the context panel wherever they are kept, behind off N
+          ...((tiers ? scene.line.dots : scene.line.kind === 'dots')
             ? ([
                 ['dots', 'line.dots.count'],
                 ['dot size', 'line.dots.size'],
@@ -650,7 +718,7 @@ export function prefixOf(levels: Level[], id: string, base = 'levels'): Address 
 }
 
 function LevelSection({ id }: { id: string }) {
-  const { scene, edit, pick } = useCtl()
+  const { scene, edit, pick, tiers } = useCtl()
   const { level, list } = findLevel(scene, id)
   const at = prefixOf(scene.levels, id)!
   const index = list.indexOf(level)
@@ -840,7 +908,7 @@ function LevelSection({ id }: { id: string }) {
         <Row
           key={i}
           title={level.variants.length > 1 ? `variant ${i + 1}` : 'shape'}
-          knobs={[['share', `${at}.variants[${i}].share`], ...shapeKnobs(`${at}.variants[${i}].shape`, v.shape)]}
+          knobs={[['share', `${at}.variants[${i}].share`], ...shapeKnobs(`${at}.variants[${i}].shape`, v.shape, tiers)]}
         >
           <ShapeMenus
             at={`${at}.variants[${i}].shape`}
@@ -923,7 +991,7 @@ function LevelSection({ id }: { id: string }) {
                   })
                 }
               />
-              {shapeKnobs(`${at}.variants[${i}].shape.join.shape`, shape.join.shape).map(([label, a]) => (
+              {shapeKnobs(`${at}.variants[${i}].shape.join.shape`, shape.join.shape, tiers).map(([label, a]) => (
                 <Knob key={a} label={label} at={a} />
               ))}
               <Knob label="offset x" at={`${at}.variants[${i}].shape.join.offset[0]`} />
@@ -1130,12 +1198,13 @@ const FORM: Partial<Record<ShapeKind, string>> = {
   ziggurat: 'steepness',
 }
 
-// A shape's knobs: the star's m, a kind's form, its size, round and twist.
-function shapeKnobs(at: Address, shape: Shape): [string, Address][] {
+// A shape's knobs: the star's m (every shape's, dead but a star's, in the context panel), a kind's form, its size,
+// round and twist.
+function shapeKnobs(at: Address, shape: Shape, tiers: boolean): [string, Address][] {
   const kind = shape.kind ?? 'star'
   const form = FORM[kind]
   return [
-    ...(kind === 'star' ? ([['m', `${at}.m`]] as [string, Address][]) : []),
+    ...(kind === 'star' || tiers ? ([['m', `${at}.m`]] as [string, Address][]) : []),
     ...(form ? ([[form, `${at}.form`]] as [string, Address][]) : []),
     ['r', `${at}.r`],
     ['round', `${at}.round`],

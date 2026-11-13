@@ -191,6 +191,18 @@ describe('the knob kinds', () => {
     expect(kind.help.length).toBeLessThanOrEqual(140)
   })
 
+  it('every kind with a show rule says in one line why it is off', () => {
+    const ruled = Object.entries(KINDS).filter(([, kind]) => kind.shows)
+    expect(ruled.length).toBe(31)
+    for (const [key, { off }] of ruled) {
+      expect(off, key).toMatch(/^[a-z]/)
+      expect(off, key).not.toMatch(/[\n—]/)
+      expect(off!.length, key).toBeLessThanOrEqual(64)
+    }
+    // and a kind that is never dead has none
+    expect(Object.entries(KINDS).filter(([, kind]) => !kind.shows && kind.off)).toEqual([])
+  })
+
   it.each(LOOKS.map((look) => [look.name, look] as const))('every knob of %s has a kind', (_, look) => {
     for (const { address } of knobsOf(look)) expect(KINDS[kindOf(address)], address).toBeDefined()
   })

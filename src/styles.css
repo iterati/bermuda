@@ -311,6 +311,106 @@ button {
   flex-direction: column;
   gap: 2px;
 }
+/* the chip's tiers there: its live knobs first, those on the strip's page tagged with their encoder, then the whole
+   chip, its idle knobs dimmed and its off ones greyed with their why, behind off N */
+.live-block {
+  margin: 4px 0 10px;
+}
+.live-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+  font-size: 12.5px;
+}
+.all-toggle {
+  display: block;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+}
+.enc-tag {
+  position: absolute;
+  top: 0;
+  left: 2px;
+  font-size: 9px;
+  line-height: 1;
+  padding: 1px 3px;
+  border-radius: 3px;
+  background: #1d3b2b;
+  color: var(--midi);
+}
+.knob.idle {
+  opacity: 0.45;
+}
+.knob.idle:hover {
+  opacity: 0.8;
+}
+.knob.off {
+  opacity: 0.3;
+  filter: grayscale(1);
+  cursor: not-allowed;
+}
+.knob-why {
+  max-width: 64px;
+  font-size: 9px;
+  line-height: 1.1;
+  text-align: center;
+  color: #ffd38a;
+}
+.mini.fold.off {
+  color: var(--dim);
+  border-style: dashed;
+}
+/* undocked, the Stage is a console: the monitor at the top left in the picture's shape (--aspect, the main window's)
+   with the looks under it; at the right the fader, the context panel always open and the bottom deck, each of the
+   fader and the deck as tall as it needs and the panel the rest */
+.app.console {
+  display: grid;
+  grid-template-columns: 390px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px 0;
+  padding: 58px 10px 10px 0;
+}
+.app.console > .picture {
+  inset: auto;
+  top: 58px;
+  left: 10px;
+  width: 370px;
+  height: calc(370px / var(--aspect));
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+}
+.app.console > .console-looks {
+  position: absolute;
+  top: calc(68px + 370px / var(--aspect));
+  left: 10px;
+  bottom: 10px;
+  width: 370px;
+  overflow: auto;
+  padding: 8px 10px;
+}
+.app.console > .top,
+.app.console > .context,
+.app.console > .bottom {
+  position: relative;
+  inset: auto;
+  grid-column: 2;
+  width: auto;
+}
+.app.console > .top {
+  grid-row: 1;
+}
+.app.console > .context {
+  grid-row: 2;
+}
+.app.console > .bottom {
+  grid-row: 3;
+}
 /* the Perform strip: 8 big knobs, each in its own place, an empty one kept; the pager and more beside them */
 .perform {
   display: flex;

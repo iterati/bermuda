@@ -402,8 +402,9 @@ describe('the pads row and the drawn controller', () => {
     expect(await visible('.hw-fader')).toBe(0)
     await page.keyboard.press('h')
     expect(await visible(`${ROW} .hwpad`)).toBe(16)
-    // more: the chip's knobs in the context panel, and the strip and the pads stay under them
+    // more and the whole chip: the chip's knobs in the context panel, and the strip and the pads stay under them
     await page.click('.perform-side button[title="every knob of the picked chip"]')
+    await page.click('.context .all-toggle')
     await page.waitForSelector('.context .group')
     expect(await visible('.context .knob')).toBeGreaterThan(8)
     expect(await visible(`${ROW} .hwpad`)).toBe(16)

@@ -1,6 +1,7 @@
 // Undocking, the app itself in headless Chrome at 1280x800, on Tapestry 1: U or ⇱ undock opens the controls window,
-// the UI in it over a copy of the picture, and the main window keeps the picture alone; open, either brings the
-// window to the front. The keys, Tab, Enter and the wheel work in the controls window, a text field there keeps its
+// the UI in it with a copy of the picture, and the main window keeps the picture alone; open, either brings the
+// window to the front. The Stage there is a console: the copy at the top left with the looks under it, and the
+// fader, the context panel, always open, and the bottom deck beside them; docked back it is the play surface again. The keys, Tab, Enter and the wheel work in the controls window, a text field there keeps its
 // keys, and keys pressed in the main window still reach the app. Edit, Decks and Direct undock the same way, each
 // view's copy of the picture in its picture's place and whole in its own shape, the main window's picture whole,
 // Direct's framed; moving among them keeps the UI undocked, and Direct's panel moves without a remount. Closing the
@@ -48,8 +49,8 @@ const t1 = LOOKS[0]
 const TURN = 'levels[sq1].affine.turn'
 // a notch of it, as a share of its hard range
 const STEP = notch(t1, { knob: TURN }) / (hardRange(TURN)[1] - hardRange(TURN)[0])
-// a spot on the Stage's picture that no panel covers
-const OPEN = { x: 640, y: 300 }
+// a spot on the console's monitor, the controls window's copy of the picture at its top left
+const OPEN = { x: 195, y: 170 }
 // the first page of the first level's strip, by knob address or macro id
 const STRIP = strip(t1, 'sq1')
   .slice(0, 8)
@@ -172,7 +173,7 @@ describe('undocking', () => {
     expect(await popup.title()).toBe('bermuda · controls')
     expect(await showing()).toEqual(['picture'])
     expect(await page.$$('.bar, .knob, .error')).toEqual([])
-    // the Stage in the controls window, over its copy of the picture, styled as the main window was
+    // the Stage in the controls window, a console beside its copy of the picture, styled as the main window was
     const stage = await popup.evaluate(() => ({
       app: document.querySelector('body > .app')?.className,
       monitor: document.querySelector('.app > canvas.picture')?.getBoundingClientRect().width,
@@ -180,7 +181,7 @@ describe('undocking', () => {
       margin: getComputedStyle(document.body).margin,
       button: document.querySelector('.bar button[title^="undock"]')?.textContent,
     }))
-    expect(stage).toMatchObject({ app: 'app stage', monitor: 1280, bar: 'absolute', margin: '0px' })
+    expect(stage).toMatchObject({ app: 'app stage console', monitor: 370, bar: 'absolute', margin: '0px' })
     expect(stage.button).toBe('⇲ docked out')
     // the keys, behind ?
     await popup.click('.bar .help')
@@ -331,6 +332,96 @@ describe('undocking', () => {
       '',
     ])
     expect(await title(page)).toBe(t1.name)
+  }, 60_000)
+
+  it('undocked, the Stage is a console: the monitor top left with the looks under it, the panel open on the picked chip, the fader and the deck beside them', async () => {
+    const popup = await undock(() => page.keyboard.press('u'), '.context .live-row')
+    expect(await popup.$eval('body > .app', (el) => el.className)).toBe('app stage console')
+    // the boxes: the monitor in the main window's shape, the looks to the foot, the fader, the panel and the deck
+    // down the right, each 10px from the next and inside the window
+    const boxes = await popup.evaluate(() =>
+      Object.fromEntries(
+        Object.entries({
+          monitor: '.app > canvas.picture',
+          looks: '.app > .console-looks',
+          fader: '.app > section.top',
+          panel: '.app > .context',
+          deck: '.app > section.bottom',
+        }).map(([name, s]) => {
+          const r = document.querySelector(s)!.getBoundingClientRect()
+          return [name, [r.left, r.top, r.right, r.bottom].map(Math.round)]
+        }),
+      ),
+    )
+    expect(boxes.monitor).toEqual([10, 58, 380, 58 + Math.round((370 * 800) / 1280)])
+    expect(boxes.looks).toEqual([10, boxes.monitor[3] + 10, 380, 790])
+    expect(boxes.fader.slice(0, 3)).toEqual([390, 58, 1270])
+    expect(boxes.panel).toEqual([390, boxes.fader[3] + 10, 1270, boxes.deck[1] - 10])
+    expect([boxes.deck[0], boxes.deck[2], boxes.deck[3]]).toEqual([390, 1270, 790])
+    expect(boxes.panel[3] - boxes.panel[1]).toBeGreaterThan(300)
+    // nothing under another panel: each one's corners and middle are its own
+    const covered = await popup.evaluate(() =>
+      [
+        '.app > canvas.picture',
+        '.app > .console-looks',
+        '.app > section.top',
+        '.app > .context',
+        '.app > section.bottom',
+      ].flatMap((s) => {
+        const el = document.querySelector(s)!
+        const r = el.getBoundingClientRect()
+        return [
+          [r.left + 4, r.top + 4],
+          [r.right - 4, r.top + 4],
+          [r.left + 4, r.bottom - 4],
+          [r.right - 4, r.bottom - 4],
+          [(r.left + r.right) / 2, (r.top + r.bottom) / 2],
+        ]
+          .filter(([x, y]) => !el.contains(document.elementFromPoint(x, y)))
+          .map(([x, y]) => `${s} at ${x},${y}`)
+      }),
+    )
+    expect(covered).toEqual([])
+    // the looks to play, which scroll, and a look loads from them
+    expect(await popup.$$eval('.console-looks .look-name', (els) => els.length)).toBe(LOOKS.length)
+    expect(await popup.$eval('.console-looks', (el) => el.scrollHeight > el.clientHeight)).toBe(true)
+    await popup.$$eval('.console-looks .look-name', (els) => (els[2] as HTMLElement).click())
+    await pause()
+    expect(await title(popup)).toBe(LOOKS[2].name)
+    // the panel open on the picked chip with nothing opened, and back to it after ✕, Esc and another view
+    const head = () => popup.$eval('.context-head b', (el) => el.textContent)
+    const chip = LOOKS[2].levels[0].id
+    expect(await head()).toBe(chip)
+    expect(await popup.$eval('body > .app', (el) => el.classList.contains('context-open'))).toBe(false)
+    await popup.click('.context-head button')
+    expect(await head()).toBe(chip)
+    await popup.click('.picker > button[title^="the looks"]')
+    expect(await head()).toBe('looks and bank')
+    expect(await popup.$$eval('.context .graph', (els) => els.length)).toBe(1)
+    await popup.keyboard.press('Escape')
+    expect(await head()).toBe(chip)
+    expect(await popup.$('.context .live-row')).not.toBe(null)
+  }, 60_000)
+
+  it('docked back, the Stage is the play surface again, the panel as its pick has it', async () => {
+    const PANEL = '.context'
+    let popup = await undock(() => page.keyboard.press('u'), '.context .live-row')
+    // a chip pressed there: the panel docked back stays open on it, at the right
+    await popup.click('.picker .chip.level')
+    await popup.close()
+    await page.waitForSelector(`.app.stage ${PANEL}`)
+    expect(await page.$eval('.app', (el) => el.className)).toBe('app stage context-open')
+    expect(await rect(page, PANEL)).toEqual([910, 58, 360, 732])
+    expect(await rect(page, PICTURE)).toEqual([0, 0, 1280, 800])
+    expect(await page.$eval('.app > section.top', (el) => el.getBoundingClientRect().right)).toBe(900)
+    // closed there, by Esc: undocked the console still shows it, and docked back it is closed
+    popup = await undock(() => page.keyboard.press('u'), '.context .live-row')
+    await popup.keyboard.press('Escape')
+    expect(await popup.$(PANEL)).not.toBe(null)
+    await popup.close()
+    await page.waitForSelector('.app.stage .perform')
+    expect(await page.$eval('.app', (el) => el.className)).toBe('app stage')
+    expect(await page.$(PANEL)).toBe(null)
   }, 60_000)
 
   it('Edit undocks: the Rack in the controls window over the monitor, and the whole picture alone in the main window', async () => {

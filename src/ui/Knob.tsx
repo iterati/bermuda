@@ -5,7 +5,8 @@
 // where its spread puts the other levels of its link group (or a thin arc to where it runs at the deepest level, on
 // the knobs the shader spreads over depth), a dotted tail for its glide, longer the slower, and an inner arc as far
 // as its modulators swing it. Its corner names the MIDI control that drives it, dimmed while a fader waits to pick
-// it up.
+// it up. In the Stage's context panel on a chip (Ctl's tiers) one neither live nor dead is idle, dimmed, and a dead
+// one is off: greyed, its why under its label, and neither turned, focused, typed nor modulated by a hand.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { label as midiLabel, mappingOf, positionOf, same, waiting } from '../midi'
@@ -145,9 +146,9 @@ export function Slider(props: {
 export const short = (address: string) => address.replace(/^levels/, '').replace(/variants\[(\d+)\]\.shape/, 'v$1')
 
 // A knob of the scene by its address, or a macro's (running 0 to 1, moving its knobs; it takes no focus, play range
-// or modulator, and as one on the strip it is always live).
-export function Knob(props: { label: string } & ({ at: Address } | { macro: string })) {
-  const { label } = props
+// or modulator, and as one on the strip it is always live); enc, the strip's encoder it is on as the panel tags it.
+export function Knob(props: { label: string; enc?: number } & ({ at: Address } | { macro: string })) {
+  const { label, enc } = props
   const {
     scene,
     live: shown,
@@ -159,6 +160,8 @@ export function Knob(props: { label: string } & ({ at: Address } | { macro: stri
     learning,
     positions,
     liveKnobs,
+    offKnobs,
+    tiers,
     typing,
     type,
     walk,
@@ -175,6 +178,8 @@ export function Knob(props: { label: string } & ({ at: Address } | { macro: stri
   const live = macro ? undefined : resolve(shown, id)?.value
   const modulated = !macro && scene.modulators.some((m) => m.targets.some((t) => t.knob === id))
   const focused = !macro && focus === id
+  const off = tiers && !macro && offKnobs.has(id)
+  const idle = tiers && !macro && !off && !liveKnobs.has(id)
   const midi = mappingOf(scene, target)
   const learningThis = !!learning && same(learning, target)
   const el = useRef<HTMLDivElement>(null)
@@ -188,11 +193,11 @@ export function Knob(props: { label: string } & ({ at: Address } | { macro: stri
     const knob = el.current!
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
-      nudge(isMacro ? { macro: id } : { knob: id }, wheelTurn(e))
+      if (!off) nudge(isMacro ? { macro: id } : { knob: id }, wheelTurn(e))
     }
     knob.addEventListener('wheel', onWheel, { passive: false })
     return () => knob.removeEventListener('wheel', onWheel)
-  }, [id, isMacro, nudge])
+  }, [id, isMacro, nudge, off])
   // the field closes: this one, and not another opened since
   const done = useCallback(
     () => type((t) => (t && same(t, isMacro ? { macro: id } : { knob: id }) ? null : t)),
@@ -267,21 +272,25 @@ export function Knob(props: { label: string } & ({ at: Address } | { macro: stri
       data-knob={macro ? undefined : id}
       data-macro={macro?.id}
       data-learn={JSON.stringify(target)}
-      className={`knob${focused ? ' focused' : ''}${modulated ? ' modulated' : ''}${learningThis ? ' learning' : ''}${macro ? ' macro' : ''}${typingThis ? ' typing' : ''}`}
+      className={`knob${idle ? ' idle' : ''}${off ? ' off' : ''}${focused ? ' focused' : ''}${modulated ? ' modulated' : ''}${learningThis ? ' learning' : ''}${macro ? ' macro' : ''}${typingThis ? ' typing' : ''}`}
       title={
         macro
           ? `macro ${macro.name}: moves ${macro.targets.length} knob${macro.targets.length === 1 ? '' : 's'}\nwheel; shift for fine · Enter or double-click types`
-          : `${kind!.label}: ${kind!.help}\n${id}${knob!.glide ? ` · glide ${knob!.glide} s` : ''} · wheel; shift for fine · Enter or double-click types`
+          : off
+            ? `${kind!.label}: off, ${kind!.off}\n${id}`
+            : `${kind!.label}: ${kind!.help}\n${id}${knob!.glide ? ` · glide ${knob!.glide} s` : ''} · wheel; shift for fine · Enter or double-click types`
       }
       onPointerDown={() => {
-        if (!macro) setFocus(id)
+        if (!macro && !off) setFocus(id)
       }}
-      onDoubleClick={() => type({ ...target, el: el.current! })}
+      onDoubleClick={() => {
+        if (!off) type({ ...target, el: el.current! })
+      }}
       onDragOver={(e) => {
-        if (!macro && e.dataTransfer.types.includes(MOD_DRAG)) e.preventDefault()
+        if (!macro && !off && e.dataTransfer.types.includes(MOD_DRAG)) e.preventDefault()
       }}
       onDrop={(e) => {
-        if (macro) return
+        if (macro || off) return
         e.preventDefault()
         const mod = e.dataTransfer.getData(MOD_DRAG)
         edit((d) => {
@@ -318,6 +327,12 @@ export function Knob(props: { label: string } & ({ at: Address } | { macro: stri
         <div className="knob-value">{macro ? value.toFixed(2) : format(id, live ?? value)}</div>
       )}
       <div className="knob-label">{label}</div>
+      {off && <div className="knob-why">{kind!.off}</div>}
+      {enc && (
+        <span className="enc-tag" title={`on the strip: encoder ${enc}, Tab reaches it there`}>
+          E{enc}
+        </span>
+      )}
       {typingThis &&
         hintAt &&
         createPortal(

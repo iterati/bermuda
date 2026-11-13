@@ -84,7 +84,7 @@ import { needs } from './shader'
 import { Bank } from './ui/Bank'
 import { Chain } from './ui/Chain'
 import { Direct, type Video } from './ui/Direct'
-import { CtlContext, Dice, Section, type Armed, type Ctl, type Typing } from './ui/controls'
+import { CtlContext, Dice, LiveBlock, Section, type Armed, type Ctl, type Typing } from './ui/controls'
 import { Deck } from './ui/Deck'
 import { Edge, Fader } from './ui/Fader'
 import { FrameTime, type Frames } from './ui/FrameTime'
@@ -175,8 +175,8 @@ function timelineRefusal(next: Timeline, before: Timeline | null, looks: Scene[]
 
 const other = (side: Side): Side => (side === 'a' ? 'b' : 'a')
 
-// what the Stage's context panel shows: the picked chip's every knob (a focused knob's detail above them), a modulator
-// alone, the macros, the looks and the bank to play from, the music or the edge
+// what the Stage's context panel shows: the picked chip's live knobs and the way to its every knob (a focused knob's
+// detail above them), a modulator alone, the macros, the looks and the bank to play from, the music or the edge
 type Context = 'chip' | { mod: string } | 'macros' | 'looks' | 'music' | 'edge'
 // the context panel's head, by what it shows
 const HEADS = { macros: 'macros', looks: 'looks and bank', music: 'music', edge: 'the A/B edge' } as const
@@ -220,6 +220,13 @@ export function App() {
   // and the document the UI is in
   const [undocked, setUndocked] = useState<Window | null>(null)
   const [monitor, setMonitor] = useState<HTMLCanvasElement | null>(null)
+  // this window's shape, the monitor's in the controls window's Stage
+  const [shape, setShape] = useState(() => innerWidth / innerHeight)
+  useEffect(() => {
+    const resize = () => setShape(innerWidth / innerHeight)
+    addEventListener('resize', resize)
+    return () => removeEventListener('resize', resize)
+  }, [])
   const doc = undocked?.document ?? document
   // Direct's one container for the life of the app, moved into the window the UI is in, so it never remounts
   const [directSlot] = useState(() => document.createElement('div'))
@@ -703,6 +710,16 @@ export function App() {
       ),
     [scene, performing, turned, side],
   )
+  // the knobs dead under the scene's settings, off in the context panel
+  const offKnobs = useMemo(
+    () =>
+      new Set(
+        knobsOf(scene)
+          .filter((at) => knobKind(at.address).shows?.(scene, at) === false)
+          .map((at) => at.address),
+      ),
+    [scene],
+  )
   // the next page or the one before, round from the last to the first
   const turnPage = (by: 1 | -1) => setPaged((p) => ({ key: pageKey, page: (pageOf(p) + by + pages) % pages }))
   // what a learned button does: a view, the strip's page, a look (in Play a transition, as the number keys do)
@@ -830,6 +847,8 @@ export function App() {
     nudge,
     set,
     liveKnobs,
+    offKnobs,
+    tiers: false,
     typing,
     type: setTyping,
     walk,
@@ -860,9 +879,10 @@ export function App() {
       } else if ((e.key === 'g' || e.key === 'G') && mode !== 'play' && !e.metaKey && !e.ctrlKey)
         setSetup((p) => (p ? null : 'MIDI'))
       else if (e.key === 'Enter') {
-        // the value of the focused knob, or of the strip macro Tab is on, typed in its field; a button keeps its Enter
+        // the value of the focused knob, or of the strip macro Tab is on, typed in its field; a button and an off knob
+        // keep their Enter
         const el = doc.activeElement as HTMLElement | null
-        if (el !== doc.body && !el?.matches('.knob')) return
+        if (el !== doc.body && !el?.matches('.knob:not(.off)')) return
         const macro = tabbing.current ? el?.dataset.macro : undefined
         const t = macro ? { macro } : focused && { knob: focused }
         // the knob focused, or else its first on the page
@@ -1129,7 +1149,11 @@ export function App() {
     </aside>
   )
 
-  const cls = `app ${mode}${hidden ? ' hidden' : ''}${mapping ? ' mapping' : ''}${opened ? ' context-open' : ''}`
+  // undocked, the controls window's Stage is a console: the monitor and the looks at the left, the context panel always
+  // open, on the picked chip while nothing else is opened
+  const isConsole = !!undocked && mode === 'stage'
+  const panelOn = opened ?? (isConsole ? 'chip' : null)
+  const cls = `app ${mode}${hidden ? ' hidden' : ''}${mapping ? ' mapping' : ''}${opened ? ' context-open' : ''}${isConsole ? ' console' : ''}`
   // what floats over the picture ahead of Direct: the readout, the bar and the error; then each view's panels
   const top = (
     <>
@@ -1362,16 +1386,17 @@ export function App() {
             </div>
           )}
         </section>
+        {isConsole && <aside className="panel console-looks">{looksPanel('play')}</aside>}
         {/* the context panel: what was picked, whole */}
-        {opened && (
+        {panelOn && (
           <aside className="panel context">
             <div className="context-head">
               <b>
-                {opened === 'chip'
+                {panelOn === 'chip'
                   ? `${pickedChip}${detailed ? ` › ${knobKind(detailed).label}` : ''}`
-                  : typeof opened === 'object'
-                    ? `modulator ${opened.mod}`
-                    : HEADS[opened]}
+                  : typeof panelOn === 'object'
+                    ? `modulator ${panelOn.mod}`
+                    : HEADS[panelOn]}
               </b>
               <button
                 className="mini"
@@ -1384,27 +1409,27 @@ export function App() {
                 ✕
               </button>
             </div>
-            {opened === 'chip' && (
-              <>
+            {panelOn === 'chip' && (
+              <CtlContext.Provider value={{ ...ctl, tiers: true }}>
                 {/* the detail's slot is of one height, so focusing a knob here moves no knob under it */}
                 <div className="knob-slot">
                   {detailed ? <KnobDetail /> : <span className="dim">no knob focused</span>}
                 </div>
-                <Section chip={pickedChip} />
-              </>
+                <LiveBlock chip={pickedChip} slots={slots} />
+              </CtlContext.Provider>
             )}
-            {typeof opened === 'object' && (
-              <Modulators key={opened.mod} only={opened.mod} onAdd={(id) => setContext({ mod: id })} />
+            {typeof panelOn === 'object' && (
+              <Modulators key={panelOn.mod} only={panelOn.mod} onAdd={(id) => setContext({ mod: id })} />
             )}
-            {opened === 'macros' && <Macros />}
-            {opened === 'looks' && (
+            {panelOn === 'macros' && <Macros />}
+            {panelOn === 'looks' && (
               <>
                 {looksPanel('play')}
                 {bankPanel('play')}
               </>
             )}
-            {opened === 'music' && musicBlock}
-            {opened === 'edge' && (
+            {panelOn === 'music' && musicBlock}
+            {panelOn === 'edge' && (
               <div className="row">
                 <Edge edge={edge} onEdge={setEdge} />
               </div>
@@ -1548,12 +1573,8 @@ export function App() {
         )}
         {undocked &&
           createPortal(
-            <div ref={app} className={cls}>
-              <canvas
-                ref={setMonitor}
-                className={`picture${aspect ? ' framed' : ''}`}
-                style={aspect ? ({ '--aspect': aspect } as React.CSSProperties) : undefined}
-              />
+            <div ref={app} className={cls} style={{ '--aspect': aspect ?? shape } as React.CSSProperties}>
+              <canvas ref={setMonitor} className={`picture${aspect ? ' framed' : ''}`} />
               {ui}
             </div>,
             undocked.document.body,
