@@ -200,6 +200,9 @@ export function App() {
   const [undocked, setUndocked] = useState<Window | null>(null)
   const [monitor, setMonitor] = useState<HTMLCanvasElement | null>(null)
   const doc = undocked?.document ?? document
+  // Direct's one container for the life of the app, moved into the window the UI is in, so it never remounts
+  const [directSlot] = useState(() => document.createElement('div'))
+  const dockDirect = useCallback((el: HTMLDivElement | null) => el?.append(directSlot), [directSlot])
   // the frame-time readout, off at load, and its numbers while it is on
   const [readout, setReadout] = useState(false)
   const [frames, setFrames] = useState<Frames>()
@@ -485,8 +488,8 @@ export function App() {
   }, [mode, auto.on, running, run, queue.length, cycle, seconds, refused])
 
   const toMode = (next: View | 'play' | 'direct') => {
-    // the Stage alone undocks: leaving it closes the controls window, and the view opens here
-    if (next !== 'stage' && undocked) {
+    // Play alone does not undock: going there closes the controls window, and it opens here
+    if (next === 'play' && undocked) {
       undocked.close()
       setUndocked(null)
     }
@@ -820,6 +823,7 @@ export function App() {
         e.preventDefault()
         walk(e.shiftKey ? -1 : 1)
       } else if ((e.key === 'h' || e.key === 'H') && !e.metaKey && !e.ctrlKey) setHidden((h) => !h)
+      else if ((e.key === 'u' || e.key === 'U') && mode !== 'play' && !e.metaKey && !e.ctrlKey) undock()
       else if (mode === 'direct') {
         // Direct takes the song's keys itself
         if (e.key === 't' || e.key === 'Escape') toMode('stage')
@@ -839,7 +843,6 @@ export function App() {
       } else if (e.key === 'e' || e.key === 'E') toMode(mode === 'edit' ? 'stage' : 'edit')
       else if (e.key === 'd' || e.key === 'D') toMode(mode === 'decks' ? 'stage' : 'decks')
       else if (e.key === 'f') toMode(mode === 'play' ? 'stage' : 'play')
-      else if ((e.key === 'u' || e.key === 'U') && mode === 'stage' && !e.metaKey && !e.ctrlKey) undock()
       else if (e.key === 'o') changeBank({ ...bank, autopilot: { ...auto, on: !auto.on } })
       else if (e.key === 'n') autopilot()
       else if (e.key === 'PageDown' || e.key === 'PageUp') {
@@ -1033,15 +1036,13 @@ export function App() {
               Direct
             </button>
           </span>
-          {mode === 'stage' && (
-            <button
-              className="mini"
-              onClick={undock}
-              title="undock: the controls in their own window, this one the picture alone (U); close it to dock them back"
-            >
-              {undocked ? '⇲ docked out' : '⇱ undock'}
-            </button>
-          )}
+          <button
+            className="mini undock"
+            onClick={undock}
+            title="undock: the controls in their own window, this one the picture alone (U); close it to dock them back"
+          >
+            {undocked ? '⇲ docked out' : '⇱ undock'}
+          </button>
           <button className="mini" onClick={() => setRunning((r) => !r)} title="space">
             {running ? '❚❚' : '▶'}
           </button>
@@ -1089,7 +1090,7 @@ export function App() {
           {mode === 'direct' ? (
             <span className="dim keys">
               H hides · Space play · Home rewinds · wheel zooms · shift-drag the waveform loops · double-click adds a
-              key · T or Esc to Stage
+              key · U undock · T or Esc to Stage
             </span>
           ) : (
             <span className="dim keys">
@@ -1253,11 +1254,20 @@ export function App() {
         <div className="panel">{bankPanel}</div>
       </aside>
     )
-  // undocked, this window keeps the picture alone, with Direct hidden in it as in the Stage, and the rest is in the
-  // controls window over its copy of the picture
+  // Direct's place, after the bar and the error panel, in the window the UI is in
+  const ui = (
+    <>
+      {top}
+      <div ref={dockDirect} />
+      {views}
+    </>
+  )
+  const aspect = mode === 'direct' ? video.width / video.height : undefined
+  // undocked, this window keeps the picture alone, whole, out of the view's place, and the UI is in the controls
+  // window over its copy of the picture, in the picture's place
   return (
     <CtlContext.Provider value={ctl}>
-      <div ref={undocked ? undefined : app} className={cls}>
+      <div ref={undocked ? undefined : app} className={undocked ? 'app' : cls}>
         <Picture
           pair={pair}
           side={side}
@@ -1278,34 +1288,40 @@ export function App() {
           }}
           onLand={land}
           shot={mode === 'direct' ? () => directShot.current?.() : undefined}
-          aspect={mode === 'direct' ? video.width / video.height : undefined}
+          aspect={aspect}
           ahead={ahead}
           onFrames={readout ? setFrames : undefined}
           monitor={monitor}
         />
-        {!undocked && top}
-        <Direct
-          timeline={timeline}
-          looks={looks}
-          entries={looks.flatMap((l) => [l.name, ...l.presets.map((p) => entryName(l.name, p.name))])}
-          current={entryName(scene.name, presets[side] < 0 ? undefined : scene.presets[presets[side]]?.name)}
-          bpm={bpm}
-          active={mode === 'direct'}
-          video={video}
-          shot={directShot}
-          music={music}
-          onSong={hear}
-          onVideo={setVideo}
-          onTimeline={changeTimeline}
-          onError={setError}
-        />
-        {!undocked && views}
+        {!undocked && ui}
+        {createPortal(
+          <Direct
+            timeline={timeline}
+            looks={looks}
+            entries={looks.flatMap((l) => [l.name, ...l.presets.map((p) => entryName(l.name, p.name))])}
+            current={entryName(scene.name, presets[side] < 0 ? undefined : scene.presets[presets[side]]?.name)}
+            bpm={bpm}
+            active={mode === 'direct'}
+            video={video}
+            shot={directShot}
+            music={music}
+            undocked={undocked}
+            onSong={hear}
+            onVideo={setVideo}
+            onTimeline={changeTimeline}
+            onError={setError}
+          />,
+          directSlot,
+        )}
         {undocked &&
           createPortal(
             <div ref={app} className={cls}>
-              <canvas ref={setMonitor} className="picture" />
-              {top}
-              {views}
+              <canvas
+                ref={setMonitor}
+                className={`picture${aspect ? ' framed' : ''}`}
+                style={aspect ? ({ '--aspect': aspect } as React.CSSProperties) : undefined}
+              />
+              {ui}
             </div>,
             undocked.document.body,
           )}

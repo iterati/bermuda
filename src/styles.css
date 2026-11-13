@@ -1285,9 +1285,9 @@ kbd {
 }
 
 /* Direct: the picture framed as the export will be, the timeline along the bottom */
-/* the bar's look, clock and loop are Stage's scene's, which Direct does not draw */
+/* the bar's look, clock and loop are Stage's scene's, which Direct does not draw; undock stays */
 .direct .bar > .look-title,
-.direct .bar > .mini,
+.direct .bar > .mini:not(.undock),
 .direct .bar > .num,
 .direct .bar > .check {
   display: none;
@@ -1302,6 +1302,13 @@ kbd {
   height: auto;
   aspect-ratio: var(--aspect);
   outline: 1px solid var(--edge);
+}
+/* undocked, the main window's app has no view's class: the framed picture as large as its aspect fits, centred */
+.app:not(.direct) > .picture.framed {
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(100%, 100vh * var(--aspect));
+  outline: none;
 }
 .direct-panel {
   position: absolute;

@@ -7,8 +7,8 @@
 // on, and what is heard goes up with the live scene, paused or not. In Direct it draws the timeline's frame instead,
 // at the export's aspect. Each draw is given the parts it needs, a side's alone and the pair's for the morph between
 // them, and the renderer warms what may draw next between frames; while the readout is on, the frames a second and
-// what the picture drew on go up a few times a second. While the UI is undocked, each frame is copied to the controls
-// window's monitor.
+// what the picture drew on go up a few times a second. While the UI is undocked, each frame, Direct's too, is copied
+// to the controls window's monitor whole, in its own shape.
 import { useEffect, useMemo, useRef } from 'react'
 import type { Shot } from '../direct'
 import { snapLoop } from '../loop'
@@ -87,8 +87,20 @@ export function Picture(props: Props) {
     let warmed: Iterable<Part>[] | undefined
     const times: number[] = []
     let told = 0
-    // after the frame's draws: a slice of the warm-up, and the readout's numbers a few times a second while it is on
+    // after the frame's draws: its copy to the monitor, a slice of the warm-up, and the readout's numbers a few times
+    // a second while it is on
     const drawn = (now: number, drew: Drew) => {
+      const mon = latest.current.monitor
+      if (mon?.clientWidth) {
+        if (mon.width !== mon.clientWidth || mon.height !== mon.clientHeight)
+          [mon.width, mon.height] = [mon.clientWidth, mon.clientHeight]
+        // the whole frame in its own shape, as large as fits and centred, the rest cleared
+        const k = Math.min(mon.width / el.width, mon.height / el.height)
+        const [w, h] = [el.width * k, el.height * k]
+        const g = mon.getContext('2d')!
+        g.clearRect(0, 0, mon.width, mon.height)
+        g.drawImage(el, (mon.width - w) / 2, (mon.height - h) / 2, w, h)
+      }
       renderer.step()
       const { onFrames } = latest.current
       if (!onFrames) {
@@ -181,12 +193,6 @@ export function Picture(props: Props) {
       if (run && through >= 1 && !landed) {
         landed = true
         onLand()
-      }
-      const mon = latest.current.monitor
-      if (mon?.clientWidth) {
-        if (mon.width !== mon.clientWidth || mon.height !== mon.clientHeight)
-          [mon.width, mon.height] = [mon.clientWidth, mon.clientHeight]
-        mon.getContext('2d')!.drawImage(el, 0, 0, mon.width, mon.height)
       }
       if (frame++ % 4 === 0) onLive(side === 'a' ? a : b, heardNow)
       raf = requestAnimationFrame(tick)

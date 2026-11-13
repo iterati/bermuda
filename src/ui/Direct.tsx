@@ -37,6 +37,7 @@ type Props = {
   video: Video
   shot: RefObject<(() => Shot) | null> // the picture's frame while Direct is on
   music: Listening | null // the app's one song (or the microphone), which the timeline runs over and the music hears
+  undocked: Window | null // the controls window it is in, while the UI is undocked
   onSong: (file: File) => void
   onVideo: (video: Video) => void
   onTimeline: (timeline: Timeline) => void
@@ -47,7 +48,7 @@ type Props = {
 const clock = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(2).padStart(5, '0')}`
 
 export function Direct(props: Props) {
-  const { timeline, looks, entries, current, active, video, shot, music, onSong, onTimeline, onError } = props
+  const { timeline, looks, entries, current, active, video, shot, music, undocked, onSong, onTimeline, onError } = props
   // the song as the tracks and the export take it: decoded whole, and its loudness for the waveform
   const [song, setSong] = useState<Song | null>(null)
   const audio = useRef<HTMLAudioElement>(undefined)
@@ -128,16 +129,20 @@ export function Direct(props: Props) {
   useEffect(() => {
     if (!active) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return
+      // by its tag, as the controls window's elements are of its realm, not this one's
+      const tag = (e.target as Element).tagName
+      if (tag === 'INPUT' || tag === 'SELECT') return
       const { play, seek, loop, looping } = now.current
       if (e.key === ' ') {
         e.preventDefault()
         play()
       } else if (e.key === 'Home') seek(looping && loop ? loop[0] : 0)
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [active])
+    // the controls window's keys too, while it holds this
+    const wins = undocked ? [window, undocked] : [window]
+    for (const v of wins) v.addEventListener('keydown', onKey)
+    return () => wins.forEach((v) => v.removeEventListener('keydown', onKey))
+  }, [active, undocked])
 
   // the wheel zooms the tracks round the pointer, a sideways scroll pans them
   const tracks = useRef<HTMLDivElement>(null)
