@@ -2186,7 +2186,10 @@ export const LOOKS: Scene[] = [
   scene({
     name: 'flam3 - Hearts and discs',
     zoom: 1.2,
-    // one level warped by a blend of flam3's heart, disc, spiral and handkerchief; its presets dial between them
+    // one level warped by a blend of flam3's heart, disc, spiral and handkerchief; its presets dial between them.
+    // The heart is cut along a ray from its middle, its two sides each other's mirror: the hex cells and their stars
+    // are mirrors of themselves there, so the lines meet across it, as long as the cells take no colour of their own
+    // and the lines are in cell units, which measure no stretch across it
     levels: [
       level('warp', {
         scale: { value: 1.2, play: [0.8, 1.6] },
@@ -2201,14 +2204,12 @@ export const LOOKS: Scene[] = [
         shape: star(6, 2, 0.42, { twist: 30 }),
         at: 0,
         speed: 0.5,
-        cellSpread: 0.3,
       }),
       level('seeds', { scale: R3, turn: 30, e2: HEX, shape: star(6, 3, 0.4), at: 0.4 }),
       level('dust', { scale: R3, turn: 30, e2: HEX, shape: star(6, 2, 0.35, { twist: 30 }), at: 0.8 }),
     ],
     width: 0.0025,
     falloff: 1.3,
-    units: 'screen',
     palette: 'warm',
     radius: 0.2,
     modulators: [
