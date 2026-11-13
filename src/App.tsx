@@ -488,12 +488,10 @@ export function App() {
   }, [mode, auto.on, running, run, queue.length, cycle, seconds, refused])
 
   const toMode = (next: View | 'play' | 'direct') => {
-    // Play alone does not undock: going there closes the controls window, and it opens here
-    if (next === 'play' && undocked) {
-      undocked.close()
-      setUndocked(null)
-    }
     if (next === 'play') {
+      // Play alone does not undock: going there closes the controls window, and it opens here
+      undocked?.close()
+      setUndocked(null)
       // Play goes on from the side showing, the fader run home to it if it sat between, and fills the screen
       const showing = fader < 0.5 ? 'a' : 'b'
       setSide(showing)

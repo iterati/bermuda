@@ -538,12 +538,18 @@ describe('undocking', () => {
     await popup.keyboard.press('Home')
     await pause()
     expect(await clock()).toBe('0:00.00')
-    // a field keeps what is typed in it
+    // a field keeps what is typed in it, Home and Space too, the song neither rewound nor asked for
+    await popup.mouse.click(rx + rw / 2, ry + rh / 2)
     const field = '.direct-panel label[title^="seconds the edge"] input'
     await popup.click(field, { count: 3 })
     await popup.keyboard.type('1.5')
+    await popup.keyboard.press('Home')
+    await popup.keyboard.type('2')
+    await popup.keyboard.press(' ')
     await pause()
-    expect(await popup.$eval(field, (el) => (el as HTMLInputElement).value)).toBe('1.5')
+    expect(await popup.$eval(field, (el) => (el as HTMLInputElement).value)).toBe('21.5')
+    expect(await clock()).not.toBe('0:00.00')
+    expect(await popup.$('.error')).toBe(null)
     // and Space on a checkbox ticks it, playing nothing
     await popup.keyboard.down('Shift')
     await popup.mouse.move(rx + rw * 0.2, ry + rh / 2)
