@@ -62,8 +62,8 @@ export type Ctl = {
   nudge: (t: MidiTarget, steps: number) => void
   set: (t: MidiTarget, value: number) => void // a value typed, clamped to the hard range (a macro's 0 to 1); turned
   liveKnobs: ReadonlySet<Address> // the knobs live to the hand (scene.ts liveKnob), the stops of Tab's walk
-  typing: MidiTarget | null // the knob or macro whose value is being typed
-  type: Dispatch<SetStateAction<MidiTarget | null>>
+  typing: Typing | null // the knob or macro whose value is being typed
+  type: Dispatch<SetStateAction<Typing | null>>
   walk: (by: 1 | -1) => void // Tab's walk on to the next live knob on screen, or back to the one before
   pick: (chip: string) => void
   learning: Learning | null // what the next MIDI control or button maps to
@@ -76,6 +76,8 @@ export type Ctl = {
   arm: (armed: Armed | null) => void
 }
 export type Armed = { id: string; before: Scene }
+// a knob or macro typed, and the knob it types in, of the two a knob on the strip and in the context panel has
+export type Typing = MidiTarget & { el: Element }
 export const CtlContext = createContext<Ctl | null>(null)
 export const useCtl = () => useContext(CtlContext)!
 

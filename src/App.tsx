@@ -84,7 +84,7 @@ import { needs } from './shader'
 import { Bank } from './ui/Bank'
 import { Chain } from './ui/Chain'
 import { Direct, type Video } from './ui/Direct'
-import { CtlContext, Dice, Section, type Armed, type Ctl } from './ui/controls'
+import { CtlContext, Dice, Section, type Armed, type Ctl, type Typing } from './ui/controls'
 import { Deck } from './ui/Deck'
 import { Edge, Fader } from './ui/Fader'
 import { FrameTime, type Frames } from './ui/FrameTime'
@@ -232,7 +232,7 @@ export function App() {
   // the browser's focus on a knob came from Tab's walk, not a click, so the wheel over the picture turns it
   const tabbing = useRef(false)
   // the knob or macro whose value is being typed
-  const [typing, setTyping] = useState<MidiTarget | null>(null)
+  const [typing, setTyping] = useState<Typing | null>(null)
   // each side's knobs turned by the wheel, typing or ↑ ↓ since a look was put there, which are live
   const [turned, setTurned] = useState<Record<Side, ReadonlySet<Address>>>({ a: new Set(), b: new Set() })
   // what the Stage's context panel shows, while it is open; kept through another view and back
@@ -601,14 +601,24 @@ export function App() {
     prune(next)
   }
 
+  // the chips in chain order, for the arrow keys
+  const chips = useMemo(
+    () => ['background', 'frame', ...allLevels(scene.levels).map(({ level }) => level.id), ...CHIPS.slice(2)],
+    [scene.levels],
+  )
+  const pickedChip = chips.includes(picked) ? picked : 'frame'
+
   // a knob focused, as a press or Tab's walk focuses it: in the Stage the context panel opens on its chip, its detail
-  // above the chip's knobs
+  // above the chip's knobs; a knob the picked chip does not show, as a target's link names, picks its own chip
   const focusKnob = useCallback(
     (address: Address) => {
       setFocus(address)
-      if (mode === 'stage') setContext('chip')
+      if (mode !== 'stage') return
+      setContext('chip')
+      const has = (chip: string) => chipKnobs(scene, chip).some((k) => k.address === address)
+      if (!has(pickedChip)) setPicked((p) => chips.find(has) ?? p)
     },
-    [mode],
+    [mode, scene, chips, pickedChip],
   )
   // the walk of Tab (by 1) and Shift-Tab (by -1) over the live knobs on screen, round from the last to the first: the
   // Perform strip's first, then the rest in the page's order, each knob once (one on the strip and in the context
@@ -666,19 +676,15 @@ export function App() {
     armed && armed.side === side && armed.before.name === scene.name && scene.macros.some((m) => m.id === armed.id)
       ? armed
       : null
-  // the context panel shows nothing once the modulator it shows is gone
+  // the context panel closes once the modulator it shows is gone, and stays closed when one of its id comes back
   const opened =
     context && typeof context === 'object' && !scene.modulators.some((m) => m.id === context.mod) ? null : context
+  if (opened !== context) setContext(null)
   const openMod = typeof opened === 'object' ? opened?.mod : undefined
+  // the focused knob's detail heads the panel while its chip is the one shown
+  const detailed = focused && chipKnobs(scene, pickedChip).some((k) => k.address === focused) ? focused : null
   // a look saved in this browser is locked against the dice
   const locked = saved.some((s) => s.name === scene.name)
-
-  // the chips in chain order, for the arrow keys
-  const chips = useMemo(
-    () => ['background', 'frame', ...allLevels(scene.levels).map(({ level }) => level.id), ...CHIPS.slice(2)],
-    [scene.levels],
-  )
-  const pickedChip = chips.includes(picked) ? picked : 'frame'
 
   // the Perform strip and its page showing, back to the first when the side, its look or the picked chip changes
   const performing = useMemo(() => strip(scene, pickedChip), [scene, pickedChip])
@@ -859,9 +865,12 @@ export function App() {
         if (el !== doc.body && !el?.matches('.knob')) return
         const macro = tabbing.current ? el?.dataset.macro : undefined
         const t = macro ? { macro } : focused && { knob: focused }
-        if (!t || !doc.querySelector(`[data-${macro ? 'macro' : 'knob'}="${CSS.escape(macro ?? focused!)}"]`)) return
+        // the knob focused, or else its first on the page
+        const sel = t && `[data-${macro ? 'macro' : 'knob'}="${CSS.escape(macro ?? focused!)}"]`
+        const at = sel && (el?.matches(sel) ? el : doc.querySelector(sel))
+        if (!t || !at) return
         e.preventDefault()
-        setTyping(t)
+        setTyping({ ...t, el: at })
       } else if (e.key === 't') toMode('direct')
       else if (e.key === 'i') {
         setReadout((r) => !r)
@@ -1359,7 +1368,7 @@ export function App() {
             <div className="context-head">
               <b>
                 {opened === 'chip'
-                  ? `${pickedChip}${focused ? ` › ${knobKind(focused).label}` : ''}`
+                  ? `${pickedChip}${detailed ? ` › ${knobKind(detailed).label}` : ''}`
                   : typeof opened === 'object'
                     ? `modulator ${opened.mod}`
                     : HEADS[opened]}
@@ -1379,7 +1388,7 @@ export function App() {
               <>
                 {/* the detail's slot is of one height, so focusing a knob here moves no knob under it */}
                 <div className="knob-slot">
-                  {focused ? <KnobDetail /> : <span className="dim">no knob focused</span>}
+                  {detailed ? <KnobDetail /> : <span className="dim">no knob focused</span>}
                 </div>
                 <Section chip={pickedChip} />
               </>

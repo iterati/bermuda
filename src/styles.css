@@ -85,6 +85,7 @@ button {
   padding: 3px 6px;
   font-size: 13px;
   font-weight: 600;
+  min-width: 260px;
 }
 .look-title:hover,
 .look-title:focus {
@@ -110,8 +111,8 @@ button {
 .bar > * {
   flex: none;
 }
-/* the look's name gives way, so the bar's every control shows at 1280 */
-.bar > .look-title {
+/* the Stage's look name gives way, so the bar's every control shows at 1280 with ♪ */
+.stage .bar > .look-title {
   flex: 0 1 260px;
   min-width: 120px;
   text-overflow: ellipsis;

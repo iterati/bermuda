@@ -178,18 +178,8 @@ export function Knob(props: { label: string } & ({ at: Address } | { macro: stri
   const midi = mappingOf(scene, target)
   const learningThis = !!learning && same(learning, target)
   const el = useRef<HTMLDivElement>(null)
-  // a knob shown twice, on the strip and in the context panel, types in one of them: the one holding the focus, or
-  // else the first
-  const typingThis =
-    !!typing &&
-    same(typing, target) &&
-    !!el.current &&
-    (() => {
-      const doc = el.current.ownerDocument
-      const all = [...doc.querySelectorAll(`[data-${isMacro ? 'macro' : 'knob'}="${CSS.escape(id)}"]`)]
-      const at = all.find((k) => k.contains(doc.activeElement))
-      return (at ?? all[0]) === el.current
-    })()
+  // a knob shown twice, on the strip and in the context panel, types in the one its typing names
+  const typingThis = !!typing && typing.el === el.current
   const kind = macro ? undefined : knobKind(id)
   const [lo, hi] = kind ? kind.range : [0, 1]
   const f = (v: number) => (clamp(v, [lo, hi]) - lo) / (hi - lo)
@@ -286,7 +276,7 @@ export function Knob(props: { label: string } & ({ at: Address } | { macro: stri
       onPointerDown={() => {
         if (!macro) setFocus(id)
       }}
-      onDoubleClick={() => type(target)}
+      onDoubleClick={() => type({ ...target, el: el.current! })}
       onDragOver={(e) => {
         if (!macro && e.dataTransfer.types.includes(MOD_DRAG)) e.preventDefault()
       }}

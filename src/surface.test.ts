@@ -8,7 +8,7 @@ import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import { createServer, type ViteDevServer } from 'vite'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { LOOKS } from './looks'
-import { allLevels, knobKind, strip, type Controls } from './scene'
+import { allLevels, chipKnobs, knobKind, strip, type Controls } from './scene'
 
 let server: ViteDevServer
 let browser: Browser
@@ -280,6 +280,9 @@ describe('the play surface', () => {
     await page.click(`.context .knob[data-knob="${TURN}"]`)
     expect((await panel())!.detail).toBe(TURN)
     expect(await box(`.context .knob[data-knob="${TURN}"]`)).toEqual(rest)
+    // another chip picked shows its knobs, and no detail of a knob it does not have
+    await press('.picker', 'Frame')
+    expect(await panel()).toMatchObject({ head: 'frame', detail: 'no knob focused' })
     // a look loaded drops the focus, and the detail goes with it
     await page.keyboard.press('1')
     await pause()
@@ -354,6 +357,24 @@ describe('the play surface', () => {
     await page.click('.context .mod-head > button')
     expect(await panel()).toBe(null)
     expect((await entries()).slice(-3)).toEqual([`⠿ ${t1.modulators.at(-1)!.id}`, `⠿ ${next}`, '+'])
+    // a target's link, with another chip picked, opens the panel on its knob's chip, which the picker picks
+    const t = m.targets.find((x) => !chipKnobs(t1, 'frame').some((k) => k.address === x.knob))!
+    await press('.picker', 'Frame')
+    await page.click('.picker .chip-mod')
+    await page.click(`.context .targets button.link[title="${t.knob}"]`)
+    const linked = (await panel())!
+    const [chip, label] = linked.head!.split(' › ')
+    expect([linked.detail, label]).toEqual([t.knob, knobKind(t.knob).label])
+    expect(chipKnobs(t1, chip).some((k) => k.address === t.knob)).toBe(true)
+    expect(await page.$eval('.picker .chip.picked', (el) => el.textContent)).not.toBe('Frame')
+    // the panel closed with its modulator stays closed when a look brings one of its id back
+    await page.click('.picker .chip-mod')
+    await page.click('.context .mod-head > button')
+    expect(await panel()).toBe(null)
+    await page.keyboard.press('1')
+    await pause()
+    expect(await entries()).toContain(`⠿ ${m.id}`)
+    expect(await panel()).toBe(null)
   }, 60_000)
 
   it('Macros, Looks and ♪ open the macros, the looks and the bank to play from, and the music in the panel', async () => {

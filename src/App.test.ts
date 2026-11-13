@@ -248,7 +248,6 @@ describe('music', { timeout: 60_000 }, () => {
     await view('Stage')
     // the Music block opens in the Stage's context panel by ♪ in the bar
     const note = '.bar button[title^="the music"]'
-    expect(await page.$eval(note, (b) => b.textContent)).toBe('♪ song / mic')
     await page.click(note)
     const input = (await page.$('label[title^="hear a song"] input'))!
     await input.uploadFile(clickTrack(120, 30))
@@ -256,7 +255,8 @@ describe('music', { timeout: 60_000 }, () => {
       () => /^1(19|20|21) bpm$/.test(document.querySelector('.music-beat b')?.textContent ?? ''),
       { timeout: 40_000 },
     )
-    expect(await page.$eval(note, (b) => b.textContent)).toMatch(/^♪ \d+ bpm$/)
+    // ♪ reads the tempo heard, as the bpm field does
+    expect(await page.$eval(note, (b) => b.textContent)).toBe(`♪ ${(await tempo())[0]} bpm`)
     const [bpm, fixed] = await tempo()
     expect(Math.abs((bpm as number) - 120)).toBeLessThanOrEqual(1)
     expect(fixed).toBe(true)
