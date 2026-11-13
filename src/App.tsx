@@ -22,6 +22,7 @@ import {
   driveStrip,
   echoes,
   HAS_MIDI,
+  hearsControl,
   keyOf,
   learn,
   learnStrip,
@@ -29,9 +30,11 @@ import {
   release,
   same,
   takes,
+  triggerOf,
   unmapControl,
   waiting,
   type Learning,
+  type Pressed,
 } from './midi'
 import { morphSize } from './morph'
 import { applyPreset, capturePreset, copyLive, dice, newLive, setKnob, setMacro, update } from './motion'
@@ -262,6 +265,8 @@ export function App() {
   const [presets, setPresets] = useState<Record<Side, number>>({ a: -1, b: -1 })
   const [midi, setMidi] = useState<MIDIAccess | null>(null)
   const [inputs, setInputs] = useState<string[]>([])
+  // the notes each controller has sent, for its pads
+  const [pressed, setPressed] = useState<Pressed[]>([])
   const [learning, setLearning] = useState<Learning | null>(null)
   // the macro learning by example, the scene as it was armed and its side
   const [armed, setArmed] = useState<(Armed & { side: Side }) | null>(null)
@@ -778,40 +783,41 @@ export function App() {
           // a target learning takes the first control of its kind: knobs, macros, the fader and the strip's slots a
           // CC, triggers a note
           if (m.kind === 'note') {
+            setPressed((p) =>
+              p.some((x) => x.device === m.device && x.channel === m.channel && x.note === m.number)
+                ? p
+                : [...p, { device: m.device, channel: m.channel, note: m.number }],
+            )
             if (learning && ('slot' in learning || 'mode' in learning || 'page' in learning)) {
               now.current.learning = null
               setLearning(null)
               return saveControls({ ...controls, buttons: learnTrigger(controls.buttons, learning, m) })
             }
-            const t = controls.buttons.find((x) => x.channel === m.channel && x.note === m.number)
+            const t = triggerOf(controls.buttons, m)
             if (t) trigger(t)
             return
           }
-          const key = keyOf('cc', m.channel, m.number)
+          const key = keyOf('cc', m.channel, m.number, m.device)
           const last = at.get(key)
+          // a mapping with no device's position is its control's last on any controller
           at.set(key, m.value)
-          const ab = controls.fader && keyOf('cc', controls.fader.channel, controls.fader.control) === key
+          at.set(keyOf('cc', m.channel, m.number), m.value)
+          const ab = controls.fader && hearsControl(controls.fader, m)
           // only a fader's position is shown, while it waits to pick up
-          if (
-            (ab && controls.fader!.pickup) ||
-            scene.midi?.some((x) => x.pickup && keyOf('cc', x.channel, x.control) === key)
-          )
+          if ((ab && controls.fader!.pickup) || scene.midi?.some((x) => x.pickup && hearsControl(x, m)))
             setPositions(new Map(at))
           if (learning && 'fader' in learning) {
             now.current.learning = null
             setLearning(null)
             // a fader learns with pickup, as it cannot move to where the A/B fader is
             return saveControls({
-              ...release(controls, m.channel, m.number),
-              fader: { channel: m.channel, control: m.number, pickup: true },
+              ...release(controls, m),
+              fader: { channel: m.channel, control: m.number, pickup: true, device: m.device },
             })
           }
           if (learning && 'strip' in learning) {
             // a turning encoder sends a burst: a CC this round learned already is not a new one
-            if (
-              controls.strip?.some((x) => x.channel === m.channel && x.control === m.number && x.index < learning.strip)
-            )
-              return
+            if (controls.strip?.some((x) => hearsControl(x, m) && x.index < learning.strip)) return
             const next = learning.strip < STRIP - 1 ? { strip: learning.strip + 1 } : null
             now.current.learning = next
             setLearning(next)
@@ -824,7 +830,7 @@ export function App() {
             setLearning(null)
             // the A/B fader and the strip let the control go, and a control learning a target drives it from its
             // first move
-            saveControls(release(controls, m.channel, m.number))
+            saveControls(release(controls, m))
             setScene((s) =>
               drive(
                 update(s, (d) => learn(d, learning, m)),
@@ -1075,6 +1081,7 @@ export function App() {
     <Midi
       connected={!!midi}
       inputs={inputs}
+      pressed={pressed}
       onConnect={connect}
       looks={looks}
       controls={controls}

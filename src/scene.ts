@@ -129,21 +129,23 @@ export type Macro = {
   listen?: Feature // music's, milestone 5: while music plays, the feature sets its value
 }
 // A controller's control change (CC) number on its channel (1 to 16), driving one knob or one macro; a fader's
-// takes pickup: it drives only once it passes the value it drives.
+// takes pickup: it drives only once it passes the value it drives. Its device is the name of the controller (the
+// MIDI input) it was learned on, the only one it hears; one learned before controllers had names has none and hears
+// its channel and number on any.
 export type MidiTarget = { knob: Address } | { macro: string }
-export type Midi = { channel: number; control: number; pickup?: true } & MidiTarget
+export type Midi = { channel: number; control: number; pickup?: true; device?: string } & MidiTarget
 // A controller's button, a note on its channel, for the whole app: it loads a bank slot, picks a view or steps the
 // Perform strip's page forward or back, and its LED is lit while that slot or view is on, or while the strip has
 // more than one page.
 export type TriggerTarget = { slot: number } | { mode: View } | { page: 1 | -1 }
-export type Trigger = { channel: number; note: number } & TriggerTarget
+export type Trigger = { channel: number; note: number; device?: string } & TriggerTarget
 // The app's own MIDI, kept in the browser beside the looks: its buttons, the CC on the A/B fader (with pickup
 // for a fader, as a look's mappings take it), and the CCs on the Perform strip's slots, index 0 to 7 of the page
-// showing, on every look.
+// showing, on every look. Each has its controller's device, as a look's mappings do.
 export type Controls = {
   buttons: Trigger[]
-  fader?: { channel: number; control: number; pickup?: true }
-  strip?: { channel: number; control: number; index: number }[]
+  fader?: { channel: number; control: number; pickup?: true; device?: string }
+  strip?: { channel: number; control: number; index: number; device?: string }[]
 }
 export type Edge = { seconds: number; stagger: number; deepFirst: boolean }
 // scenes: its entries, each a look's name or a look's and one of its presets' ('look / preset'); links: pairs of
@@ -1283,13 +1285,22 @@ function address(scene: Scene, v: unknown, path: string): Address {
   return a
 }
 
-// A MIDI channel (1 to 16) and control or note number (0 to 127), each pair once in its list.
-function midiControl(x: Json, at: string, field: 'control' | 'note', seen: Set<string>): [number, number] {
+// A MIDI channel (1 to 16) and control or note number (0 to 127), and the device (the controller's name) when
+// given, each control of a device once in its list.
+function midiControl(
+  x: Json,
+  at: string,
+  field: 'control' | 'note',
+  seen: Set<string>,
+): [number, number, { device?: string }] {
   const out: [number, number] = [num(x.channel, `${at}.channel`, [1, 16]), num(x[field], `${at}.${field}`, [0, 127])]
   if (!out.every(Number.isInteger)) fail(at, 'channel and number must be whole numbers')
-  if (seen.has(String(out))) fail(at, `channel ${out[0]} number ${out[1]} is mapped twice`)
-  seen.add(String(out))
-  return out
+  const device = x.device === undefined ? {} : { device: str(x.device, `${at}.device`) }
+  const key = JSON.stringify([...out, device.device])
+  if (seen.has(key))
+    fail(at, `channel ${out[0]} number ${out[1]}${device.device ? ` of ${device.device}` : ''} is mapped twice`)
+  seen.add(key)
+  return [...out, device]
 }
 
 // Parse the app's own MIDI (text or a parsed value), as strictly as a scene. A CC drives one thing: the A/B
@@ -1302,34 +1313,34 @@ export function parseControls(input: unknown): Controls {
   const out: Controls = {
     buttons: list(o.buttons, 'buttons', 0, 256).map((item, i): Trigger => {
       const at = `buttons[${i}]`
-      const x = obj(item, at, ['channel', 'note'], ['slot', 'mode', 'page'])
-      const [channel, note] = midiControl(x, at, 'note', notes)
+      const x = obj(item, at, ['channel', 'note'], ['slot', 'mode', 'page', 'device'])
+      const [channel, note, device] = midiControl(x, at, 'note', notes)
       if ([x.slot, x.mode, x.page].filter((t) => t !== undefined).length !== 1)
         fail(at, 'must name one slot, one mode or one page step')
-      if (x.mode !== undefined) return { channel, note, mode: oneOf(x.mode, `${at}.mode`, VIEWS) }
-      if (x.page !== undefined) return { channel, note, page: oneOf(x.page, `${at}.page`, [1, -1] as const) }
+      if (x.mode !== undefined) return { channel, note, ...device, mode: oneOf(x.mode, `${at}.mode`, VIEWS) }
+      if (x.page !== undefined) return { channel, note, ...device, page: oneOf(x.page, `${at}.page`, [1, -1] as const) }
       const slot = num(x.slot, `${at}.slot`, [0, 255])
       if (!Number.isInteger(slot)) fail(`${at}.slot`, 'must be a whole number')
-      return { channel, note, slot }
+      return { channel, note, ...device, slot }
     }),
   }
   if (o.fader !== undefined) {
-    const x = obj(o.fader, 'fader', ['channel', 'control'], ['pickup'])
-    const [channel, control] = midiControl(x, 'fader', 'control', ccs)
+    const x = obj(o.fader, 'fader', ['channel', 'control'], ['pickup', 'device'])
+    const [channel, control, device] = midiControl(x, 'fader', 'control', ccs)
     if (x.pickup !== undefined && x.pickup !== true) fail('fader.pickup', 'must be true when given')
-    out.fader = x.pickup === true ? { channel, control, pickup: true } : { channel, control }
+    out.fader = x.pickup === true ? { channel, control, pickup: true, ...device } : { channel, control, ...device }
   }
   if (o.strip !== undefined) {
     const slots = new Set<number>()
     out.strip = list(o.strip, 'strip', 0, STRIP).map((item, i) => {
       const at = `strip[${i}]`
-      const x = obj(item, at, ['channel', 'control', 'index'])
-      const [channel, control] = midiControl(x, at, 'control', ccs)
+      const x = obj(item, at, ['channel', 'control', 'index'], ['device'])
+      const [channel, control, device] = midiControl(x, at, 'control', ccs)
       const index = num(x.index, `${at}.index`, [0, STRIP - 1])
       if (!Number.isInteger(index)) fail(`${at}.index`, 'must be a whole number')
       if (slots.has(index)) fail(`${at}.index`, `slot ${index} is mapped twice`)
       slots.add(index)
-      return { channel, control, index }
+      return { channel, control, index, ...device }
     })
   }
   return out
@@ -1494,15 +1505,16 @@ export function parseScene(input: unknown): Scene {
     const controls = new Set<string>()
     scene.midi = list(o.midi, 'midi', 0, 256).map((item, i): Midi => {
       const at = `midi[${i}]`
-      const x = obj(item, at, ['channel', 'control'], ['knob', 'macro', 'pickup'])
-      const [channel, control] = midiControl(x, at, 'control', controls)
+      const x = obj(item, at, ['channel', 'control'], ['knob', 'macro', 'pickup', 'device'])
+      const [channel, control, device] = midiControl(x, at, 'control', controls)
       if (x.pickup !== undefined && x.pickup !== true) fail(`${at}.pickup`, 'must be true when given')
       const pickup = x.pickup === true ? { pickup: true as const } : {}
       if ((x.knob === undefined) === (x.macro === undefined)) fail(at, 'must name one knob or one macro')
-      if (x.knob !== undefined) return { channel, control, ...pickup, knob: address(scene, x.knob, `${at}.knob`) }
+      if (x.knob !== undefined)
+        return { channel, control, ...pickup, ...device, knob: address(scene, x.knob, `${at}.knob`) }
       const macro = str(x.macro, `${at}.macro`)
       if (!scene.macros.some((m) => m.id === macro)) fail(`${at}.macro`, `${macro} names no macro`)
-      return { channel, control, ...pickup, macro }
+      return { channel, control, ...pickup, ...device, macro }
     })
   }
   if (o.loop !== undefined) {

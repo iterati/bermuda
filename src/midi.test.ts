@@ -7,7 +7,9 @@ import {
   driveStrip,
   ECHO_MS,
   echoes,
+  grids,
   HOLD_MS,
+  hearsControl,
   keyOf,
   learn,
   learnStrip,
@@ -15,10 +17,12 @@ import {
   positionOf,
   release,
   takes,
+  triggerOf,
   unmapControl,
   waiting,
   type Learning,
   type Message,
+  type Pressed,
 } from './midi'
 import { setKnob, update } from './motion'
 import {
@@ -63,11 +67,45 @@ function fakeController() {
   }
 }
 
+// A fake MIDI access with the captain's two controllers plugged in at once, each an input and an output of its name:
+// send.dj and send.xt deliver a message as each would, and sent.dj and sent.xt hold what the app sent each.
+function fakePair() {
+  type Port = { name: string; state: string; onmidimessage: ((e: { data: Uint8Array; target: Port }) => void) | null }
+  const port = (name: string): Port => ({ name, state: 'connected', onmidimessage: null })
+  const inputs = { dj: port('DJ2GO2'), xt: port('X-TOUCH MINI') }
+  const sent = { dj: [] as number[][], xt: [] as number[][] }
+  const output = (name: string, into: number[][]) => ({ name, state: 'connected', send: (b: number[]) => into.push(b) })
+  const access = {
+    inputs: new Map([
+      ['dj', inputs.dj],
+      ['xt', inputs.xt],
+    ]),
+    outputs: new Map([
+      ['dj', output('DJ2GO2', sent.dj)],
+      ['xt', output('X-TOUCH MINI', sent.xt)],
+    ]),
+    onstatechange: null,
+  }
+  const sender =
+    (input: Port) =>
+    (...bytes: number[]) =>
+      input.onmidimessage?.({ data: new Uint8Array(bytes), target: input })
+  return {
+    access: access as unknown as MIDIAccess,
+    send: { dj: sender(inputs.dj), xt: sender(inputs.xt) },
+    sent,
+  }
+}
+
 // The app's MIDI loop in small: a target learning takes the first control of its kind, a control drives what it
 // maps to (the A/B fader's control first, then the strip's slot of the page showing on the chip picked), a button
-// loads its slot, picks its mode or steps the strip's page, and the controller is sent the look.
-function play(scene: Scene, chip = 'frame') {
-  const { access, send, sent, through } = fakeController()
+// loads its slot, picks its mode or steps the strip's page, each note sent is kept for the pads, and the controller
+// is sent the look.
+// On another access (fakePair's), its own send and sent stand in for the ones returned.
+function play(scene: Scene, chip = 'frame', other?: MIDIAccess) {
+  const fake = fakeController()
+  const { send, sent, through } = fake
+  const access = other ?? fake.access
   const state = {
     scene,
     learning: null as Learning | null,
@@ -75,6 +113,7 @@ function play(scene: Scene, chip = 'frame') {
     fader: 0,
     mode: 'stage' as View,
     inputs: [] as string[],
+    pressed: [] as Pressed[],
     chip,
     page: 0,
   }
@@ -97,37 +136,39 @@ function play(scene: Scene, chip = 'frame') {
       message: (m: Message) => {
         const t = state.learning
         if (m.kind === 'note') {
+          if (!state.pressed.some((x) => x.device === m.device && x.channel === m.channel && x.note === m.number))
+            state.pressed.push({ device: m.device, channel: m.channel, note: m.number })
           if (t && ('slot' in t || 'mode' in t || 'page' in t)) {
             state.learning = null
             state.controls = { ...state.controls, buttons: learnTrigger(state.controls.buttons, t, m) }
             return
           }
-          const trigger = state.controls.buttons.find((x) => x.channel === m.channel && x.note === m.number)
+          const trigger = triggerOf(state.controls.buttons, m)
           if (trigger && 'mode' in trigger) state.mode = trigger.mode
           else if (trigger && 'page' in trigger) state.page = (state.page + trigger.page + pages()) % pages()
           else if (trigger) state.scene = structuredClone(LOOKS[trigger.slot])
           return
         }
-        const key = keyOf('cc', m.channel, m.number)
+        const key = keyOf('cc', m.channel, m.number, m.device)
         const last = at.get(key)
         at.set(key, m.value)
+        at.set(keyOf('cc', m.channel, m.number), m.value)
         const ab = state.controls.fader
-        const onAb = ab && keyOf('cc', ab.channel, ab.control) === key
+        const onAb = ab && hearsControl(ab, m)
         if (t && 'fader' in t) {
           state.learning = null
           state.controls = {
-            ...release(state.controls, m.channel, m.number),
-            fader: { channel: m.channel, control: m.number, pickup: true },
+            ...release(state.controls, m),
+            fader: { channel: m.channel, control: m.number, pickup: true, device: m.device },
           }
         } else if (t && 'strip' in t) {
-          if (state.controls.strip?.some((x) => x.channel === m.channel && x.control === m.number && x.index < t.strip))
-            return
+          if (state.controls.strip?.some((x) => hearsControl(x, m) && x.index < t.strip)) return
           state.learning = t.strip < STRIP - 1 ? { strip: t.strip + 1 } : null
           state.controls = learnStrip(state.controls, t.strip, m)
           state.scene = update(state.scene, (d) => unmapControl(d, m))
         } else if (t && ('knob' in t || 'macro' in t)) {
           state.learning = null
-          state.controls = release(state.controls, m.channel, m.number)
+          state.controls = release(state.controls, m)
           state.scene = drive(
             update(state.scene, (d) => learn(d, t, m)),
             m,
@@ -170,7 +211,7 @@ describe('MIDI learn', () => {
     expect(state.inputs).toEqual(['Fake knobs', 'Midi Through'])
     state.learning = { knob: address }
     send(0xba, 1, 64)
-    expect(state.scene.midi).toEqual([{ channel: 11, control: 1, knob: address }])
+    expect(state.scene.midi).toEqual([{ channel: 11, control: 1, device: 'Fake knobs', knob: address }])
     const [lo, hi] = hardRange(address)
     for (const v of [0, 1, 64, 126, 127]) {
       send(0xba, 1, v)
@@ -189,7 +230,7 @@ describe('MIDI learn', () => {
     const { state, send } = play({ ...squareToHex(), background: background('soak') })
     state.learning = { knob: 'background.amount' }
     send(0xb0, 7, 64)
-    expect(state.scene.midi).toEqual([{ channel: 1, control: 7, knob: 'background.amount' }])
+    expect(state.scene.midi).toEqual([{ channel: 1, control: 7, device: 'Fake knobs', knob: 'background.amount' }])
     send(0xb0, 7, 0)
     expect(state.scene.background!.amount.value).toBe(0)
     send(0xb0, 7, 127)
@@ -204,7 +245,7 @@ describe('MIDI learn', () => {
     const { state, send } = play(scene)
     state.learning = { knob: address }
     send(0xb3, 74, 127)
-    expect(state.scene.midi).toEqual([{ channel: 4, control: 74, knob: address }])
+    expect(state.scene.midi).toEqual([{ channel: 4, control: 74, device: 'Fake knobs', knob: address }])
     expect(resolve(state.scene, address)!.value).toBe(0.2)
     send(0xb3, 74, 0)
     expect(resolve(state.scene, address)!.value).toBe(0.001)
@@ -229,7 +270,7 @@ describe('MIDI learn', () => {
     send(0xb0, 21, 10)
     state.learning = { knob: 'frame.turn' }
     send(0xb0, 22, 10)
-    expect(state.scene.midi).toEqual([{ channel: 1, control: 22, knob: 'frame.turn' }])
+    expect(state.scene.midi).toEqual([{ channel: 1, control: 22, device: 'Fake knobs', knob: 'frame.turn' }])
   })
 
   it('learns only from the first control of a burst, and a knob only from a CC', () => {
@@ -239,7 +280,7 @@ describe('MIDI learn', () => {
     expect(state.learning).toEqual({ knob: 'frame.zoom' })
     send(0xb0, 7, 10)
     send(0xb0, 39, 10)
-    expect(state.scene.midi).toEqual([{ channel: 1, control: 7, knob: 'frame.zoom' }])
+    expect(state.scene.midi).toEqual([{ channel: 1, control: 7, device: 'Fake knobs', knob: 'frame.zoom' }])
   })
 
   it('drops a mapping whose knob or macro an edit took away', () => {
@@ -315,7 +356,7 @@ describe('a fader with pickup', () => {
     state.fader = 0.5
     state.learning = { fader: true }
     send(0xba, 9, 0)
-    expect(state.controls.fader).toEqual({ channel: 11, control: 9, pickup: true })
+    expect(state.controls.fader).toEqual({ channel: 11, control: 9, pickup: true, device: 'Fake knobs' })
     expect(waiting(state.controls.fader!, state.fader, at)).toBe(true)
     send(0xba, 9, 50)
     expect(state.fader).toBe(0.5)
@@ -410,8 +451,8 @@ describe('the controller shows the look', () => {
     state.learning = { mode: 'edit' }
     send(0x9a, 16, 127)
     expect(state.controls.buttons).toEqual([
-      { channel: 11, note: 8, slot: 0 },
-      { channel: 11, note: 16, mode: 'edit' },
+      { channel: 11, note: 8, device: 'Fake knobs', slot: 0 },
+      { channel: 11, note: 16, device: 'Fake knobs', mode: 'edit' },
     ])
     vi.advanceTimersByTime(ECHO_MS)
     expect(sent.filter(([status]) => status === 0x9a)).toEqual([
@@ -499,7 +540,10 @@ describe('the Perform strip by MIDI', () => {
       send(0xba, cc, 61)
     }
     expect(state.learning).toBeNull()
-    expect(state.controls).toEqual(encoders)
+    expect(state.controls).toEqual({
+      buttons: [],
+      strip: encoders.strip.map((x) => ({ ...x, device: 'Fake knobs' })),
+    })
     expect(state.scene.midi).toEqual([])
     expect(parseControls(JSON.stringify(state.controls))).toEqual(state.controls)
   })
@@ -571,8 +615,8 @@ describe('the Perform strip by MIDI', () => {
       state.learning = { page: -1 }
       send(0x9a, 9, 127)
       expect(state.controls.buttons).toEqual([
-        { channel: 11, note: 8, page: 1 },
-        { channel: 11, note: 9, page: -1 },
+        { channel: 11, note: 8, device: 'Fake knobs', page: 1 },
+        { channel: 11, note: 9, device: 'Fake knobs', page: -1 },
       ])
       send(0x9a, 8, 127)
       expect(state.page).toBe(1)
@@ -597,5 +641,211 @@ describe('the Perform strip by MIDI', () => {
       ])
       stop()
     })
+  })
+})
+
+// The captain's rig: a Numark DJ2GO2 and a Behringer X-Touch Mini plugged in at once, each its own input and output.
+describe('two controllers at once', () => {
+  const at = (s: Scene, address: string) => positionOf(s, { knob: address })
+  // a control learned on one controller: the target learning takes the next control moved
+  const learned = (state: ReturnType<typeof play>['state'], t: Learning, send: () => void) => {
+    state.learning = t
+    send()
+  }
+
+  it('drives two different knobs by the same CC on each, and a learn on one leaves the other its mapping', () => {
+    const { access, send } = fakePair()
+    const { state } = play(squareToHex(), 'frame', access)
+    expect(state.inputs).toEqual(['DJ2GO2', 'X-TOUCH MINI'])
+    learned(state, { knob: 'frame.zoom' }, () => send.dj(0xb0, 1, 0))
+    learned(state, { knob: 'frame.turn' }, () => send.xt(0xb0, 1, 0))
+    expect(state.scene.midi).toEqual([
+      { channel: 1, control: 1, device: 'DJ2GO2', knob: 'frame.zoom' },
+      { channel: 1, control: 1, device: 'X-TOUCH MINI', knob: 'frame.turn' },
+    ])
+    send.dj(0xb0, 1, 127)
+    expect([at(state.scene, 'frame.zoom'), at(state.scene, 'frame.turn')]).toEqual([1, 0])
+    send.xt(0xb0, 1, 127)
+    send.dj(0xb0, 1, 0)
+    expect([at(state.scene, 'frame.zoom'), at(state.scene, 'frame.turn')]).toEqual([0, 1])
+    // the A/B fader and the strip are each controller's own too
+    learned(state, { fader: true }, () => send.xt(0xb0, 9, 0))
+    learned(state, { strip: 0 }, () => send.dj(0xb0, 9, 0))
+    expect(state.controls).toEqual({
+      buttons: [],
+      fader: { channel: 1, control: 9, pickup: true, device: 'X-TOUCH MINI' },
+      strip: [{ channel: 1, control: 9, index: 0, device: 'DJ2GO2' }],
+    })
+    // a target learning again moves to the controller that learned it, the other's mappings staying
+    learned(state, { knob: 'frame.zoom' }, () => send.xt(0xb0, 2, 0))
+    expect(state.scene.midi).toEqual([
+      { channel: 1, control: 1, device: 'X-TOUCH MINI', knob: 'frame.turn' },
+      { channel: 1, control: 2, device: 'X-TOUCH MINI', knob: 'frame.zoom' },
+    ])
+  })
+
+  it("learns each controller's buttons on the same note apart, each pressing its own", () => {
+    const { access, send } = fakePair()
+    const { state } = play(squareToHex(), 'frame', access)
+    learned(state, { slot: 2 }, () => send.dj(0x90, 8, 127))
+    learned(state, { mode: 'edit' }, () => send.xt(0x90, 8, 127))
+    expect(state.controls.buttons).toEqual([
+      { channel: 1, note: 8, device: 'DJ2GO2', slot: 2 },
+      { channel: 1, note: 8, device: 'X-TOUCH MINI', mode: 'edit' },
+    ])
+    send.xt(0x90, 8, 127)
+    expect([state.mode, state.scene.name]).toEqual(['edit', squareToHex().name])
+    send.dj(0x90, 8, 127)
+    expect(state.scene.name).toBe(LOOKS[2].name)
+  })
+
+  it("hears a mapping with no device, an older look's, on either controller, until a learn gives it one", () => {
+    const old = squareToHex()
+    old.midi = [{ channel: 1, control: 5, knob: 'frame.zoom' }]
+    const { access, send } = fakePair()
+    const { state } = play(parseScene(JSON.stringify(old)), 'frame', access)
+    state.controls = parseControls({ buttons: [{ channel: 1, note: 8, mode: 'decks' }] })
+    send.dj(0xb0, 5, 127)
+    expect(at(state.scene, 'frame.zoom')).toBe(1)
+    send.xt(0xb0, 5, 0)
+    expect(at(state.scene, 'frame.zoom')).toBe(0)
+    send.dj(0x90, 8, 127)
+    expect(state.mode).toBe('decks')
+    state.mode = 'stage'
+    send.xt(0x90, 8, 127)
+    expect(state.mode).toBe('decks')
+    // learned again, it is the X-Touch's alone
+    learned(state, { knob: 'frame.zoom' }, () => send.xt(0xb0, 5, 64))
+    expect(state.scene.midi).toEqual([{ channel: 1, control: 5, device: 'X-TOUCH MINI', knob: 'frame.zoom' }])
+    send.dj(0xb0, 5, 127)
+    expect(at(state.scene, 'frame.zoom')).toBeCloseTo(64 / 127)
+  })
+
+  describe('on the controllers', () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] })
+    })
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it("sends each mapping's value and each button's LED back only to its own controller", () => {
+      const look = squareToHex()
+      look.midi = [
+        { channel: 1, control: 1, device: 'DJ2GO2', knob: 'frame.zoom' },
+        { channel: 1, control: 1, device: 'X-TOUCH MINI', knob: 'frame.turn' },
+      ]
+      const { access, send, sent } = fakePair()
+      const { state, stop } = play(setKnob(setKnob(look, 'frame.zoom', 8), 'frame.turn', 0), 'frame', access)
+      state.controls = { buttons: [{ channel: 1, note: 8, device: 'X-TOUCH MINI', mode: 'stage' }] }
+      vi.advanceTimersByTime(ECHO_MS)
+      // a controller's own mappings go to it before it is heard from
+      expect(sent.dj).toEqual([[0xb0, 1, 127]])
+      const turn = Math.round(at(state.scene, 'frame.turn') * 127)
+      expect(sent.xt).toEqual([
+        [0xb0, 1, turn],
+        [0x90, 8, 1],
+      ])
+      // one with no device goes to every controller heard from, as before
+      state.controls = { buttons: [{ channel: 2, note: 9, mode: 'stage' }] }
+      sent.dj.length = sent.xt.length = 0
+      send.dj(0xb1, 64, 0)
+      send.xt(0xb1, 64, 0)
+      vi.advanceTimersByTime(ECHO_MS)
+      expect(sent.dj).toEqual([[0x91, 9, 1]])
+      expect(sent.xt).toEqual([[0x91, 9, 1]])
+      stop()
+    })
+  })
+
+  it("draws a grid a controller, each of exactly the notes it sent, the X-Touch's layer B too", () => {
+    const { access, send } = fakePair()
+    const { state } = play(squareToHex(), 'frame', access)
+    expect(grids(state.inputs, state.pressed, state.controls.buttons)).toEqual([
+      { device: 'DJ2GO2', plugged: true, pads: [] },
+      { device: 'X-TOUCH MINI', plugged: true, pads: [] },
+    ])
+    // layer A's top row's first and the bottom's last, then layer B's, out of order, one twice, and a release
+    for (const n of [8, 23, 47, 32, 8]) send.xt(0x90, n, 127)
+    send.xt(0x80, 40, 0)
+    // the DJ2GO2's pads on each deck's channel
+    send.dj(0x94, 1, 127)
+    send.dj(0x95, 1, 127)
+    send.dj(0x94, 0, 127)
+    learned(state, { slot: 0 }, () => send.dj(0x90, 11, 127))
+    expect(grids(state.inputs, state.pressed, state.controls.buttons)).toEqual([
+      {
+        device: 'DJ2GO2',
+        plugged: true,
+        pads: [
+          { channel: 1, note: 11 },
+          { channel: 5, note: 0 },
+          { channel: 5, note: 1 },
+          { channel: 6, note: 1 },
+        ],
+      },
+      {
+        device: 'X-TOUCH MINI',
+        plugged: true,
+        pads: [8, 23, 32, 47].map((note) => ({ channel: 1, note })),
+      },
+    ])
+    // a controller's learned buttons draw its grid unplugged too, and buttons with no device a grid of their own
+    expect(
+      grids(
+        ['DJ2GO2'],
+        [],
+        [
+          { channel: 1, note: 9, device: 'X-TOUCH MINI', slot: 1 },
+          { channel: 1, note: 8, slot: 0 },
+        ],
+      ),
+    ).toEqual([
+      { device: 'DJ2GO2', plugged: true, pads: [] },
+      { device: 'X-TOUCH MINI', plugged: false, pads: [{ channel: 1, note: 9 }] },
+      { plugged: true, pads: [{ channel: 1, note: 8 }] },
+    ])
+  })
+
+  it("keeps each mapping's device through the parsers, and refuses one that is not a name", () => {
+    const look = squareToHex()
+    look.midi = [
+      { channel: 1, control: 1, device: 'DJ2GO2', knob: 'frame.zoom' },
+      { channel: 1, control: 1, device: 'X-TOUCH MINI', pickup: true, macro: 'lattice' },
+      { channel: 1, control: 2, knob: 'frame.turn' },
+    ]
+    expect(parseScene(JSON.stringify(look))).toEqual(look)
+    const controls: Controls = {
+      buttons: [
+        { channel: 1, note: 8, device: 'DJ2GO2', slot: 0 },
+        { channel: 1, note: 8, device: 'X-TOUCH MINI', mode: 'edit' },
+      ],
+      fader: { channel: 1, control: 9, pickup: true, device: 'X-TOUCH MINI' },
+      strip: [{ channel: 1, control: 9, index: 0, device: 'DJ2GO2' }],
+    }
+    expect(parseControls(JSON.stringify(controls))).toEqual(controls)
+    const midi = (device: unknown) => ({ ...look, midi: [{ channel: 1, control: 1, device, knob: 'frame.zoom' }] })
+    expect(() => parseScene(midi(7))).toThrow(/^midi\[0\]\.device: must be a non-empty string/)
+    expect(() => parseScene(midi(''))).toThrow(/^midi\[0\]\.device: must be a non-empty string/)
+    expect(() => parseControls({ buttons: [{ channel: 1, note: 8, device: null, slot: 0 }] })).toThrow(
+      /^buttons\[0\]\.device: must be a non-empty string/,
+    )
+    expect(() => parseControls({ buttons: [], fader: { channel: 1, control: 9, device: ['X'] } })).toThrow(
+      /^fader\.device: must be a non-empty string/,
+    )
+    expect(() => parseControls({ buttons: [], strip: [{ channel: 1, control: 9, index: 0, device: {} }] })).toThrow(
+      /^strip\[0\]\.device: must be a non-empty string/,
+    )
+    // a control once on its controller: twice on one is refused, as twice with no device is
+    const twice = { channel: 1, control: 1, device: 'DJ2GO2' }
+    expect(() =>
+      parseScene({
+        ...look,
+        midi: [
+          { ...twice, knob: 'frame.zoom' },
+          { ...twice, knob: 'frame.turn' },
+        ],
+      }),
+    ).toThrow(/^midi\[1\]: channel 1 number 1 of DJ2GO2 is mapped twice/)
   })
 })

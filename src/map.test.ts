@@ -399,7 +399,7 @@ describe('MIDI map mode', () => {
     expect(await page.$eval(`${macro(MACRO)} .knob-midi`, (el) => el.textContent)).toBe('cc22')
     await page.click('svg.fader')
     await cc(9)
-    expect((await stored()).fader).toEqual({ channel: 1, control: 9, pickup: true })
+    expect((await stored()).fader).toEqual({ channel: 1, control: 9, pickup: true, device: 'Fake knobs' })
     await page.click('.pager button[data-learn=\'{"page":1}\']')
     await note(17)
     await page.click('.bar button[data-learn=\'{"mode":"decks"}\']')
@@ -409,9 +409,9 @@ describe('MIDI map mode', () => {
     await note(11)
     expect(await line()).toBe(BANNER)
     expect((await stored()).buttons).toEqual([
-      { channel: 1, note: 17, page: 1 },
-      { channel: 1, note: 20, mode: 'decks' },
-      { channel: 1, note: 11, slot: 3 },
+      { channel: 1, note: 17, device: 'Fake knobs', page: 1 },
+      { channel: 1, note: 20, device: 'Fake knobs', mode: 'decks' },
+      { channel: 1, note: 11, device: 'Fake knobs', slot: 3 },
     ])
     // the tags show what was learned, and nothing was played by it
     expect(await page.$eval('.fader-row .map-tag', (el) => el.textContent)).toBe('cc9')

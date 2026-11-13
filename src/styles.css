@@ -1372,6 +1372,34 @@ kbd {
   grid-template-columns: repeat(8, 1fr);
   margin: 4px 0 6px;
 }
+/* a grid of pads a controller, side by side, each under its controller's name */
+.grids {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 14px;
+}
+.grid {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.grids .pads {
+  grid-template-columns: repeat(4, 1fr);
+}
+.hwpad.row {
+  grid-column-start: 1;
+}
+.grid-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pads-none {
+  grid-column: 1 / -1;
+  line-height: 30px;
+  text-align: center;
+  border: 1px dashed var(--edge);
+  border-radius: 6px;
+}
 /* the controller's 16 pads, two rows of 8, each of one height with its note on or off */
 .pads {
   display: grid;

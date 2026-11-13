@@ -1,10 +1,25 @@
-// The MIDI block: the controller's connection, the look's mappings (each to follow to its knob, to give pickup as a
-// fader, or to drop), and the controller drawn: the strip's encoders (learned in turn, slot 1 to 8, and dropped at
-// once), the A/B fader's control, and its 16 pads, each learned on, over the app's buttons (each to drop). Beside it,
-// what is learning a control, shown on every view, in MIDI map mode what drives each control a controller can drive,
-// and the pads, the drawing's and the Stage's.
+// The MIDI block: the controllers' connection, the look's mappings (each to follow to its knob, to give pickup as a
+// fader, or to drop), and the controllers drawn: the strip's encoders (learned in turn, slot 1 to 8, and dropped at
+// once), the A/B fader's control, and a grid of pads a controller, side by side, each learned on, over the app's
+// buttons (each to drop). Beside it, what is learning a control, shown on every view, in MIDI map mode what drives
+// each control a controller can drive, and the pads, the drawing's and the Stage's.
 import { useState } from 'react'
-import { HAS_MIDI, keyOf, label, mappingOf, positionOf, release, same, unmap, waiting, type Learning } from '../midi'
+import {
+  grids,
+  HAS_MIDI,
+  keyOf,
+  label,
+  mappingOf,
+  named,
+  positionOf,
+  same,
+  triggerOf,
+  unmap,
+  waiting,
+  type Grid,
+  type Learning,
+  type Pressed,
+} from '../midi'
 import {
   STRIP,
   VIEWS,
@@ -21,6 +36,7 @@ import { short } from './Knob'
 type Props = {
   connected: boolean
   inputs: string[]
+  pressed: Pressed[]
   onConnect: () => void
   looks: Scene[]
   controls: Controls
@@ -49,7 +65,7 @@ const nameOf = (t: Learning, scene: Scene, looks: Scene[]) =>
               ? `${t.page > 0 ? 'next' : 'previous'} strip page`
               : VIEW_NAMES[t.mode]
 
-export function Midi({ connected, inputs, onConnect, looks, controls, fader, lit, onControls }: Props) {
+export function Midi({ connected, inputs, pressed, onConnect, looks, controls, fader, lit, onControls }: Props) {
   const { scene, edit, setFocus, learning, learn, positions } = useCtl()
   const [button, setButton] = useState('slot 0')
   const picked: TriggerTarget = button.startsWith('slot ')
@@ -83,12 +99,13 @@ export function Midi({ connected, inputs, onConnect, looks, controls, fader, lit
             </span>
           )}
           {scene.midi?.map((m) => {
-            const at = positions.get(keyOf('cc', m.channel, m.control))
+            const at = positions.get(keyOf('cc', m.channel, m.control, m.device))
             const to = positionOf(scene, m)
             return (
-              <div key={label(m)}>
+              <div key={named(m)}>
                 <span className="target">
                   <b className="chip-midi">{label(m)}</b>
+                  {m.device && <span className="dim">{m.device}</span>}
                   {'knob' in m ? (
                     <button className="link" onClick={() => setFocus(m.knob)} title={m.knob}>
                       {short(m.knob)}
@@ -125,10 +142,9 @@ export function Midi({ connected, inputs, onConnect, looks, controls, fader, lit
           })}
         </div>
       )}
-      {/* the controller drawn, each part learned on it, and the learned buttons' list under it */}
+      {/* the controllers drawn, each part learned on them, and the learned buttons' list under them */}
       {HAS_MIDI && (
         <div className="controller">
-          <div className="dim">X-Touch Mini · layer A</div>
           <div className="sm-row">
             <span className="sm-label">encoders → the strip</span>
             {Array.from({ length: STRIP }, (_, i) => {
@@ -137,7 +153,7 @@ export function Midi({ connected, inputs, onConnect, looks, controls, fader, lit
                 <span
                   key={i}
                   className={`sm-enc${e ? '' : ' none'}${learning && 'strip' in learning && learning.strip === i ? ' learning' : ''}`}
-                  title={e ? label(e) : `slot ${i + 1}: no encoder`}
+                  title={e ? named(e) : `slot ${i + 1}: no encoder`}
                 >
                   E{i + 1}
                   <i>{e ? `cc${e.control}` : '—'}</i>
@@ -165,7 +181,7 @@ export function Midi({ connected, inputs, onConnect, looks, controls, fader, lit
             <span className="sm-label">fader → A/B</span>
             <span
               className={`sm-enc${controls.fader ? '' : ' none'}${faderWaits ? ' waiting' : ''}${learning && 'fader' in learning ? ' learning' : ''}`}
-              title={controls.fader ? label(controls.fader) : 'the A/B fader: no control'}
+              title={controls.fader ? named(controls.fader) : 'the A/B fader: no control'}
             >
               F<i>{controls.fader ? `cc${controls.fader.control}${controls.fader.pickup ? ' · pickup' : ''}` : '—'}</i>
             </span>
@@ -176,18 +192,21 @@ export function Midi({ connected, inputs, onConnect, looks, controls, fader, lit
                     type="checkbox"
                     checked={!!controls.fader.pickup}
                     onChange={(e) => {
-                      const { channel, control } = controls.fader!
-                      onControls({
-                        ...controls,
-                        fader: e.target.checked ? { channel, control, pickup: true } : { channel, control },
-                      })
+                      const next = { ...controls.fader! }
+                      if (e.target.checked) next.pickup = true
+                      else delete next.pickup
+                      onControls({ ...controls, fader: next })
                     }}
                   />
                   fader
                 </label>
                 <button
                   className="mini"
-                  onClick={() => onControls(release(controls, controls.fader!.channel, controls.fader!.control))}
+                  onClick={() => {
+                    const next = { ...controls }
+                    delete next.fader
+                    onControls(next)
+                  }}
                 >
                   ×
                 </button>
@@ -236,18 +255,19 @@ export function Midi({ connected, inputs, onConnect, looks, controls, fader, lit
               </button>
             </span>
             {/* a learned pad learns its own target again, an empty one what button for picks */}
-            <Pads
+            <Grids
+              grids={grids(inputs, pressed, controls.buttons)}
               looks={looks}
               lit={lit}
-              notes
               onPad={(t) => {
                 const to = t ?? picked
                 learn(learning && same(learning, to) ? null : to)
               }}
             />
             {controls.buttons.map((t) => (
-              <span className="target" key={label(t)}>
+              <span className="target" key={named(t)}>
                 <b className="chip-midi">{label(t)}</b>
+                {t.device && <span className="dim">{t.device}</span>}
                 <span>{nameOf(t, scene, looks)}</span>
                 <button
                   className="mini"
@@ -307,7 +327,7 @@ export function MapTag({ target }: { target: Learning }) {
   if (!d) return null
   const text = 'note' in d ? `n${d.note}` : `cc${d.control}`
   return (
-    <b className="map-tag" title={label(d)}>
+    <b className="map-tag" title={named(d)}>
       {'strip' in target ? `E${target.strip + 1} · ${text}` : text}
     </b>
   )
@@ -325,7 +345,7 @@ export function MidiLearn({ target }: { target: MidiTarget }) {
       <span className="pair">
         <b
           className={`chip-midi${waiting(map, positionOf(scene, map), positions) ? ' waiting' : ''}`}
-          title={`the MIDI control driving this${map.pickup ? ', a fader with pickup' : ''}`}
+          title={`the MIDI control driving this${map.device ? `, on ${map.device}` : ''}${map.pickup ? ', a fader with pickup' : ''}`}
         >
           {label(map)}
         </b>
@@ -362,43 +382,94 @@ const padName = (t: TriggerTarget, looks: Scene[]) =>
         : '◂ page'
       : VIEW_NAMES[t.mode]
 
-// The controller's 16 pads, each the button learned on its note (on any channel), lit as its LED is, pulsing while
-// its target learns, and with its note when notes is on; a pad pressed gives its target, or undefined if it has none.
-// A learned pad is a control a controller can drive, for MIDI map mode.
-export function Pads({
-  looks,
-  lit,
-  notes,
-  onPad,
-}: {
+// A pad: the button b, lit as its LED is, pulsing while its target learns, and with its note's tag when it has one;
+// titled idle when it has no button, and starting a row of its grid when row is on. Pressed, it gives its target, or undefined if it has none. A learned pad is a
+// control a controller can drive, for MIDI map mode.
+type PadProps = {
   looks: Scene[]
   lit: (t: TriggerTarget) => boolean
-  notes: boolean
   onPad: (t: TriggerTarget | undefined) => void
-}) {
-  const { scene, controls, learning } = useCtl()
+}
+function Pad({
+  b,
+  idle,
+  tag,
+  row,
+  looks,
+  lit,
+  onPad,
+}: PadProps & { b?: Trigger; idle: string; tag?: string; row?: boolean }) {
+  const { scene, learning } = useCtl()
+  const t = b && targetOf(b)
+  return (
+    <button
+      className={`hwpad${row ? ' row' : ''}${t ? '' : ' empty'}${t && lit(t) ? ' lit' : ''}${t && learning && same(learning, t) ? ' learning' : ''}`}
+      title={b ? `${named(b)}: ${nameOf(b, scene, looks)}` : idle}
+      data-learn={t && JSON.stringify(t)}
+      onClick={() => onPad(t)}
+    >
+      <span>{t ? padName(t, looks) : '·'}</span>
+      {tag && (
+        <b className="map-tag" title={b ? named(b) : idle}>
+          {tag}
+        </b>
+      )}
+    </button>
+  )
+}
+
+// The Stage's 16 pads, the X-Touch Mini's layer A, each the button learned on its note (on any channel), with its
+// note when notes is on.
+export function Pads({ notes, ...pad }: PadProps & { notes: boolean }) {
+  const { controls } = useCtl()
   return (
     <div className="pads">
-      {PAD_NOTES.map((n) => {
-        const b = controls.buttons.find((x) => x.note === n)
-        const t = b && targetOf(b)
-        return (
-          <button
-            key={n}
-            className={`hwpad${t ? '' : ' empty'}${t && lit(t) ? ' lit' : ''}${t && learning && same(learning, t) ? ' learning' : ''}`}
-            title={b ? `${label(b)}: ${nameOf(b, scene, looks)}` : `note ${n}: not learned`}
-            data-learn={t && JSON.stringify(t)}
-            onClick={() => onPad(t)}
-          >
-            <span>{t ? padName(t, looks) : '·'}</span>
-            {notes && (
-              <b className="map-tag" title={b ? label(b) : `note ${n}: not learned`}>
-                n{n}
-              </b>
-            )}
-          </button>
-        )
-      })}
+      {PAD_NOTES.map((n) => (
+        <Pad
+          key={n}
+          b={controls.buttons.find((x) => x.note === n)}
+          idle={`note ${n}: not learned`}
+          tag={notes ? `n${n}` : undefined}
+          {...pad}
+        />
+      ))}
+    </div>
+  )
+}
+
+// The controllers' pads, a grid a controller side by side, each under its name: a pad a note it has sent or a button
+// learned on it, by channel and note, four a row and each channel from a new row, with its note; the pad's button the
+// controller's own, else one with no device. A controller that has sent no note yet shows its name over an empty
+// grid, and the buttons learned with no device a grid of their own, as any controller presses them.
+function Grids({ grids, ...pad }: PadProps & { grids: Grid[] }) {
+  const { controls } = useCtl()
+  return (
+    <div className="grids">
+      {grids.map((g) => (
+        <div className="grid" key={g.device ?? ''} data-device={g.device ?? ''}>
+          <div className="dim grid-name" title={g.device ? undefined : 'buttons learned before controllers had names'}>
+            {g.device ?? 'any controller'}
+            {!g.plugged && ' · not plugged in'}
+          </div>
+          <div className="pads">
+            {g.pads.map(({ channel, note }, i) => (
+              <Pad
+                key={`${channel}/${note}`}
+                row={i > 0 && g.pads[i - 1].channel !== channel}
+                b={
+                  g.device === undefined
+                    ? controls.buttons.find((x) => x.device === undefined && x.channel === channel && x.note === note)
+                    : triggerOf(controls.buttons, { device: g.device, channel, number: note })
+                }
+                idle={`ch${channel} note ${note}: not learned`}
+                tag={`n${note}`}
+                {...pad}
+              />
+            ))}
+            {!g.pads.length && <span className="dim pads-none">no button pressed yet</span>}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

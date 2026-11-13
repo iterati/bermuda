@@ -39,6 +39,41 @@ const fakeController = () => {
   Object.assign(window, { fake })
 }
 
+// what the captain's two controllers, plugged in at once, put on a window: send(name, ...) delivers a message as that
+// controller would, ready() says the app is hearing both, and sent(name) is all the app sent that controller
+type Pair = {
+  send: (name: string, ...bytes: number[]) => void
+  ready: () => boolean
+  sent: (name: string) => number[][]
+}
+
+// a fake MIDI access with a DJ2GO2 and an X-Touch Mini, each an input and an output of its name, as Chrome lists them
+const fakePair = () => {
+  type Port = { name: string; state: string; onmidimessage: ((e: { data: Uint8Array; target: Port }) => void) | null }
+  const names = ['DJ2GO2', 'X-TOUCH MINI']
+  const inputs = new Map(names.map((name): [string, Port] => [name, { name, state: 'connected', onmidimessage: null }]))
+  const sent = new Map(names.map((name): [string, number[][]] => [name, []]))
+  const send = (name: string) => (b: number[]) => sent.get(name)!.push([...b])
+  const access = {
+    inputs,
+    outputs: new Map(names.map((name) => [name, { name, state: 'connected', send: send(name) }])),
+    onstatechange: null,
+  }
+  Object.defineProperty(Navigator.prototype, 'requestMIDIAccess', {
+    configurable: true,
+    value: () => Promise.resolve(access),
+  })
+  const pair: Pair = {
+    send: (name, ...bytes) => {
+      const input = inputs.get(name)!
+      input.onmidimessage?.({ data: new Uint8Array(bytes), target: input })
+    },
+    ready: () => [...inputs.values()].every((i) => !!i.onmidimessage),
+    sent: (name) => sent.get(name)!,
+  }
+  Object.assign(window, { pair })
+}
+
 beforeAll(async () => {
   server = await createServer({ logLevel: 'silent', server: { host: '127.0.0.1', port: 0, hmr: false } })
   await server.listen()
@@ -116,6 +151,9 @@ const RIG_TITLES = [
 const EMPTY = Array.from({ length: 16 }, () => '·')
 const ROW = '.pads-row'
 const SHEET = '.setup-body'
+// the sheet's grids: the fake controller's, and the buttons' learned with no device
+const FAKE = `${SHEET} .grid[data-device="Fake knobs"]`
+const ANY = `${SHEET} .grid[data-device=""]`
 
 const pause = (ms = 200) => new Promise((r) => setTimeout(r, ms))
 async function seed(controls: Controls) {
@@ -152,6 +190,17 @@ const pads = (within: string, p: Page = page) =>
 const texts = async (within: string, p: Page = page) => (await pads(within, p)).map((x) => x.text)
 // the pad on a note pressed as a hand would
 const pad = (within: string, n: number, p: Page = page) => p.click(`${within} .hwpad:nth-child(${n - 7})`)
+// a grid's pad on a note, by its tag
+const padOf = async (within: string, n: number, p: Page = page) => {
+  const tags = (await pads(within, p)).map((x) => x.tag)
+  await p.click(`${within} .hwpad:nth-child(${tags.indexOf(`n${n}`) + 1})`)
+}
+// a controller's grid on the sheet: its pads' tags, and the line an empty one shows
+const grid = (device: string, p: Page = page) =>
+  p.$eval(`${SHEET} .grid[data-device="${device}"]`, (el) => ({
+    pads: [...el.querySelectorAll('.hwpad .map-tag')].map((t) => t.textContent),
+    none: el.querySelector('.pads-none')?.textContent ?? null,
+  }))
 const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem('bermuda.midi') ?? '{}') as Controls)
 // the learning line's text, if it shows
 const line = (p: Page = page) =>
@@ -383,7 +432,10 @@ describe('the pads row and the drawn controller', () => {
     await note(21)
     expect(await line()).toBe(BANNER)
     expect(await showing()).toEqual(before)
-    expect((await stored()).buttons).toEqual([...RIG.buttons.slice(1), { channel: 1, note: 21, slot: 0 }])
+    expect((await stored()).buttons).toEqual([
+      ...RIG.buttons.slice(1),
+      { channel: 1, note: 21, device: 'Fake knobs', slot: 0 },
+    ])
     const after = await pads(ROW)
     expect([after[13].text, after[13].tag, after[13].learns]).toEqual([`1 ${t1.name}`, 'n21', '{"slot":0}'])
     expect([after[0].text, after[0].tag, after[0].learns, after[0].empty]).toEqual(['·', 'n8', null, true])
@@ -436,7 +488,7 @@ describe('the pads row and the drawn controller', () => {
     await bare.close()
   }, 60_000)
 
-  it("the sheet's MIDI page draws the controller: the strip's encoders, the A/B fader's control and the 16 pads, over the learned buttons' list", async () => {
+  it("the sheet's MIDI page draws the controller: the strip's encoders, the A/B fader's control and a grid of pads a controller, over the learned buttons' list", async () => {
     // the drawing, in the MIDI block after the look's mappings
     const drawing = () =>
       page.evaluate(() => {
@@ -444,10 +496,11 @@ describe('the pads row and the drawn controller', () => {
         const enc = (el: Element) => [el.textContent, el.getAttribute('title'), el.classList.contains('none')]
         const rows = [...c.querySelectorAll('.sm-row')]
         const list = [...c.querySelectorAll('.midi-buttons > .target')]
-        const pads = c.querySelector('.pads')!.getBoundingClientRect()
+        const pads = c.querySelector('.grids')!.getBoundingClientRect()
         return {
           after: c.previousElementSibling?.matches('.targets'),
-          head: c.firstElementChild!.textContent,
+          first: c.firstElementChild!.matches('.sm-row'),
+          grids: [...c.querySelectorAll('.grid-name')].map((el) => el.textContent),
           labels: [...c.querySelectorAll('.sm-label')].map((el) => el.textContent),
           encoders: [...rows[0].querySelectorAll('.sm-enc')].map(enc),
           stripButtons: [...rows[0].querySelectorAll('button')].map((b) => [b.textContent, b.getAttribute('title')]),
@@ -465,7 +518,9 @@ describe('the pads row and the drawn controller', () => {
     await page.keyboard.press('g')
     expect(await drawing()).toEqual({
       after: true,
-      head: 'X-Touch Mini · layer A',
+      first: true,
+      // the controller plugged in, which has sent no note yet, and the rig's buttons, learned with no device
+      grids: ['Fake knobs', 'any controller'],
       labels: ['encoders → the strip', 'fader → A/B', 'buttons: click a pad, then press its button'],
       encoders: Array.from({ length: 8 }, (_, i) => [`E${i + 1}cc${i + 1}`, `ch1 cc${i + 1}`, false]),
       stripButtons: [
@@ -484,16 +539,25 @@ describe('the pads row and the drawn controller', () => {
       pickerOver: true,
       oldStrip: false,
     })
-    const shown = await pads(SHEET)
-    expect(shown.map((x) => x.text)).toEqual(RIG_PADS)
-    expect(shown.map((x) => x.title)).toEqual(RIG_TITLES)
-    expect(shown.map((x) => x.tag)).toEqual(Array.from({ length: 16 }, (_, i) => `n${8 + i}`))
-    expect(shown.map((x) => x.lit)).toEqual(RIG_PADS.map((_, i) => [8, 16, 17, 18].includes(8 + i)))
-    // with nothing learned
+    expect(await grid('Fake knobs')).toEqual({ pads: [], none: 'no button pressed yet' })
+    const shown = await pads(ANY)
+    expect(shown.map((x) => x.text)).toEqual(RIG_PADS.slice(0, 13))
+    expect(shown.map((x) => x.title)).toEqual(RIG_TITLES.slice(0, 13))
+    expect(shown.map((x) => x.tag)).toEqual(Array.from({ length: 13 }, (_, i) => `n${8 + i}`))
+    expect(shown.map((x) => x.lit)).toEqual(RIG.buttons.map((b) => [8, 16, 17, 18].includes(b.note)))
+    // the notes the controller sends draw its grid, each pad the button it presses
+    await note(21)
+    await note(9)
+    expect(await pads(FAKE)).toMatchObject([
+      { text: `2 ${LOOKS[1].name}`, title: RIG_TITLES[1], tag: 'n9', empty: false },
+      { text: '·', title: 'ch1 note 21: not learned', tag: 'n21', empty: true },
+    ])
+    // with nothing learned, the controller's grid alone
     await page.keyboard.press('Escape')
     await seed({ buttons: [] })
     await page.keyboard.press('g')
     expect(await drawing()).toMatchObject({
+      grids: ['Fake knobs'],
       encoders: Array.from({ length: 8 }, (_, i) => [`E${i + 1}—`, `slot ${i + 1}: no encoder`, true]),
       stripButtons: [['learn the strip', expect.any(String)]],
       fader: [['F—', 'the A/B fader: no control', true, false]],
@@ -501,10 +565,7 @@ describe('the pads row and the drawn controller', () => {
       waitingLine: null,
       rows: [],
     })
-    const empty = await pads(SHEET)
-    expect(empty.map((x) => x.text)).toEqual(EMPTY)
-    expect(empty.map((x) => x.tag)).toEqual(Array.from({ length: 16 }, (_, i) => `n${8 + i}`))
-    expect(empty.map((x) => x.tagTitle)).toEqual(Array.from({ length: 16 }, (_, i) => `note ${8 + i}: not learned`))
+    expect(await grid('Fake knobs')).toEqual({ pads: [], none: 'no button pressed yet' })
   }, 60_000)
 
   it('on the drawing, learn the strip lights each encoder as it learns, and the fader learns the next control moved', async () => {
@@ -534,7 +595,7 @@ describe('the pads row and the drawn controller', () => {
     expect(await page.$eval(strip, (el) => el.textContent)).toBe('learn the strip')
     expect(await line()).toBe(null)
     expect((await stored()).strip).toEqual(
-      Array.from({ length: 8 }, (_, i) => ({ channel: 1, control: 31 + i, index: i })),
+      Array.from({ length: 8 }, (_, i) => ({ channel: 1, control: 31 + i, index: i, device: 'Fake knobs' })),
     )
     // the fader
     const fader = async () => (await chips(1))[0]
@@ -544,7 +605,7 @@ describe('the pads row and the drawn controller', () => {
     expect(await line()).toBe('move a control for the A/B fader')
     await cc(40)
     expect(await fader()).toEqual(['Fcc40 · pickup', false])
-    expect((await stored()).fader).toEqual({ channel: 1, control: 40, pickup: true })
+    expect((await stored()).fader).toEqual({ channel: 1, control: 40, pickup: true, device: 'Fake knobs' })
     expect(await line()).toBe(null)
     // and the strip's × forgets its encoders
     await page.click(`${SHEET} button[title="forget the strip's encoders"]`)
@@ -556,42 +617,44 @@ describe('the pads row and the drawn controller', () => {
     await page.keyboard.press('g')
     const at = await showing()
     // a learned pad its own target, and a second press cancels it
-    await pad(SHEET, 10)
+    await padOf(ANY, 10)
     expect(await line()).toBe(`press a button for look 3 · ${LOOKS[2].name}`)
-    expect((await pads(SHEET))[2].learning).toBe(true)
+    expect((await pads(ANY))[2].learning).toBe(true)
     expect(await showing()).toEqual(at)
-    await pad(SHEET, 10)
+    await padOf(ANY, 10)
     expect(await line()).toBe(null)
-    await pad(SHEET, 10)
+    await padOf(ANY, 10)
     await note(22)
     expect(await line()).toBe(null)
     expect(await showing()).toEqual(at)
+    // learned on the controller it came from, off the grid of the buttons with no device and onto its own
     expect((await stored()).buttons).toEqual([
       ...RIG.buttons.filter((b) => b.note !== 10),
-      { channel: 1, note: 22, slot: 2 },
+      { channel: 1, note: 22, device: 'Fake knobs', slot: 2 },
     ])
-    let shown = await pads(SHEET)
-    expect([shown[2].text, shown[14].text]).toEqual(['·', `3 ${LOOKS[2].name}`])
+    expect((await pads(ANY)).map((x) => x.tag)).not.toContain('n10')
+    expect(await texts(FAKE)).toEqual([`3 ${LOOKS[2].name}`])
     // an empty pad what button for picks: the Stage, learned on note 18, which pulses
+    await note(21)
     await page.select(`${SHEET} .midi-buttons select`, 'stage')
-    await pad(SHEET, 21)
+    await padOf(FAKE, 21)
     expect(await line()).toBe('press a button for Stage')
-    expect((await pads(SHEET)).map((x) => x.learning)).toEqual(Array.from({ length: 16 }, (_, i) => i === 10))
+    expect((await pads(SHEET)).filter((x) => x.learning).map((x) => x.title)).toEqual(['ch1 note 18: Stage'])
     expect(await page.$eval(`${SHEET} .midi-buttons button.learning`, (el) => el.textContent)).toBe('press a button…')
     // Esc cancels, and the sheet stays open
     await page.keyboard.press('Escape')
     expect(await line()).toBe(null)
     expect(await page.$(SHEET)).not.toBe(null)
     expect((await pads(SHEET)).some((x) => x.learning)).toBe(false)
-    await pad(SHEET, 23)
+    await padOf(FAKE, 21)
     await note(23)
-    expect((await stored()).buttons.at(-1)).toEqual({ channel: 1, note: 23, mode: 'stage' })
-    shown = await pads(SHEET)
-    expect([shown[10].text, shown[15].text]).toEqual(['·', 'Stage'])
+    expect((await stored()).buttons.at(-1)).toEqual({ channel: 1, note: 23, device: 'Fake knobs', mode: 'stage' })
+    expect(await texts(FAKE)).toEqual(['·', `3 ${LOOKS[2].name}`, 'Stage'])
+    expect((await pads(ANY)).map((x) => x.tag)).not.toContain('n18')
     // and in map mode too: an empty pad what button for picks
     await page.keyboard.press('m')
     await page.select(`${SHEET} .midi-buttons select`, 'edit')
-    await pad(SHEET, 10)
+    await padOf(FAKE, 21)
     expect(await line()).toBe('press a button for Edit')
     await page.keyboard.press('Escape')
     expect(await line()).toBe(BANNER)
@@ -619,5 +682,59 @@ describe('the pads row and the drawn controller', () => {
     await popup.waitForSelector('.app.edit')
     expect(await popup.$$('.hwpad')).toEqual([])
     await popup.close()
+  }, 60_000)
+
+  it("with two controllers plugged in at once, the sheet draws a grid each, side by side, of exactly the notes each sent, the X-Touch's layer B too", async () => {
+    const two = await browser.newPage()
+    await two.setViewport({ width: 1280, height: 800 })
+    await two.evaluateOnNewDocument(() => Object.defineProperty(window, 'devicePixelRatio', { get: () => 0.05 }))
+    await two.evaluateOnNewDocument(fakePair)
+    await two.goto(server.resolvedUrls!.local[0])
+    await two.waitForSelector('.knob', { timeout: 55_000 })
+    await two.waitForFunction(() => (window as unknown as { pair: Pair }).pair.ready(), { polling: 100 })
+    const send = async (name: string, ...bytes: number[]) => {
+      await two.evaluate((n, b) => (window as unknown as { pair: Pair }).pair.send(n, ...b), name, bytes)
+      await pause()
+    }
+    const sent = (name: string) => two.evaluate((n) => (window as unknown as { pair: Pair }).pair.sent(n), name)
+    const DJ = `${SHEET} .grid[data-device="DJ2GO2"]`
+    const XT = `${SHEET} .grid[data-device="X-TOUCH MINI"]`
+    await two.keyboard.press('g')
+    // each plugged in, with no note sent yet: its name over an empty grid
+    expect(await two.$$eval(`${SHEET} .grid-name`, (els) => els.map((el) => el.textContent))).toEqual([
+      'DJ2GO2',
+      'X-TOUCH MINI',
+    ])
+    expect(await grid('DJ2GO2', two)).toEqual({ pads: [], none: 'no button pressed yet' })
+    expect(await grid('X-TOUCH MINI', two)).toEqual({ pads: [], none: 'no button pressed yet' })
+    // layer A's first and last buttons, then layer B's, out of order, and a release, which draws nothing
+    for (const n of [8, 23, 47, 32]) await send('X-TOUCH MINI', 0x90, n, 127)
+    await send('X-TOUCH MINI', 0x80, 40, 0)
+    // a pad on each of the DJ2GO2's decks, on its own channel
+    await send('DJ2GO2', 0x94, 1, 127)
+    await send('DJ2GO2', 0x95, 1, 127)
+    expect(await grid('X-TOUCH MINI', two)).toEqual({ pads: ['n8', 'n23', 'n32', 'n47'], none: null })
+    expect(await grid('DJ2GO2', two)).toEqual({ pads: ['n1', 'n1'], none: null })
+    expect((await pads(DJ, two)).map((x) => x.title)).toEqual(['ch5 note 1: not learned', 'ch6 note 1: not learned'])
+    // side by side, the DJ2GO2's at the left
+    const [dj, xt] = await two.$$eval(`${SHEET} .grid`, (els) =>
+      els.map((el) => {
+        const r = el.getBoundingClientRect()
+        return { top: r.top, left: r.left, right: r.right }
+      }),
+    )
+    expect(xt.top).toBe(dj.top)
+    expect(xt.left).toBeGreaterThan(dj.right)
+    // a pad learned on one is its controller's alone, its LED sent to it alone
+    await padOf(XT, 32, two)
+    await send('X-TOUCH MINI', 0x90, 32, 127)
+    expect(
+      await two.evaluate(() => (JSON.parse(localStorage.getItem('bermuda.midi') ?? '{}') as Controls).buttons),
+    ).toEqual([{ channel: 1, note: 32, device: 'X-TOUCH MINI', slot: 0 }])
+    expect(await texts(XT, two)).toEqual(['·', '·', `1 ${t1.name}`, '·'])
+    expect(await texts(DJ, two)).toEqual(['·', '·'])
+    expect((await sent('X-TOUCH MINI')).filter((b) => b[0] === 0x90 && b[1] === 32).at(-1)).toEqual([0x90, 32, 1])
+    expect((await sent('DJ2GO2')).filter((b) => b[1] === 32)).toEqual([])
+    await two.close()
   }, 60_000)
 })

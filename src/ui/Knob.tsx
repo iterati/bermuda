@@ -9,7 +9,7 @@
 // one is off: greyed, its why under its label, and neither turned, focused, typed nor modulated by a hand.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { label as midiLabel, mappingOf, positionOf, same, waiting } from '../midi'
+import { mappingOf, named, positionOf, same, waiting } from '../midi'
 import { allLevels, clamp, knobKind, playRange, resolve, type Address, type MidiTarget } from '../scene'
 import { useCtl } from './controls'
 
@@ -316,7 +316,7 @@ export function Knob(props: { label: string; enc?: number } & ({ at: Address } |
       {midi && (
         <span
           className={`knob-midi${waiting(midi, positionOf(scene, midi), positions) ? ' waiting' : ''}`}
-          title={`${midiLabel(midi)}${midi.pickup ? ', a fader with pickup' : ''}`}
+          title={`${named(midi)}${midi.pickup ? ', a fader with pickup' : ''}`}
         >
           cc{midi.control}
         </span>
