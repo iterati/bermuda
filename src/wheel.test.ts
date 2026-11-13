@@ -38,7 +38,7 @@ afterAll(async () => {
 const TURN = 'levels[sq1].affine.turn'
 // a notch of it, as a share of its hard range
 const STEP = notch(LOOKS[0], { knob: TURN }) / (hardRange(TURN)[1] - hardRange(TURN)[0])
-const PANEL = { stage: '.stage .bottom', edit: '.edit .rack', decks: '.mixer > .panel:nth-child(2)' }
+const PANEL = { stage: '.context', edit: '.edit .rack', decks: '.mixer > .panel:nth-child(2)' }
 // a spot on the picture that no panel covers
 const OPEN = { stage: { x: 640, y: 300 }, edit: { x: 360, y: 400 }, decks: { x: 640, y: 120 } }
 const modes = ['stage', 'edit', 'decks'] as const
@@ -52,7 +52,7 @@ beforeEach(async () => {
 }, 60_000)
 
 const to = async (m: Mode) => {
-  // Stage's every knob of the picked chip, past its Perform strip, in a panel that scrolls
+  // Stage's every knob of the picked chip, in the context panel, which scrolls, opened by more ▸
   if (m === 'stage') await page.click('.perform-side button[title="every knob of the picked chip"]')
   else await page.keyboard.press(m === 'edit' ? 'e' : 'd')
   await page.waitForSelector(`.${m} .knob`)
@@ -223,15 +223,18 @@ describe('a drag', () => {
       const r = input.getBoundingClientRect()
       return { value: input.valueAsNumber, x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width }
     }, pick)
-  const tab = (name: string) =>
+  // an entry of the Stage's picker row, or the fader's edge ▸, opening the context panel on it
+  const press = (name: string) =>
     page.evaluate((name) => {
-      ;[...document.querySelectorAll<HTMLButtonElement>('.tabs button')].find((b) => b.textContent === name)!.click()
+      ;[...document.querySelectorAll<HTMLButtonElement>('.picker button, .top button')]
+        .find((b) => b.textContent === name)!
+        .click()
     }, name)
   const pause = () => new Promise((r) => setTimeout(r, 200))
 
   it('a press or drag on the macro slider, a Bank slider and the stagger leaves its value, and the wheel turns it', async () => {
     for (const [open, pick] of [
-      [() => tab('Macros'), 'macro'],
+      [() => press('Macros'), 'macro'],
       // busy is in the setup sheet's Bank page
       [
         async () => {
@@ -240,8 +243,14 @@ describe('a drag', () => {
         },
         'busy',
       ],
-      // the sheet closed, off the fader
-      [() => page.keyboard.press('g'), 'stagger'],
+      // the sheet closed, the fader's edge
+      [
+        async () => {
+          await page.keyboard.press('g')
+          await press('edge ▸')
+        },
+        'stagger',
+      ],
     ] as const) {
       await open()
       const { value, x, y, w } = await slider(pick)

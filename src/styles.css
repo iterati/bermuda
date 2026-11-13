@@ -85,7 +85,6 @@ button {
   padding: 3px 6px;
   font-size: 13px;
   font-weight: 600;
-  min-width: 260px;
 }
 .look-title:hover,
 .look-title:focus {
@@ -110,6 +109,12 @@ button {
 }
 .bar > * {
   flex: none;
+}
+/* the look's name gives way, so the bar's every control shows at 1280 */
+.bar > .look-title {
+  flex: 0 1 260px;
+  min-width: 120px;
+  text-overflow: ellipsis;
 }
 .bar > .help {
   margin-left: auto;
@@ -198,47 +203,112 @@ button {
   margin: 6px 0 10px;
 }
 
-/* Stage: everything floats over the picture */
-.stage .left {
+/* Stage, the play surface: everything floats over the picture. The slim fader at the top and the bottom deck at the
+   foot each run from edge to edge, or to 10px short of the context panel while it is open */
+.stage .top {
   position: absolute;
   top: 58px;
   left: 10px;
-  width: 190px;
-  max-height: calc(100% - 300px);
-  overflow: auto;
-  padding: 8px;
+  right: 10px;
+  padding: 5px 10px;
 }
-.stage .right {
+.stage .top .side {
+  max-width: 190px;
+}
+.stage .bottom {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  padding: 6px 10px 8px;
+}
+.stage.context-open .top,
+.stage.context-open .bottom {
+  right: 380px;
+}
+/* the picker row over the strip: the looks, the macros, the chain's chips in a row, the modulators; one line that
+   wraps */
+.picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 5px;
+  align-items: center;
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--edge);
+}
+.picker .pick-entry {
+  font-weight: 600;
+}
+.pick-entry.on,
+.chip-mod.on {
+  border-color: var(--accent);
+}
+.picker-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 0 3px;
+  background: var(--edge);
+}
+/* the chain's chips as the row's own, without their dim text, the sub-chains' labels and the levels' indent */
+.picker-chain,
+.picker-chain .chain,
+.picker-chain .chain div:not(.sub) {
+  display: contents;
+}
+.picker-chain .sub,
+.picker-chain .chip .dim {
+  display: none;
+}
+.picker-chain .chip {
+  width: auto;
+  margin-left: 0 !important;
+  padding: 1px 6px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.picker .add-level {
+  align-self: auto;
+  white-space: nowrap;
+}
+.picker .chip-mod {
+  cursor: pointer;
+  white-space: nowrap;
+  padding: 0 6px;
+  font-size: 10.5px;
+}
+/* the context panel, at the right under the bar: what was picked, whole */
+.context {
   position: absolute;
   top: 58px;
   right: 10px;
   bottom: 10px;
-  width: 300px;
-  overflow: auto;
-  padding: 8px;
-}
-/* the knobs' panel at the bottom, and the knob detail floating over it */
-.stage-bottom {
-  position: absolute;
-  left: 10px;
-  right: 320px;
-  bottom: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  pointer-events: none;
-}
-.stage-bottom > * {
-  pointer-events: auto;
-}
-.stage .bottom {
-  max-height: 40vh;
+  width: 360px;
   overflow: auto;
   padding: 8px 10px;
 }
-.stage .knob-slot {
-  margin-left: 200px; /* clear of the chain */
+.context-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+/* a knob's detail, its slot of one height held at the panel's top as the chip's knobs scroll under it */
+.context .knob-slot {
+  position: sticky;
+  top: -8px;
+  z-index: 1;
+  height: 240px;
+  overflow: auto;
+  margin: 0 -10px 8px;
   padding: 6px 10px;
+  background: rgba(10, 12, 18, 0.94);
+  border-bottom: 1px solid var(--edge);
+}
+.context .detail-head {
+  flex-direction: column;
+  gap: 2px;
 }
 /* the Perform strip: 8 big knobs, each in its own place, an empty one kept; the pager and more beside them */
 .perform {
@@ -284,31 +354,9 @@ button {
   gap: 4px;
   white-space: nowrap;
 }
-.strip-back {
-  float: right;
-  margin-left: 8px;
-}
-/* the right column's tabs, one block at a time under them */
-.tabs {
-  display: flex;
-  margin-bottom: 8px;
-}
-.tabs button {
-  flex: 1;
-  padding: 3px 4px;
-}
 /* a block title's menus keep inside the column */
 .block-title select.mini {
   max-width: 150px;
-}
-
-/* the fader from A to B: on Stage it floats at the top, between the chain and the bank */
-.stage .top {
-  position: absolute;
-  top: 58px;
-  left: 210px;
-  right: 320px;
-  padding: 6px 10px;
 }
 /* the frame-time readout (I): a small panel centred over the picture, under the Stage's fader (its foot at 128px) */
 .frame-time {
@@ -1060,20 +1108,6 @@ kbd {
 .presets li {
   display: flex;
   justify-content: space-between;
-}
-
-/* Stage packs the picked chip's rows side by side, their titles turned up the side */
-.stage .bottom .group-body > .row {
-  width: auto;
-  border-top: 0;
-  border-left: 1px solid var(--edge);
-  padding: 0 6px;
-}
-.stage .bottom .row-title {
-  width: auto;
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
-  text-align: center;
 }
 
 /* MIDI learn */

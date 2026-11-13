@@ -72,9 +72,12 @@ const open = (name: string) =>
   page.evaluate((name) => {
     ;[...document.querySelectorAll<HTMLButtonElement>('.setup-nav button')].find((b) => b.textContent === name)!.click()
   }, name)
-const tab = (name: string) =>
+// an entry of the Stage's picker row, or the fader's edge ▸, by its text, opening the context panel on it
+const pick = (name: string) =>
   page.evaluate((name) => {
-    ;[...document.querySelectorAll<HTMLButtonElement>('.tabs button')].find((b) => b.textContent === name)!.click()
+    ;[...document.querySelectorAll<HTMLButtonElement>('.picker button, .top button')]
+      .find((b) => b.textContent === name)!
+      .click()
   }, name)
 // the blocks' titles in a panel, in order
 const titles = (within: string) =>
@@ -155,36 +158,30 @@ describe('the setup sheet', () => {
     )
   }, 60_000)
 
-  it("the Stage has no MIDI tab, and its Bank tab keeps the looks and the bank to play from, without saving, files, deleting or the bank's management", async () => {
-    expect(await page.$$eval('.tabs button', (els) => els.map((el) => el.textContent))).toEqual([
-      'Music',
-      'Motion',
-      'Macros',
-      'Bank',
-    ])
+  it("the Stage has no tabs, and its Looks in the context panel keep the looks and the bank to play from, without saving, files, deleting or the bank's management", async () => {
+    expect(await page.$$('.tabs')).toEqual([])
     // a look saved, and a preset on it, so the whole block would show their ×s
     await page.keyboard.press('p')
     await page.keyboard.press('s')
-    await tab('Bank')
-    const right = '.stage .right'
-    expect(await titles(right)).toEqual(['Looks', 'Bank'])
-    expect(await page.$$eval(`${right} .look-name`, (els) => els.length)).toBe(LOOKS.length)
-    expect(await page.$$(`${right} .presets .link`)).not.toEqual([])
-    expect(await has(right, [...LOOKS_SETUP, ...BANK_SETUP, '×'])).toEqual(
+    await pick('Looks')
+    const context = '.context'
+    expect(await titles(context)).toEqual(['Looks', 'Bank'])
+    expect(await page.$$eval(`${context} .look-name`, (els) => els.length)).toBe(LOOKS.length)
+    expect(await page.$$(`${context} .presets .link`)).not.toEqual([])
+    expect(await has(context, [...LOOKS_SETUP, ...BANK_SETUP, '×'])).toEqual(
       every([...LOOKS_SETUP, ...BANK_SETUP, '×'], false),
     )
-    expect(await page.$$(`${right} .preset-save, ${right} .actions`)).toEqual([])
-    expect(await slides(right)).toEqual([])
-    expect(await has(right, ['autopilot', 'next ›'])).toEqual(every(['autopilot', 'next ›'], true))
-    expect(await page.$$eval(`${right} .graph, ${right} .bank .hint`, (els) => els.length)).toBe(2)
+    expect(await page.$$(`${context} .preset-save, ${context} .actions`)).toEqual([])
+    expect(await slides(context)).toEqual([])
+    expect(await has(context, ['autopilot', 'next ›'])).toEqual(every(['autopilot', 'next ›'], true))
+    expect(await page.$$eval(`${context} .graph, ${context} .bank .hint`, (els) => els.length)).toBe(2)
     // a look and a preset load from it
-    await page.evaluate(() => document.querySelectorAll<HTMLButtonElement>('.stage .right .look-name')[2].click())
+    await page.evaluate(() => document.querySelectorAll<HTMLButtonElement>('.context .look-name')[2].click())
     await pause()
     expect(await page.$eval('.look-title', (el) => (el as HTMLInputElement).value)).toBe(LOOKS[2].name)
     const other = LOOKS.findIndex((l, i) => i > 0 && i !== 2 && l.presets.length)
     await page.evaluate(
-      (i) =>
-        document.querySelectorAll('.stage .right ol.looks > li')[i].querySelector<HTMLButtonElement>('.link')!.click(),
+      (i) => document.querySelectorAll('.context ol.looks > li')[i].querySelector<HTMLButtonElement>('.link')!.click(),
       other,
     )
     await pause()
@@ -242,11 +239,13 @@ describe('the setup sheet', () => {
       {},
       a.name,
     )
+    // the stagger, through edge ▸
+    await pick('edge ▸')
     expect(
       await page.evaluate(() => ({
         sides: [...document.querySelectorAll('.fader-panel .side span')].map((el) => el.textContent),
         at: document.querySelector('.fader-at')?.textContent,
-        stagger: document.querySelector('.fader-panel .slide b')?.textContent,
+        stagger: document.querySelector('.context .slide b')?.textContent,
         error: document.querySelector('.error'),
       })),
     ).toEqual({ sides: [a.name, b.name], at: '25%', stagger: '0.70', error: null })

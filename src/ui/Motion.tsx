@@ -1,7 +1,8 @@
 // The modulators and macros. A modulator is one line, its chip to drag onto any knob, its editor opened under it
-// by a click on the line; a macro's slider moves all its knobs at once. Either can listen to the music: a modulator
-// to its beats or a feature, a macro to a feature. A macro learns by example: arm it, move knobs, press learn again.
-import { useState } from 'react'
+// by a click on the line (the Stage's context panel shows one alone, its editor open); a macro's slider moves all its
+// knobs at once. Either can listen to the music: a modulator to its beats or a feature, a macro to a feature. A macro
+// learns by example: arm it, move knobs, press learn again.
+import { useState, type MouseEvent, type ReactNode } from 'react'
 import { prune } from '../edit'
 import { detunePeriods, learnMacro, setMacro, wave } from '../motion'
 import { blend } from '../music'
@@ -45,13 +46,53 @@ function ListenTo<T extends string>(props: { value: T; options: T[]; title: stri
 // a modulator that plays a wave, on the clock or the music's beats, rather than a feature
 const wavy = (m: Modulator) => !m.listen || m.listen === 'beats'
 
-export function Modulators() {
+// A modulator's chip, to drag onto a knob, which takes the drop (Knob.tsx).
+export function ModChip(props: { id: string; on?: boolean; title: string; onClick: (e: MouseEvent) => void }) {
+  return (
+    <span
+      className={`chip-mod${props.on ? ' on' : ''}`}
+      draggable
+      title={props.title}
+      onClick={props.onClick}
+      onDragStart={(e) => {
+        e.dataTransfer.setData(MOD_DRAG, props.id)
+        e.dataTransfer.effectAllowed = 'link'
+      }}
+    >
+      ⠿ {props.id}
+    </span>
+  )
+}
+
+// A new modulator, a cosine named after the scene's others; onAdd hears its id.
+export function AddModulator(props: { title?: string; onAdd?: (id: string) => void; children: ReactNode }) {
+  const { scene, edit } = useCtl()
+  return (
+    <button
+      className="mini"
+      title={props.title}
+      onClick={() => {
+        let n = scene.modulators.length + 1
+        while (scene.modulators.some((m) => m.id === `mod${n}`)) n++
+        const id = `mod${n}`
+        edit((d) => d.modulators.push({ id, wave: 'cos', period: 8, phase: 0, glide: 0, targets: [] }))
+        props.onAdd?.(id)
+      }}
+    >
+      {props.children}
+    </button>
+  )
+}
+
+// Every modulator, or only the one named, its editor open.
+export function Modulators({ only, onAdd }: { only?: string; onAdd?: (id: string) => void }) {
   const { scene, live, edit, setFocus } = useCtl()
   // the one modulator whose editor is open
-  const [open, setOpen] = useState<string | null>(null)
+  const [open, setOpen] = useState<string | null>(only ?? null)
   const change = (id: string, fn: (m: Modulator) => void) => edit((d) => fn(d.modulators.find((m) => m.id === id)!))
   // a loop plays each period snapped to it
   const plays = new Map(live.modulators.map((m) => [m.id, m.period]))
+  const shown = only ? scene.modulators.filter((m) => m.id === only) : scene.modulators
   return (
     <div className="panel-block">
       <div className="block-title">
@@ -65,39 +106,17 @@ export function Modulators() {
           >
             detune
           </button>
-          <button
-            className="mini"
-            onClick={() =>
-              edit((d) => {
-                let n = d.modulators.length + 1
-                while (d.modulators.some((m) => m.id === `mod${n}`)) n++
-                d.modulators.push({ id: `mod${n}`, wave: 'cos', period: 8, phase: 0, glide: 0, targets: [] })
-              })
-            }
-          >
-            + modulator
-          </button>
+          <AddModulator onAdd={onAdd}>+ modulator</AddModulator>
         </span>
       </div>
-      {scene.modulators.map((m) => (
+      {shown.map((m) => (
         <div className="mod" key={m.id}>
           <div
             className="mod-head mod-line"
             title={open === m.id ? 'close its editor' : 'open its editor'}
             onClick={() => setOpen(open === m.id ? null : m.id)}
           >
-            <span
-              className="chip-mod"
-              draggable
-              title="drag onto a knob"
-              onClick={(e) => e.stopPropagation()}
-              onDragStart={(e) => {
-                e.dataTransfer.setData(MOD_DRAG, m.id)
-                e.dataTransfer.effectAllowed = 'link'
-              }}
-            >
-              ⠿ {m.id}
-            </span>
+            <ModChip id={m.id} title="drag onto a knob" onClick={(e) => e.stopPropagation()} />
             {wavy(m) && <WaveLine m={m} />}
             <span className="mod-sum">
               {wavy(m) ? m.wave : `♪ ${m.listen}`}

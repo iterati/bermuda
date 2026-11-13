@@ -116,30 +116,34 @@ async function typeOn(address: string) {
   await page.keyboard.press('Enter')
   await page.waitForSelector('.knob-type')
 }
+// the context panel opened on the picked chip's every knob, beside the strip, by more ▸, the walk starting afresh
 const toMore = async () => {
   await page.click('.perform-side button[title="every knob of the picked chip"]')
-  await page.waitForSelector('.stage .group')
+  await page.waitForSelector('.context .group')
+  await page.evaluate(() => (document.activeElement as HTMLElement).blur())
 }
+// each knob once, at its first place: one on the strip and in the context panel is the strip's
+const once = (addresses: string[]) => [...new Set(addresses)]
 
 describe('Tab', () => {
   it('Tab walks the strip first, then the live knobs on screen, and Shift-Tab walks back', async () => {
-    expect(await walk(9)).toEqual([...STRIP, STRIP[0]])
-    expect(await walk(2, 'Shift-Tab')).toEqual([STRIP[7], STRIP[6]])
-    // a scene knob takes the app's focus with it, as a click does
-    expect(await page.$eval(knob(STRIP[6]), (el) => el.classList.contains('focused'))).toBe(true)
-    // every knob of the chip: its live ones on screen, in the page's order
-    await toMore()
+    expect(await walk(STRIP.length)).toEqual(STRIP)
+    // its first knob opened the context panel on the chip's every knob: the strip's, then the panel's live ones on
+    // screen, in the page's order, each a stop once
     const live = new Set(
       knobsOf(t1)
         .filter((at) => liveKnob(t1, at, strip(t1, 'sq1'), new Set()))
         .map((at) => at.address),
     )
-    const stops = (await shown()).filter((k) => live.has(k.at)).map((k) => k.at)
+    const stops = once((await shown()).filter((k) => live.has(k.at)).map((k) => k.at))
     // the strip's later pages among them
     expect(stops.filter((a) => !STRIP.includes(a)).length).toBeGreaterThan(0)
-    expect((await shown()).filter((k) => k.stop).map((k) => k.at)).toEqual(stops)
-    expect(await walk(stops.length + 1)).toEqual([...stops, stops[0]])
-    expect(await walk(2, 'Shift-Tab')).toEqual([stops[stops.length - 1], stops[stops.length - 2]])
+    expect(once((await shown()).filter((k) => k.stop).map((k) => k.at))).toEqual(stops)
+    const round = once([...STRIP, ...stops])
+    expect(await walk(round.length - STRIP.length + 1)).toEqual([...round.slice(STRIP.length), round[0]])
+    expect(await walk(2, 'Shift-Tab')).toEqual([round[round.length - 1], round[round.length - 2]])
+    // a scene knob takes the app's focus with it, as a click does
+    expect(await page.$eval(knob(round[round.length - 2]), (el) => el.classList.contains('focused'))).toBe(true)
   }, 60_000)
 
   it('Tab skips idle and dead knobs, and a knob turned joins the walk until a look is loaded', async () => {
@@ -153,10 +157,10 @@ describe('Tab', () => {
       })
       .map((at) => at.address)
     const all = await shown()
-    const idle = all.filter((k) => !k.stop).map((k) => k.at)
+    const idle = once(all.filter((k) => !k.stop).map((k) => k.at))
     expect(idle).toContain('levels[sq1].variants[0].share')
     expect(idle.some((a) => !dead.includes(a))).toBe(true)
-    const stops = all.filter((k) => k.stop).map((k) => k.at)
+    const stops = once([...STRIP, ...all.filter((k) => k.stop).map((k) => k.at)])
     expect(await walk(stops.length)).toEqual(stops)
     // a wheel notch on an idle knob, not a dead one, makes it a stop
     const turned = idle.find((a) => !dead.includes(a))!
@@ -164,9 +168,9 @@ describe('Tab', () => {
     await page.mouse.move(x, y)
     await page.mouse.wheel({ deltaY: -100 })
     await pause()
-    const joined = (await shown()).filter((k) => k.stop).map((k) => k.at)
+    const joined = once([...STRIP, ...(await shown()).filter((k) => k.stop).map((k) => k.at)])
     expect(joined).toContain(turned)
-    await page.keyboard.press('Escape')
+    await page.evaluate(() => (document.activeElement as HTMLElement).blur())
     expect(await walk(joined.length)).toEqual(joined)
     // until the look is loaded again
     await page.keyboard.press('1')

@@ -282,10 +282,10 @@ export function Knob(props: { label: string } & ({ at: Address } | { macro: stri
       onDrop={(e) => {
         if (macro) return
         e.preventDefault()
-        const id = e.dataTransfer.getData(MOD_DRAG)
+        const mod = e.dataTransfer.getData(MOD_DRAG)
         edit((d) => {
           // a drop carries the id of a modulator of this scene, or of one a look switch took away
-          const m = d.modulators.find((x) => x.id === id)
+          const m = d.modulators.find((x) => x.id === mod)
           if (m && !m.targets.some((t) => t.knob === id)) m.targets.push({ knob: id, depth: (hi - lo) / 10 })
         })
       }}

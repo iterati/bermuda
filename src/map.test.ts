@@ -132,8 +132,9 @@ async function press(within: string, text: string, p: Page = page) {
     if (await b.evaluate((el, text) => el.textContent!.startsWith(text) && el.checkVisibility(), text)) return b.click()
   throw new Error(`no ${within} button ${text}`)
 }
-const tab = (name: string) => press('.tabs', name)
-const lookName = (i: number) => `.stage .right ol.looks > li:nth-child(${i + 1}) .look-name`
+// an entry of the Stage's picker row, opening the context panel on it
+const pick = (name: string) => press('.picker', name)
+const lookName = (i: number) => `.context ol.looks > li:nth-child(${i + 1}) .look-name`
 const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem('bermuda.midi') ?? '{}') as Controls)
 // what the app shows: the view, the strip's page, the fader, the look, a strip knob's value, the focus (the app's
 // and the browser's, on nothing) and a typing field
@@ -276,8 +277,8 @@ describe('MIDI map mode', () => {
     expect(await page.$eval(`${knob(KNOB)} .knob-midi`, (el) => el.textContent)).toBe('cc21')
     expect(await page.$eval(`${macro(MACRO)} .knob-midi`, (el) => el.textContent)).toBe('cc22')
     // the looks, by their place
-    await tab('Bank')
-    const looks = await page.$$eval('.stage .right .look-name', (els) =>
+    await pick('Looks')
+    const looks = await page.$$eval('.context .look-name', (els) =>
       els.map((el) => [
         el.getAttribute('data-learn'),
         getComputedStyle(el).outlineStyle,
@@ -286,7 +287,7 @@ describe('MIDI map mode', () => {
     )
     expect(looks).toEqual(LOOKS.map((_, i) => [JSON.stringify({ slot: i }), 'dashed', i < 8 ? `n${8 + i}` : null]))
     // each macro's slider, and its head's mapping
-    await tab('Macros')
+    await pick('Macros')
     const sliders = await page.$$eval('.macro-slider', (els) =>
       els.map((el) => [el.getAttribute('data-learn'), getComputedStyle(el).outlineStyle]),
     )
@@ -315,7 +316,7 @@ describe('MIDI map mode', () => {
   }, 60_000)
 
   it('in map mode a press on a control arms its learn and changes nothing else, and a press on the one learning cancels it', async () => {
-    await tab('Bank')
+    await pick('Looks')
     await page.evaluate(() => (document.activeElement as HTMLElement).blur())
     const before = await showing()
     expect(before).toEqual({
@@ -364,7 +365,7 @@ describe('MIDI map mode', () => {
     // a double-click types nothing, and a macro's slider keeps its value
     await page.click(knob(KNOB), { count: 2 })
     expect(await showing()).toEqual(before)
-    await tab('Macros')
+    await pick('Macros')
     await page.evaluate(() => (document.activeElement as HTMLElement).blur())
     const slider = () => page.$eval('.macro-slider', (el) => (el as HTMLInputElement).valueAsNumber)
     const value = await slider()
@@ -403,7 +404,7 @@ describe('MIDI map mode', () => {
     await note(17)
     await page.click('.bar button[data-learn=\'{"mode":"decks"}\']')
     await note(20)
-    await tab('Bank')
+    await pick('Looks')
     await page.click(lookName(3))
     await note(11)
     expect(await line()).toBe(BANNER)
@@ -452,18 +453,18 @@ describe('MIDI map mode', () => {
     await page.keyboard.press('Escape')
     await page.keyboard.press('e')
     await page.waitForSelector('.app.stage')
-    await tab('Macros')
-    expect(await learnIn('.right')).toEqual([])
+    await pick('Macros')
+    expect(await learnIn('.context')).toEqual([])
     await page.keyboard.press('m')
-    expect(await learnIn('.right')).toEqual(t1.macros.map(() => 'MIDI learn'))
+    expect(await learnIn('.context')).toEqual(t1.macros.map(() => 'MIDI learn'))
     await page.click('.macro-head button[title^="map the next MIDI control"]')
     await cc(24)
-    expect(await learnIn('.right')).toEqual(t1.macros.map((_, i) => (i ? 'MIDI learn' : 'ch1 cc24')))
+    expect(await learnIn('.context')).toEqual(t1.macros.map((_, i) => (i ? 'MIDI learn' : 'ch1 cc24')))
     await page.keyboard.press('m')
-    expect(await learnIn('.right')).toEqual([])
+    expect(await learnIn('.context')).toEqual([])
     await page.keyboard.press('m')
     await page.click('.macro-head button[title="forget the MIDI control"]')
-    expect(await learnIn('.right')).toEqual(t1.macros.map(() => 'MIDI learn'))
+    expect(await learnIn('.context')).toEqual(t1.macros.map(() => 'MIDI learn'))
   }, 60_000)
 
   it('the learning line shows in Stage, Edit, Decks, Direct and Play while a control learns, the sheet closed, and its cancel ends the learning', async () => {
@@ -567,7 +568,7 @@ describe('MIDI map mode', () => {
     expect((await showing()).page).toBe('page 2/2')
     await page.click('svg.fader')
     expect((await showing()).fader).toBe('50%')
-    await tab('Bank')
+    await pick('Looks')
     await page.click(lookName(2))
     await pause()
     expect((await showing()).look).toBe(LOOKS[2].name)

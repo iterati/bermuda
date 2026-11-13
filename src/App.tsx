@@ -1,5 +1,8 @@
 // Bermuda: the picture, and over it (Stage) or beside it (Edit) the fader from scene A to scene B, the chain,
-// the picked chip's knobs, the modulators, the macros, MIDI, the looks and the bank. Decks puts A and B in their
+// the picked chip's knobs, the modulators, the macros, MIDI, the looks and the bank. The Stage is the play surface:
+// the slim fader at the top, one bottom deck of what is played (the picker row over the strip and the pads), and one
+// context panel at the right that opens on what is picked (a chip, a knob, a modulator, the macros, the looks, the
+// music, the edge) and closes on ✕ or Esc. Decks puts A and B in their
 // own previews either side of the mix, like a DJ mixer, so B can be cued while A plays. The controls edit one side,
 // A or B; every change is instant, and so is MIDI, which plays the side being edited and the fader. Play is the
 // picture alone with the bank over it: every change there rides a timed transition, the fader run from the side
@@ -52,6 +55,7 @@ import {
   CHIPS,
   clamp,
   depthOf,
+  knobKind,
   knobsOf,
   liveKnob,
   MAX_DEPTH,
@@ -68,7 +72,7 @@ import {
   type Address,
   type Bank as BankShape,
   type Controls,
-  type Edge,
+  type Edge as EdgeShape,
   type Fader as Pair,
   type MidiTarget,
   type Scene,
@@ -82,13 +86,13 @@ import { Chain } from './ui/Chain'
 import { Direct, type Video } from './ui/Direct'
 import { CtlContext, Dice, Section, type Armed, type Ctl } from './ui/controls'
 import { Deck } from './ui/Deck'
-import { Fader } from './ui/Fader'
+import { Edge, Fader } from './ui/Fader'
 import { FrameTime, type Frames } from './ui/FrameTime'
 import { wheelTurn } from './ui/Knob'
 import { KnobDetail } from './ui/KnobDetail'
 import { download, Looks } from './ui/Looks'
 import { MapTag, Midi, MidiLearning, Pads } from './ui/Midi'
-import { Macros, Modulators } from './ui/Motion'
+import { AddModulator, Macros, ModChip, Modulators } from './ui/Motion'
 import { Music } from './ui/Music'
 import { Perform } from './ui/Perform'
 import { Picture, type Side, type Transition } from './ui/Picture'
@@ -171,8 +175,11 @@ function timelineRefusal(next: Timeline, before: Timeline | null, looks: Scene[]
 
 const other = (side: Side): Side => (side === 'a' ? 'b' : 'a')
 
-// the Stage's right column, one block at a time
-const TABS = ['Music', 'Motion', 'Macros', 'Bank'] as const
+// what the Stage's context panel shows: the picked chip's every knob (a focused knob's detail above them), a modulator
+// alone, the macros, the looks and the bank to play from, the music or the edge
+type Context = 'chip' | { mod: string } | 'macros' | 'looks' | 'music' | 'edge'
+// the context panel's head, by what it shows
+const HEADS = { macros: 'macros', looks: 'looks and bank', music: 'music', edge: 'the A/B edge' } as const
 // the setup sheet's pages
 const SETUP = ['MIDI', 'Looks', 'Bank', 'Files'] as const
 
@@ -198,7 +205,7 @@ export function App() {
   const [entries, setEntries] = useState<Record<Side, string | undefined>>({ a: pair.a.name, b: pair.b.name })
   const [side, setSide] = useState<Side>('a')
   const [fader, setFader] = useState(0)
-  const [edge, setEdge] = useState<Edge>({ seconds: 2, stagger: 0.4, deepFirst: false })
+  const [edge, setEdge] = useState<EdgeShape>({ seconds: 2, stagger: 0.4, deepFirst: false })
   const scene = pair[side]
   const setScene = useCallback((fn: (s: Scene) => Scene) => setPair((p) => ({ ...p, [side]: fn(p[side]) })), [side])
   const [shown, setShown] = useState(scene)
@@ -228,9 +235,8 @@ export function App() {
   const [typing, setTyping] = useState<MidiTarget | null>(null)
   // each side's knobs turned by the wheel, typing or ↑ ↓ since a look was put there, which are live
   const [turned, setTurned] = useState<Record<Side, ReadonlySet<Address>>>({ a: new Set(), b: new Set() })
-  // the Stage's bottom panel: the Perform strip, or every knob of the picked chip; and its right column's tab
-  const [more, setMore] = useState(false)
-  const [tab, setTab] = useState<(typeof TABS)[number]>('Motion')
+  // what the Stage's context panel shows, while it is open; kept through another view and back
+  const [context, setContext] = useState<Context | null>(null)
   const [bpm, setBpm] = useState(60)
   // the song, microphone or tab being heard, and what it heard as the picture last drew; and why a tab's sound,
   // once heard, is heard no more
@@ -595,13 +601,32 @@ export function App() {
     prune(next)
   }
 
+  // a knob focused, as a press or Tab's walk focuses it: in the Stage the context panel opens on its chip, its detail
+  // above the chip's knobs
+  const focusKnob = useCallback(
+    (address: Address) => {
+      setFocus(address)
+      if (mode === 'stage') setContext('chip')
+    },
+    [mode],
+  )
   // the walk of Tab (by 1) and Shift-Tab (by -1) over the live knobs on screen, round from the last to the first: the
-  // Perform strip's first, then the rest in the page's order; from anywhere else, the next one after it on the page.
-  // A scene knob takes the app's focus too, as a click gives it.
+  // Perform strip's first, then the rest in the page's order, each knob once (one on the strip and in the context
+  // panel is a stop on the strip); from anywhere else, the next one after it on the page. A scene knob takes the
+  // app's focus too, as a click gives it.
   const walk = useCallback(
     (by: 1 | -1) => {
       const shown = [...doc.querySelectorAll<HTMLElement>('[data-tab]')].filter((el) => el.checkVisibility())
-      const stops = [...shown.filter((el) => el.closest('.perform')), ...shown.filter((el) => !el.closest('.perform'))]
+      const seen = new Set<string>()
+      const stops = [
+        ...shown.filter((el) => el.closest('.perform')),
+        ...shown.filter((el) => !el.closest('.perform')),
+      ].filter((el) => {
+        const id = el.dataset.knob ?? el.dataset.macro!
+        if (seen.has(id)) return false
+        seen.add(id)
+        return true
+      })
       if (!stops.length) return
       const at = doc.activeElement!
       const i = stops.indexOf(at as HTMLElement)
@@ -614,9 +639,9 @@ export function App() {
             : (stops.findLast((el) => !after(el)) ?? stops[stops.length - 1])
       tabbing.current = true
       next.focus()
-      if (next.dataset.knob) setFocus(next.dataset.knob)
+      if (next.dataset.knob) focusKnob(next.dataset.knob)
     },
-    [doc],
+    [doc, focusKnob],
   )
   // a click in either window ends the Tab focus
   useEffect(() => {
@@ -641,6 +666,10 @@ export function App() {
     armed && armed.side === side && armed.before.name === scene.name && scene.macros.some((m) => m.id === armed.id)
       ? armed
       : null
+  // the context panel shows nothing once the modulator it shows is gone
+  const opened =
+    context && typeof context === 'object' && !scene.modulators.some((m) => m.id === context.mod) ? null : context
+  const openMod = typeof opened === 'object' ? opened?.mod : undefined
   // a look saved in this browser is locked against the dice
   const locked = saved.some((s) => s.name === scene.name)
 
@@ -789,7 +818,7 @@ export function App() {
     scene,
     live: shown,
     focus: focused,
-    setFocus,
+    setFocus: focusKnob,
     edit,
     setKnob: (address, value) => setScene((s) => setKnob(s, address, value)),
     nudge,
@@ -875,10 +904,12 @@ export function App() {
         setMapping((m) => !m)
       else if (e.key === 'Escape' && mode === 'play') toMode('stage')
       else if (e.key === 'Escape') {
-        // a control learning keeps the setup sheet open and MIDI map mode on, its learning cancelled
+        // a control learning keeps the setup sheet open, MIDI map mode on and the context panel open, its learning
+        // cancelled
         if (!learningNow) {
           setSetup(null)
           setMapping(false)
+          setContext(null)
         }
         setFocus(null)
         setLearning(null)
@@ -994,7 +1025,15 @@ export function App() {
       onSwap={swap}
       onCopy={copy}
       pickup={faderWaits ? `MIDI fader waiting: move it to ${Math.round(fader * 100)}% to pick up` : undefined}
+      openEdge={mode === 'stage' ? () => setContext('edge') : undefined}
     />
+  )
+
+  // a picker row's entry, on while the context panel shows it
+  const pickEntry = (view: 'looks' | 'macros', label: string, title: string) => (
+    <button className={`mini pick-entry${opened === view ? ' on' : ''}`} title={title} onClick={() => setContext(view)}>
+      {label}
+    </button>
   )
 
   const musicBlock = <Music music={music} heard={heard} ended={ended} onListen={hear} onStop={unhear} />
@@ -1081,7 +1120,7 @@ export function App() {
     </aside>
   )
 
-  const cls = `app ${mode}${hidden ? ' hidden' : ''}${mapping ? ' mapping' : ''}`
+  const cls = `app ${mode}${hidden ? ' hidden' : ''}${mapping ? ' mapping' : ''}${opened ? ' context-open' : ''}`
   // what floats over the picture ahead of Direct: the readout, the bar and the error; then each view's panels
   const top = (
     <>
@@ -1183,6 +1222,15 @@ export function App() {
           >
             mutate
           </button>
+          {mode === 'stage' && (
+            <button
+              className={`mini${opened === 'music' ? ' on' : ''}`}
+              title="the music: a song, the microphone or a tab, and what it hears"
+              onClick={() => setContext('music')}
+            >
+              ♪ {!music ? 'song / mic' : heard?.locked ? `${tempo} bpm` : 'listening…'}
+            </button>
+          )}
           <button
             className={`mini map${mapping ? ' on' : ''}`}
             disabled={!HAS_MIDI}
@@ -1258,67 +1306,102 @@ export function App() {
     ) : mode === 'stage' ? (
       <>
         <section className="panel top">{faderPanel}</section>
-        <nav className="panel left">
-          <Chain picked={pickedChip} />
-        </nav>
-        <aside className="panel right">
-          <div className="seg tabs">
-            {TABS.map((t) => (
-              <button key={t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>
-                {t}
-              </button>
+        {/* the bottom deck: the picker row over the strip and the pads */}
+        <section className="panel bottom">
+          <div className="picker">
+            {pickEntry('looks', 'Looks', 'the looks, their presets and the bank')}
+            {pickEntry('macros', 'Macros', 'the macros, their targets and what they listen to')}
+            <span className="picker-sep" />
+            {/* a chip pressed picks it, as in the Chain, and opens the panel on it; + level opens nothing */}
+            <div
+              className="picker-chain"
+              onClickCapture={(e) => (e.target as Element).closest('.chip') && setContext('chip')}
+            >
+              <Chain picked={pickedChip} />
+            </div>
+            <span className="picker-sep" />
+            {scene.modulators.map((m) => (
+              <ModChip
+                key={m.id}
+                id={m.id}
+                on={openMod === m.id}
+                title="open it; drag onto a knob"
+                onClick={() => setContext({ mod: m.id })}
+              />
             ))}
+            <AddModulator title="+ modulator" onAdd={(id) => setContext({ mod: id })}>
+              +
+            </AddModulator>
           </div>
-          {tab === 'Music' && musicBlock}
-          {tab === 'Motion' && <Modulators />}
-          {tab === 'Macros' && <Macros />}
-          {tab === 'Bank' && (
-            <>
-              {looksPanel('play')}
-              {bankPanel('play')}
-            </>
-          )}
-        </aside>
-        {/* the knob detail floats over the knobs' panel, so opening it moves no knob */}
-        <div className="stage-bottom">
-          {more && focused && (
-            <div className="panel knob-slot">
-              <KnobDetail />
+          <Perform slots={slots} page={page} pages={pages} onPage={turnPage} onMore={() => setContext('chip')} />
+          {/* the controller's buttons under the strip's slots, and its fader under the pager */}
+          {HAS_MIDI && (
+            <div className="pads-row">
+              <Pads looks={looks} lit={lit} notes={mapping} onPad={(t) => t && trigger(t)} />
+              <div
+                className={`hw-fader${faderWaits ? ' waiting' : ''}`}
+                data-learn={JSON.stringify({ fader: true })}
+                title={`the A/B fader, as the controller's fader drives it${faderWaits ? ': waiting to pick up' : ''}`}
+              >
+                <span>A</span>
+                <span className="hw-track">
+                  <span className="hw-cap" style={{ left: `${fader * 100}%` }} />
+                </span>
+                <span>B</span>
+                <MapTag target={{ fader: true }} />
+              </div>
             </div>
           )}
-          <section className="panel bottom">
-            {more ? (
+        </section>
+        {/* the context panel: what was picked, whole */}
+        {opened && (
+          <aside className="panel context">
+            <div className="context-head">
+              <b>
+                {opened === 'chip'
+                  ? `${pickedChip}${focused ? ` › ${knobKind(focused).label}` : ''}`
+                  : typeof opened === 'object'
+                    ? `modulator ${opened.mod}`
+                    : HEADS[opened]}
+              </b>
+              <button
+                className="mini"
+                title="close (Esc)"
+                onClick={() => {
+                  setContext(null)
+                  setFocus(null)
+                }}
+              >
+                ✕
+              </button>
+            </div>
+            {opened === 'chip' && (
               <>
-                <button className="mini strip-back" title="back to the Perform strip" onClick={() => setMore(false)}>
-                  ◂ strip
-                </button>
+                {/* the detail's slot is of one height, so focusing a knob here moves no knob under it */}
+                <div className="knob-slot">
+                  {focused ? <KnobDetail /> : <span className="dim">no knob focused</span>}
+                </div>
                 <Section chip={pickedChip} />
               </>
-            ) : (
+            )}
+            {typeof opened === 'object' && (
+              <Modulators key={opened.mod} only={opened.mod} onAdd={(id) => setContext({ mod: id })} />
+            )}
+            {opened === 'macros' && <Macros />}
+            {opened === 'looks' && (
               <>
-                <Perform slots={slots} page={page} pages={pages} onPage={turnPage} onMore={() => setMore(true)} />
-                {/* the controller's buttons under the strip's slots, and its fader under the pager */}
-                {HAS_MIDI && (
-                  <div className="pads-row">
-                    <Pads looks={looks} lit={lit} notes={mapping} onPad={(t) => t && trigger(t)} />
-                    <div
-                      className={`hw-fader${faderWaits ? ' waiting' : ''}`}
-                      data-learn={JSON.stringify({ fader: true })}
-                      title={`the A/B fader, as the controller's fader drives it${faderWaits ? ': waiting to pick up' : ''}`}
-                    >
-                      <span>A</span>
-                      <span className="hw-track">
-                        <span className="hw-cap" style={{ left: `${fader * 100}%` }} />
-                      </span>
-                      <span>B</span>
-                      <MapTag target={{ fader: true }} />
-                    </div>
-                  </div>
-                )}
+                {looksPanel('play')}
+                {bankPanel('play')}
               </>
             )}
-          </section>
-        </div>
+            {opened === 'music' && musicBlock}
+            {opened === 'edge' && (
+              <div className="row">
+                <Edge edge={edge} onEdge={setEdge} />
+              </div>
+            )}
+          </aside>
+        )}
       </>
     ) : mode === 'decks' ? (
       <>
