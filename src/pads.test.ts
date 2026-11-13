@@ -390,6 +390,13 @@ describe('the pads row and the drawn controller', () => {
     // the strip's first knob turned off where look 1 has it, so loading the look again would show
     const fresh = (await showing()).value
     await cc(1, 0)
+    // drawn once the app gets to it, which a loaded machine may take longer than a pause for
+    await page.waitForFunction(
+      (k, v) => document.querySelector(`${k} .knob-value`)?.textContent !== v,
+      { polling: 50, timeout: 10_000 },
+      SLOT_1,
+      fresh,
+    )
     const before = await showing()
     expect(before.value).not.toBe(fresh)
     // the pads and the drawn fader's words and track, where they are
