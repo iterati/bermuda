@@ -73,6 +73,7 @@ import {
   type MidiTarget,
   type Scene,
   type Timeline,
+  type TriggerTarget,
   type View,
 } from './scene'
 import { needs } from './shader'
@@ -86,7 +87,7 @@ import { FrameTime, type Frames } from './ui/FrameTime'
 import { wheelTurn } from './ui/Knob'
 import { KnobDetail } from './ui/KnobDetail'
 import { download, Looks } from './ui/Looks'
-import { MapTag, Midi, MidiLearning } from './ui/Midi'
+import { MapTag, Midi, MidiLearning, Pads } from './ui/Midi'
 import { Macros, Modulators } from './ui/Motion'
 import { Music } from './ui/Music'
 import { Perform } from './ui/Perform'
@@ -669,40 +670,40 @@ export function App() {
   )
   // the next page or the one before, round from the last to the first
   const turnPage = (by: 1 | -1) => setPaged((p) => ({ key: pageKey, page: (pageOf(p) + by + pages) % pages }))
+  // what a learned button does: a view, the strip's page, a look (in Play a transition, as the number keys do)
+  const trigger = (t: TriggerTarget) => {
+    if ('mode' in t) toMode(t.mode)
+    else if ('page' in t) turnPage(t.page)
+    else if (looks[t.slot] && mode === 'play') go(keyframe(looks[t.slot]))
+    else if (looks[t.slot]) load(looks[t.slot])
+  }
+  // whether a learned button's LED is lit: its look showing, its view on, the strip having more than one page
+  const lit = (t: TriggerTarget) =>
+    'slot' in t ? looks[t.slot]?.name === scene.name : 'page' in t ? pages > 1 : t.mode === mode
 
   // the MIDI handlers read the app as it is now
   const now = useRef({
     scene,
     setScene,
     fader,
-    looks,
     mode,
     controls,
-    load,
-    go,
-    keyframe,
-    toMode,
+    trigger,
+    lit,
     learning: learningNow,
     slots,
-    pages,
-    turnPage,
   })
   useEffect(() => {
     now.current = {
       scene,
       setScene,
       fader,
-      looks,
       mode,
       controls,
-      load,
-      go,
-      keyframe,
-      toMode,
+      trigger,
+      lit,
       learning: learningNow,
       slots,
-      pages,
-      turnPage,
     }
   })
   useEffect(() => {
@@ -711,33 +712,13 @@ export function App() {
     return attach(
       midi,
       () => {
-        const { scene, fader, looks, mode, controls, slots, pages } = now.current
-        return echoes(
-          scene,
-          controls,
-          fader,
-          (t) => ('slot' in t ? looks[t.slot]?.name === scene.name : 'page' in t ? pages > 1 : t.mode === mode),
-          slots,
-        )
+        const { scene, fader, controls, lit, slots } = now.current
+        return echoes(scene, controls, fader, lit, slots)
       },
       {
         inputs: setInputs,
         message: (m) => {
-          const {
-            scene,
-            setScene,
-            fader,
-            looks,
-            mode,
-            controls,
-            load,
-            go,
-            keyframe,
-            toMode,
-            learning,
-            slots,
-            turnPage,
-          } = now.current
+          const { scene, setScene, fader, mode, controls, trigger, learning, slots } = now.current
           // a target learning takes the first control of its kind: knobs, macros, the fader and the strip's slots a
           // CC, triggers a note
           if (m.kind === 'note') {
@@ -747,11 +728,7 @@ export function App() {
               return saveControls({ ...controls, buttons: learnTrigger(controls.buttons, learning, m) })
             }
             const t = controls.buttons.find((x) => x.channel === m.channel && x.note === m.number)
-            // in Play a slot rides a transition, as the number keys do
-            if (t && 'mode' in t) toMode(t.mode)
-            else if (t && 'page' in t) turnPage(t.page)
-            else if (t && looks[t.slot] && mode === 'play') go(keyframe(looks[t.slot]))
-            else if (t && looks[t.slot]) load(looks[t.slot])
+            if (t) trigger(t)
             return
           }
           const key = keyOf('cc', m.channel, m.number)
@@ -1003,6 +980,8 @@ export function App() {
     />
   )
 
+  // the MIDI fader waiting to pick up where the A/B fader is
+  const faderWaits = !!controls.fader && waiting(controls.fader, fader, positions)
   const faderPanel = (
     <Fader
       pair={pair}
@@ -1014,11 +993,7 @@ export function App() {
       onEdge={setEdge}
       onSwap={swap}
       onCopy={copy}
-      pickup={
-        controls.fader && waiting(controls.fader, fader, positions)
-          ? `MIDI fader waiting: move it to ${Math.round(fader * 100)}% to pick up`
-          : undefined
-      }
+      pickup={faderWaits ? `MIDI fader waiting: move it to ${Math.round(fader * 100)}% to pick up` : undefined}
     />
   )
 
@@ -1032,6 +1007,7 @@ export function App() {
       looks={looks}
       controls={controls}
       fader={fader}
+      lit={lit}
       onControls={saveControls}
     />
   )
@@ -1319,7 +1295,27 @@ export function App() {
                 <Section chip={pickedChip} />
               </>
             ) : (
-              <Perform slots={slots} page={page} pages={pages} onPage={turnPage} onMore={() => setMore(true)} />
+              <>
+                <Perform slots={slots} page={page} pages={pages} onPage={turnPage} onMore={() => setMore(true)} />
+                {/* the controller's buttons under the strip's slots, and its fader under the pager */}
+                {HAS_MIDI && (
+                  <div className="pads-row">
+                    <Pads looks={looks} lit={lit} notes={mapping} onPad={(t) => t && trigger(t)} />
+                    <div
+                      className={`hw-fader${faderWaits ? ' waiting' : ''}`}
+                      data-learn={JSON.stringify({ fader: true })}
+                      title={`the A/B fader, as the controller's fader drives it${faderWaits ? ': waiting to pick up' : ''}`}
+                    >
+                      <span>A</span>
+                      <span className="hw-track">
+                        <span className="hw-cap" style={{ left: `${fader * 100}%` }} />
+                      </span>
+                      <span>B</span>
+                      <MapTag target={{ fader: true }} />
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </section>
         </div>

@@ -8,7 +8,7 @@ import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import { createServer, type ViteDevServer } from 'vite'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { LOOKS } from './looks'
-import { strip, type Controls } from './scene'
+import { strip, type Controls, type TriggerTarget } from './scene'
 
 let server: ViteDevServer
 let browser: Browser
@@ -88,6 +88,18 @@ const RIG: Controls = {
   fader: { channel: 1, control: 9, pickup: true },
   strip: Array.from({ length: 8 }, (_, i) => ({ channel: 1, control: 1 + i, index: i })),
 }
+// what the rig's pads learn, notes 8 to 23, the last three none
+const PADS: (TriggerTarget | null)[] = [
+  ...Array.from({ length: 8 }, (_, i) => ({ slot: i })),
+  { page: -1 },
+  { page: 1 },
+  { mode: 'stage' },
+  { mode: 'edit' },
+  { mode: 'decks' },
+  null,
+  null,
+  null,
+]
 
 const pause = (ms = 200) => new Promise((r) => setTimeout(r, ms))
 async function seed(controls: Controls) {
@@ -247,6 +259,8 @@ describe('MIDI map mode', () => {
         JSON.stringify({ macro: MACRO }),
       ]),
     )
+    // last on the page, the 13 learned pads and the drawn fader beside them
+    expect(learns.slice(-14)).toEqual([...PADS.flatMap((t) => (t ? [JSON.stringify(t)] : [])), '{"fader":true}'])
     // nothing else of the bar
     expect(await page.$$eval('.bar [data-learn]', (els) => els.length)).toBe(3)
     expect(await tags()).toEqual([
@@ -257,6 +271,13 @@ describe('MIDI map mode', () => {
       ...Array.from({ length: 8 }, (_, i) => ['slot', `E${i + 1} · cc${i + 1}`, `ch1 cc${i + 1}`]),
       ['{"page":-1}', 'n16', 'ch1 note 16'],
       ['{"page":1}', 'n17', 'ch1 note 17'],
+      // the pads under the strip, each its note, and the drawn fader under the pager
+      ...PADS.map((t, i) =>
+        t
+          ? [JSON.stringify(t), `n${8 + i}`, `ch1 note ${8 + i}`]
+          : ['hwpad empty', `n${8 + i}`, `note ${8 + i}: not learned`],
+      ),
+      ['{"fader":true}', 'cc9', 'ch1 cc9'],
     ])
     // the knob and the macro their look's CC, in their corner
     expect(await page.$eval(`${knob(KNOB)} .knob-midi`, (el) => el.textContent)).toBe('cc21')
