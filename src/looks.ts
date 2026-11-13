@@ -1732,7 +1732,15 @@ export const LOOKS: Scene[] = [
     ],
     presets: [
       { name: 'Grid', values: { 'levels[cells].lattice.jitter': 0, 'levels[nuclei].lattice.jitter': 0 } },
-      { name: 'Organic', values: { 'levels[cells].lattice.jitter': 0.9, 'levels[nuclei].lattice.jitter': 0.8 } },
+      {
+        name: 'Organic',
+        values: {
+          'levels[cells].lattice.jitter': 0.9,
+          'levels[nuclei].lattice.jitter': 0.8,
+          'levels[cells].affine.scale': 0.8,
+          'contour.rings': 4,
+        },
+      },
     ],
   }),
   // ---- remixes across lattice kinds ----
@@ -1883,8 +1891,11 @@ export const LOOKS: Scene[] = [
       mod('hue', 'cos', 48, [['palette.hue', 90]]),
     ],
     presets: [
-      { name: 'Dashes', values: { 'line.dots.size': 0.75, 'line.dots.count': 10 } },
-      { name: 'Pearls', values: { 'line.dots.size': 0, 'line.dots.count': 28, 'line.width': 0.012 } },
+      { name: 'Dashes', values: { 'line.dots.size': 0.75, 'line.dots.count': 10, 'levels[ants].affine.scale': 0.4 } },
+      {
+        name: 'Pearls',
+        values: { 'line.dots.size': 0, 'line.dots.count': 12, 'line.width': 0.03, 'levels[ants].affine.scale': 1.1 },
+      },
     ],
   }),
   scene({
@@ -1902,7 +1913,7 @@ export const LOOKS: Scene[] = [
           { value: 0.8, play: [0.5, 1] },
           {
             onion: 0.015,
-            join: join(star(6, 2, 0.12, { round: 1 }), [0.22, 0], { value: 0.05, play: [0.01, 0.1] }),
+            join: join(star(6, 2, 0.12, { round: 1 }), [0.22, 0], { value: 0.05, play: [0, 0.1] }),
           },
         ),
         at: { value: 0, spread: 0.5 },
@@ -1922,8 +1933,23 @@ export const LOOKS: Scene[] = [
       mod('hue', 'cos', 50, [['palette.hue', 70]]),
     ],
     presets: [
-      { name: 'Apart', values: { 'levels[blob1].variants[0].shape.join.blend': 0 } },
-      { name: 'Melted', values: { 'levels[blob1].variants[0].shape.join.blend': 0.12 } },
+      {
+        name: 'Apart',
+        values: {
+          'levels[blob1].variants[0].shape.join.blend': 0,
+          'levels[blob1].variants[0].shape.join.offset[0]': 0.4,
+          'levels[blob1].affine.scale': 1.6,
+        },
+      },
+      {
+        name: 'Melted',
+        values: {
+          'levels[blob1].variants[0].shape.join.blend': 0.1,
+          'levels[blob1].variants[0].shape.join.offset[0]': 0.12,
+          'levels[blob1].variants[0].shape.onion': 0.03,
+          'frame.zoom': 0.6,
+        },
+      },
     ],
   }),
   scene({
@@ -2111,7 +2137,16 @@ export const LOOKS: Scene[] = [
       mod('hue', 'cos', 50, [['palette.hue', 60]]),
     ],
     presets: [
-      { name: 'Still water', values: { 'levels[pond].cell.phase': 0.05, 'levels[drops].cell.turn': 0 } },
+      {
+        name: 'Still water',
+        values: {
+          'levels[pond].cell.phase': 0.04,
+          'levels[drops].cell.turn': 0,
+          'levels[drops].cell.phase': 0,
+          'contour.drift': 0.6,
+          'contour.rings': 2,
+        },
+      },
       {
         name: 'Whirlpool',
         values: { 'levels[pond].cell.turn': 9, 'levels[drops].cell.turn': -16, 'contour.drift': 1.8 },
@@ -2155,7 +2190,12 @@ export const LOOKS: Scene[] = [
     presets: [
       {
         name: 'Butterflies',
-        values: { 'levels[tile].variants[0].shape.twist': 80, 'levels[tile].variants[0].shape.form': 0.75 },
+        values: {
+          'levels[tile].variants[0].shape.twist': 90,
+          'levels[tile].variants[0].shape.form': 0.8,
+          'contour.rings': 1,
+          'levels[inlay].affine.scale': 1,
+        },
       },
       { name: 'Scales', values: { 'levels[tile].variants[0].shape.twist': 5, 'levels[inlay].affine.scale': 1.5 } },
     ],
@@ -2186,8 +2226,14 @@ export const LOOKS: Scene[] = [
       mod('hue', 'ramp', 80, [['palette.hue', 180]]),
     ],
     presets: [
-      { name: 'Point trap', values: { 'palette.trap.size': 0, 'palette.trap.weight': 3.6 } },
-      { name: 'Ring trap', values: { 'palette.trap.size': 0.4, 'palette.trap.weight': 2 } },
+      {
+        name: 'Point trap',
+        values: { 'palette.trap.size': 0, 'palette.trap.weight': 3.6, 'levels[o1].variants[0].shape.m': 5 },
+      },
+      {
+        name: 'Ring trap',
+        values: { 'palette.trap.size': 0.4, 'palette.trap.weight': 2, 'levels[o1].affine.scale': 1.4, 'frame.zoom': 1 },
+      },
       palettePreset('Rainbow', 'rainbow'),
     ],
   }),
