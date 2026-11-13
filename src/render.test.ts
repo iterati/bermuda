@@ -8,7 +8,9 @@
 // variation warps finite and not blank, ring and mirror draw as none where they have nothing to do, and the orbit
 // trap draws as none at weight 0. Each fill mode draws on every lattice, at fill 0 as none, in front order from one
 // cell, over the background and under the lines; a palette field at depth 0 draws as none, each kind recolours, and
-// one stepped at cells gives each fan one colour pair.
+// one stepped at cells gives each fan one colour pair. Halftone dots draw on each grid and every lattice, at amount 0
+// as none, swap grids landing on each end, sit still on the screen through a frame turn, and follow a link group's
+// spread.
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
@@ -16,7 +18,7 @@ import { build, type Rollup } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { findLevel, removeLevel, setLattice } from './edit'
 import { snapLoop } from './loop'
-import { background, BANK, fill, join, level, LOOKS, scene, shape, star } from './looks'
+import { background, BANK, fill, halftone, join, level, LOOKS, scene, shape, star } from './looks'
 import { morph, smooth } from './morph'
 import { advance, applyPreset, newLive, update, type Live } from './motion'
 import { bend, bendOf, entryScene, step, tangent, valuesOf, type Keyframe } from './play'
@@ -25,6 +27,7 @@ import {
   BACKGROUNDS,
   CELLS,
   FIELDS,
+  GRIDS,
   LATTICES,
   SHAPES,
   SPILLS,
@@ -32,6 +35,7 @@ import {
   type Edge,
   type Field,
   type Fill,
+  type Halftone,
   type Scene,
   type ShapeKind,
   type VariationKind,
@@ -135,20 +139,29 @@ function morphAt(a: Scene, b: Scene, x: number, edge: Edge, t: number) {
 
 // the first draw compiles the shader's software code, slow while another browser test runs beside it
 describe('the one shader', { timeout: 30_000 }, () => {
-  // the first draw of each of the everything program's three compiles and links it and builds its software code:
-  // 40 s the three, metal's the longest
-  it('compiles and links', { timeout: 90_000 }, async () => {
+  // the first draw of each of the everything program's nine compiles and links it and builds its software code:
+  // 40 s the three without the halftone, metal's the longest, and 2 minutes the six with it
+  it('compiles and links', { timeout: 300_000 }, async () => {
     const ok = await page.evaluate(
       () => !!(window.renderer ??= window.Bermuda.createRenderer(document.querySelector('canvas')!)),
     )
     expect(ok).toBe(true)
     const lines = look('Tapestry 7 ')
     const filled = (f: Parameters<typeof fill>[0]) => update(lines, (d) => d.levels.forEach((l) => (l.fill = fill(f))))
-    for (const [name, s] of [
+    // each of the three as plain, on the halftone's lattice and on its screen
+    const dotted = (s: Scene, grid: Halftone['grid']) =>
+      update(s, (d) => (d.levels[0].halftone = halftone({ grid, pitch: grid === 'lattice' ? 6 : 40 })))
+    const programs = [
       ['plain', lines],
       ['fills', filled({ bands: 4 })],
       ['metal', filled({ metal: 1 })],
-    ] as const) {
+    ] as const
+    for (const [name, s] of [
+      ...programs,
+      ...(['lattice', 'hex'] as const).flatMap((grid) =>
+        programs.map(([name, s]) => [`${name} on a ${grid} halftone`, dotted(s, grid)] as const),
+      ),
+    ]) {
       const { finite, mean } = await shoot(s, newLive())
       expect(finite, name).toBe(true)
       expect(mean, name).toBeGreaterThan(0.01)
@@ -661,6 +674,95 @@ describe('fills', () => {
     expect(furthest(painted, bare)).toBeGreaterThan(0.1)
     expect(furthest(sub(bareLines, bare), Array(bare.length).fill(0))).toBeGreaterThan(0.1)
     expect(furthest(sub(paintedLines, painted), sub(bareLines, bare))).toBeLessThan(1e-4)
+  })
+})
+
+describe('halftone', { timeout: 60_000 }, () => {
+  const still = { drift: 0, colour: 0, crawl: 0 }
+  const drawn = (s: Scene) => pixels(advance(s, newLive(), 0, 60), still)
+  const dotted = (s: Scene, id: string, h: Halftone) =>
+    update(s, (d) => (findLevel(d, id).level.halftone = structuredClone(h)))
+  const lines = scene({
+    name: 'lines',
+    levels: [level('a', { scale: 1.3, turn: 20, shape: star(6, 2.5, 0.4), at: 0, speed: 1, cellSpread: 0.3 })],
+    rings: 2,
+    radius: 0,
+    width: 0.004,
+  })
+  const ofGrid = (grid: Halftone['grid'], o: Parameters<typeof halftone>[0] = {}) =>
+    halftone({ grid, pitch: grid === 'lattice' ? 6 : 40, reach: 0.05, ...o })
+
+  it.each(GRIDS)('draws halftone dots on a %s grid finite and not blank', async (grid) => {
+    const mandala = look('Lattice - Mandala')
+    const px = await drawn(dotted(mandala, 'petals', ofGrid(grid, { pitch: grid === 'lattice' ? 7 : 48 })))
+    const { finite, mean, spread } = stats(px)
+    expect(finite).toBe(true)
+    expect(mean).toBeGreaterThan(0.01)
+    expect(spread).toBeGreaterThan(0.01)
+    expect(furthest(px, await drawn(mandala))).toBeGreaterThan(0.1)
+  })
+
+  it.each(LATTICES)('draws lattice dots on a %s lattice finite and not blank', async (kind) => {
+    const base = update(lines, (d) => setLattice(d, 'a', kind))
+    const { finite, mean, spread } = stats(await drawn(dotted(base, 'a', ofGrid('lattice', { reach: 0.1 }))))
+    expect(finite).toBe(true)
+    expect(mean).toBeGreaterThan(0.01)
+    expect(spread).toBeGreaterThan(0.01)
+  })
+
+  it.each(GRIDS)('at amount 0 draws a level as without the chip, on each grid (%s)', async (grid) => {
+    // a second level drawing dots runs the halftone's program over both, on the same screen
+    const pair = update(lines, (d) =>
+      d.levels.push(level('b', { scale: 1.7, shape: star(5, 2, 0.4), at: 0.5, speed: 1, halftone: ofGrid(grid) })),
+    )
+    for (const s of [lines, pair])
+      expect(furthest(await drawn(dotted(s, 'a', ofGrid(grid, { amount: 0 }))), await drawn(s))).toBeLessThan(1e-4)
+  })
+
+  it('a grid swap from lattice into a hex screen lands on A and B exactly at its ends', async () => {
+    const edge: Edge = { seconds: 2, stagger: 0.4, deepFirst: false }
+    const [a, b] = [dotted(lines, 'a', ofGrid('lattice')), dotted(lines, 'a', ofGrid('hex'))]
+    for (const [x, end] of [
+      [0, 'a'],
+      [1, 'b'],
+    ] as const) {
+      const m = morphAt(a, b, x, edge, 7.3)
+      const [s, live] = end === 'a' ? [m.sa, m.la] : [m.sb, m.lb]
+      expect(furthest(await pixels(m.scene, m.la, m.toward), await pixels(s, live)), `at ${x}`).toBeLessThan(1e-4)
+    }
+  })
+
+  it('screen dots stay put through a frame turn', async () => {
+    // one flat colour over the whole plane, a circle wider than its cell filled with no line over it, so each dot is
+    // whole and only the screen can place it
+    const flat = scene({
+      name: 'flat',
+      levels: [level('f', { shape: star(6, 2, 1.9, { round: 1 }), at: 0, speed: 1, fill: fill() })],
+      radius: 0,
+    })
+    const dots = dotted(flat, 'f', ofGrid('hex', { fade: 0 }))
+    const turned = update(dots, (d) => (d.frame.turn.value = 20))
+    const px = await drawn(dots)
+    expect(stats(px).spread).toBeGreaterThan(0.01)
+    expect(furthest(await drawn(turned), px)).toBeLessThan(1e-4)
+    // the plane turns under them: a lattice's dots turn with it
+    const lattice = dotted(flat, 'f', ofGrid('lattice', { fade: 0 }))
+    expect(
+      furthest(await drawn(update(lattice, (d) => (d.frame.turn.value = 20))), await drawn(lattice)),
+    ).toBeGreaterThan(0.1)
+  })
+
+  it('a link group with a spread on amount keeps the leader as lines and turns the deeper levels into dots', async () => {
+    const [led, rings] = [look('Halftone - LED rings'), look('Tapestry 1')]
+    for (const t of [0, 7.3])
+      expect(advance(led, newLive(), t, t).levels.map((l) => l.halftone!.amount.value)).toEqual([0, 1, 1, 1])
+    // the leader alone draws its lines, the whole group differs from Tapestry 1 by its deeper levels' dots, and with
+    // no spread the group draws Tapestry 1
+    const leader = (s: Scene) => update(s, (d) => d.levels.splice(1))
+    expect(furthest(await drawn(leader(led)), await drawn(leader(rings)))).toBeLessThan(1e-4)
+    expect(furthest(await drawn(led), await drawn(rings))).toBeGreaterThan(0.1)
+    const unspread = update(led, (d) => delete d.levels[0].halftone!.amount.spread)
+    expect(furthest(await drawn(unspread), await drawn(rings))).toBeLessThan(1e-4)
   })
 })
 

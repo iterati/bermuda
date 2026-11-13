@@ -14,7 +14,7 @@ import {
   type VariationKind,
 } from './scene'
 import { ENGINES, FILL_TEXEL, LAYOUT } from './engines'
-import { frontAlone, metalFlag } from './engines/deco'
+import { frontAlone, latticeDot, metalFlag } from './engines/deco'
 import { cell, lattice, VARIANT_TEXELS, type Place } from './engines/engine'
 import { stretchLine } from './engines/fractal'
 
@@ -36,7 +36,8 @@ import { stretchLine } from './engines/fractal'
 
 // A part of the shader beside its core, which every program holds: each variation, shape and lattice kind but the
 // first of its list (linear, star and oblique are the core's), screen lines' stretch, the joined shape, spill, dots,
-// the soak, the morph's far end and lone-level crossfade, and Deco's fills and their metal (which brings the fills).
+// the soak, the morph's far end and lone-level crossfade, Deco's fills and their metal (which brings the fills), and
+// its halftone and the halftone's screen (which brings the halftone).
 export type Part =
   | `variation.${Exclude<VariationKind, 'linear'>}`
   | 'stretch'
@@ -49,6 +50,8 @@ export type Part =
   | 'morph'
   | 'fill'
   | 'metal'
+  | 'halftone'
+  | 'screen'
 export const PARTS: readonly Part[] = ENGINES.flatMap((e) => e.parts)
 
 // The parts a scene draws with, sub-chains included, or a morph between two: both ends' and the morph's, as a
@@ -65,8 +68,9 @@ export function needs(a: Scene, b?: Scene): Set<Part> {
 }
 
 // The shader of the core and the parts given, every part's by default: each place in the core's text filled by the
-// engines, else the core's own there. Fills and metal keep the preprocessor's FILL and METAL (METAL brings FILL); a
-// kind or feature left out leaves the rest of the core's text as it is.
+// engines, else the core's own there. Fills and metal keep the preprocessor's FILL and METAL (METAL brings FILL), the
+// halftone and its screen HT and HTS (HTS brings HT); a kind or feature left out leaves the rest of the core's text as
+// it is.
 export function generateShader(parts: Iterable<Part> = PARTS): string {
   const on = new Set(parts)
   const has = (part: string) => on.has(part as Part)
@@ -354,88 +358,123 @@ Cell cellAt(int j, vec2 h, vec2 id, float w, float ring) {
 
 // What a cell's line draws at depth, scale being how many screen units a cell unit spans: echo rings 1/rings apart,
 // drifting by the ring phase. In a morph the far end's line is mixed in: the ring count morphs, and each end draws
-// with its own echo, ring phase, line kind and crawl.
-float drawn(Cell c, float ringPhase, float depth, float scale) {
+// with its own echo, ring phase, line kind and crawl. A reach above 0 draws the line that wide, and dotted lines
+// smooth there (a halftone's dots read it).
+float drawn(Cell c, float ringPhase, float depth, float scale, float reach) {
   float ra = uContour.x + uContour.y * depth, rb = uTowardRings.x + uTowardRings.y * depth;
   float k = PI * mix(max(ra, 1.), max(rb, 1.), uToward.y);
-  float lw = max(uLine.y + uLine.z * depth, 1e-5), lf = uFalloff.x + uFalloff.y * depth;
+  float lw = reach > 0. ? reach : max(uLine.y + uLine.z * depth, 1e-5), lf = uFalloff.x + uFalloff.y * depth;
+  float kind = reach > 0. && uLine.x > 3.5 ? 1. : uLine.x;
   vec4 dash = vec4(c.turn, c.rad * scale, max(uDots.x + uDots.y * depth, 1.), clamp(uDots.z + uDots.w * depth, 0., 1.));
-  float a = contour(c.d, k, ra, uContour.z + c.f * ringPhase, uLine.x, scale, lw, lf, dash, c.sgn * uCrawl.x);
+  float a = contour(c.d, k, ra, uContour.z + c.f * ringPhase, kind, scale, lw, lf, dash, c.sgn * uCrawl.x);
 ${at('drawn')}  // in screen units a cell the warps shrink to a few line widths across fades out rather than filling with line
   return a * mix(1., smoothstep(2. * lw, 8. * lw, scale), uLine.w);
 }
 
-${at('afterDrawn')}${at('beforeRender')}
+${at('afterDrawn')}// The walk down the chain from a point of the screen, a level a step: the point in the next level's input, how far the
+// chain has stretched the screen there (J), the ancestry index, the orbit trap's nearest, the weight grown so far, the
+// next level's row, the colour field's shift, and how far the frame's point is from the centre.
+struct Walk { vec2 p; mat2 J; float ci; float trap; float grown; int j; float shift; float r0; };
+
+// the walk from screen point uv (a screen height is 2) down the chain at row start
+Walk walk(vec2 uv, int start) {
+  Walk s;
+  s.p = rot(uFrame.w) * uv / uFrame.z + uFrame.xy;
+  s.r0 = length(s.p);
+  // the ancestry index starts from the colour field, as far as the radius, and the field shifts every colour
+  s.ci = uPalette.z * field(s.p);
+  s.shift = shiftAt(s.p);
+  // the orbit trap: how near the point has come to the trap's circle, from the frame's point on down the chain
+  s.trap = abs(s.r0 - uTrap.y);
+  s.J = rot(uFrame.w) / uFrame.z;
+  s.grown = 0.;
+  s.j = start;
+  return s;
+}
+
+// What a level draws: its line's light a in colour col, how many screen units a cell unit spans there (px), how much
+// of the pixel its paint covers (laid) and, at a lattice dot, how far the pixel is from the dot's centre (off, in cell
+// units).
+struct Draw { float a; vec3 col; float px; float laid; float off; };
+
+${at('beforeRender')}
+// The walk's step i at its level: what the level draws, its paint laid over ground, and the walk run on in its cell.
+// pitch above 0 draws it at its own lattice's nearest dot (pitch to a cell), reach above 0 its line that wide.
+Draw level(inout Walk s, inout vec3 ground, int i, float pitch, float reach) {
+  vec2 p = s.p;
+  mat2 J = s.J;
+  float ci = s.ci, trap = s.trap, grown = s.grown, r0 = s.r0, laid = 0., off = 0.;
+  int j = s.j;
+  gShift = s.shift;
+  // a level is as deep as the weight above it, so a level collapsing or growing moves the depths below smoothly
+  float depth = grown / uDepth;
+  vec4 t0 = row(j, 0), t1 = row(j, 1), t4 = row(j, 4), t5 = row(j, 5), t6 = row(j, 6), t7 = row(j, 7);
+  vec4 f0 = row(j, ${FILL_TEXEL});
+  float w = t0.x, kc;
+${at('flag')}  // affine, variations, lattice; the level weight blends the re-tiling toward pass-through
+${at('point', '  vec2 q0 = t0.y * (rot(t0.z) * p) + t1.xy, q = vary(q0, j);\n')}${at(
+    'cells',
+    `  vec4 cell = lattice(q, t1.zw, t7, kc);
+${latticeDot('cell', '  ')}  // the cell's offset, reflected where the Cell step mirrors
+  bool mirror = t4.x == ${cell('mirror')};
+  vec2 local = mirror ? mirrored(cell.xy, cell.zw) : cell.xy;
+  mat2 Jq = t0.y * rot(t0.z) * J;
+${has('stretch') ? '' : metalFlag(LAYOUT)}${stretchLine(has)}  J = J * (1. - w) + kc * Jq * w;
+  // how many screen units a cell unit spans here
+  float px = inversesqrt(max(abs(determinant(J)), 1e-12)), scale = mix(1., px, uLine.w);
+  // draw: the cell's shape and line
+  Cell own = cellAt(j, mix(p, local, w), cell.zw, w, ringOf(q, cell, t7.x));
+  float a = drawn(own, t4.z, depth, scale, reach);
+  // spill: the outlines of the shapes of the cells a step round it, drawn where they reach into this one (the
+  // nearest outline, so overlapping shapes each show theirs), faded in by spill; the parse keeps it to lattices
+  // whose cells are translates, triangle steps by half the pad to reach both halves, and voronoi's are its
+  // pad's neighbours, each at its own jittered point
+  Cell near = own;
+  vec2 nid = cell.zw;
+${frontAlone(LAYOUT)}`,
+  )}  // the line over a fill keeps as much of itself as the fill's line
+  a *= f0.y;
+  // a level whose cells are under a few pixels fades out rather than shimmer (log-polar's centre)
+  a *= exp(-r0 * (uRadial.x + uRadial.y * depth)) * w * smoothstep(1., 3., uRes.y * .5 * px);
+  // a colour field at cells is read at the middle of the first level's cell (its front cell's in front order), the
+  // level's warps left out, so a shape takes one colour; a lattice dot keeps its cell's, which the walk brings
+  if (i == 0 && uFieldC.w > 0. && pitch <= 0.) {
+    mat2 unturn = transpose(rot(t0.z)) / t0.y;
+    gShift = shiftAt(p - unturn * cell.xy);
+${at('fieldAtCells')}  }
+  // colour: the ancestry index pulls toward the level's own colour as far as the level is grown, plus a per-cell
+  // spread; a spilled outline wears its own cell's, by spill
+  float ni = mix(ci, t5.x + t5.z * hash(nid + near.seed * 3.7 + 11.), t5.y * w);
+${at('ancestry')}  ci = mix(ci, t5.x + t5.z * hash(cell.zw + own.seed * 3.7 + 11.), t5.y * w);
+  // the orbit trap takes in this level's point as far as the level is grown, and moves the index by its weight
+  trap = mix(trap, min(trap, abs(length(mix(p, local, w)) - uTrap.y)), w);
+  float li = mix(ci, ni, t6.w) + uTrap.x * trap;
+  vec3 col = colourAt(li);
+${at('paint')}  // the chain runs on in this cell, turned (and mirrored) by the Cell step
+  s.p = rot(own.f * t4.y * w) * mix(p, local, w);
+  s.J = J;
+  s.ci = ci;
+  s.trap = trap;
+  s.grown = grown + w;
+  float below = row(j, 9 + ${VARIANT_TEXELS} * own.v).z;
+  s.j = below >= 0. ? int(below) : int(t0.w);
+  s.shift = gShift;
+  return Draw(a, col, px, laid, off);
+}
+
 // one sample of the lines over the paint, which lies down the chain over the background bg, from the chain at row
 // start: added to it, or over it where the first hit leaves it uncovered
 vec3 render(vec2 fc, vec3 bg, int start) {
-  vec2 p = rot(uFrame.w) * ((fc * 2. - uRes) / uRes.y) / uFrame.z + uFrame.xy;
-  float r0 = length(p);
-  // the ancestry index starts from the colour field, as far as the radius, and the field shifts every colour
-  float ci = uPalette.z * field(p);
-  gShift = shiftAt(p);
+  vec2 uv = (fc * 2. - uRes) / uRes.y;
+  Walk s = walk(uv, start);
   vec3 add = vec3(0), first = vec3(0), ground = bg;
-  float cover = 0., grown = 0.;
-  // the orbit trap: how near the point has come to the trap's circle, from the frame's point on down the chain
-  float trap = abs(r0 - uTrap.y);
-  // how far the chain has stretched the screen at this pixel, for lines in screen units
-  mat2 J = rot(uFrame.w) / uFrame.z;
-  int j = start;
-  for (int i = 0; i < MAX_DEPTH; i++) {
-    if (j < 0) break;
-    // a level is as deep as the weight above it, so a level collapsing or growing moves the depths below smoothly
-    float depth = grown / uDepth;
-    vec4 t0 = row(j, 0), t1 = row(j, 1), t4 = row(j, 4), t5 = row(j, 5), t6 = row(j, 6), t7 = row(j, 7);
-    vec4 f0 = row(j, ${FILL_TEXEL});
-    float w = t0.x, kc;
-${at('flag')}    // affine, variations, lattice; the level weight blends the re-tiling toward pass-through
-${at('point', '    vec2 q0 = t0.y * (rot(t0.z) * p) + t1.xy, q = vary(q0, j);\n')}${at(
-    'cells',
-    `    vec4 cell = lattice(q, t1.zw, t7, kc);
-    // the cell's offset, reflected where the Cell step mirrors
-    bool mirror = t4.x == ${cell('mirror')};
-    vec2 local = mirror ? mirrored(cell.xy, cell.zw) : cell.xy;
-    mat2 Jq = t0.y * rot(t0.z) * J;
-${has('stretch') ? '' : metalFlag(LAYOUT)}${stretchLine(has)}    J = J * (1. - w) + kc * Jq * w;
-    // how many screen units a cell unit spans here
-    float px = inversesqrt(max(abs(determinant(J)), 1e-12)), scale = mix(1., px, uLine.w);
-    // draw: the cell's shape and line
-    Cell own = cellAt(j, mix(p, local, w), cell.zw, w, ringOf(q, cell, t7.x));
-    float a = drawn(own, t4.z, depth, scale);
-    // spill: the outlines of the shapes of the cells a step round it, drawn where they reach into this one (the
-    // nearest outline, so overlapping shapes each show theirs), faded in by spill; the parse keeps it to lattices
-    // whose cells are translates, triangle steps by half the pad to reach both halves, and voronoi's are its
-    // pad's neighbours, each at its own jittered point
-    Cell near = own;
-    vec2 nid = cell.zw;
-${frontAlone(LAYOUT)}`,
-  )}    // the line over a fill keeps as much of itself as the fill's line
-    a *= f0.y;
-    // a level whose cells are under a few pixels fades out rather than shimmer (log-polar's centre)
-    a *= exp(-r0 * (uRadial.x + uRadial.y * depth)) * w * smoothstep(1., 3., uRes.y * .5 * px);
-    // a colour field at cells is read at the middle of the first level's cell (its front cell's in front order), the
-    // level's warps left out, so a shape takes one colour
-    if (i == 0 && uFieldC.w > 0.) {
-      mat2 unturn = transpose(rot(t0.z)) / t0.y;
-      gShift = shiftAt(p - unturn * cell.xy);
-${at('fieldAtCells')}    }
-    // colour: the ancestry index pulls toward the level's own colour as far as the level is grown, plus a per-cell
-    // spread; a spilled outline wears its own cell's, by spill
-    float ni = mix(ci, t5.x + t5.z * hash(nid + near.seed * 3.7 + 11.), t5.y * w);
-${at('ancestry')}    ci = mix(ci, t5.x + t5.z * hash(cell.zw + own.seed * 3.7 + 11.), t5.y * w);
-    // the orbit trap takes in this level's point as far as the level is grown, and moves the index by its weight
-    trap = mix(trap, min(trap, abs(length(mix(p, local, w)) - uTrap.y)), w);
-    float li = mix(ci, ni, t6.w) + uTrap.x * trap;
-    vec3 col = colourAt(li);
-${at('paint')}    add += col * a;
-    float c = clamp(a, 0., 1.);
-    first += (1. - cover) * col * c;
+  float cover = 0.;
+${at('walks')}  for (int i = 0; i < MAX_DEPTH; i++) {
+    if (s.j < 0) break;
+${at('level', '    Draw d = level(s, ground, i, 0., 0.);\n')}    add += d.col * d.a;
+    float c = clamp(d.a, 0., 1.);
+    first += (1. - cover) * d.col * c;
     cover += (1. - cover) * c;
-    // the chain runs on in this cell, turned (and mirrored) by the Cell step
-    p = rot(own.f * t4.y * w) * mix(p, local, w);
-    grown += w;
-    float below = row(j, 9 + ${VARIANT_TEXELS} * own.v).z;
-    j = below >= 0. ? int(below) : int(t0.w);
   }
   return mix(ground + add, first + (1. - cover) * ground, uComposite);
 }

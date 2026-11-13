@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { paletteAt } from './colour'
-import { background, fill, join, level, LOOKS, scene, shape, star } from './looks'
+import { background, fill, halftone, join, level, LOOKS, scene, shape, star } from './looks'
 import { depthWindow, morph, smooth } from './morph'
 import type { Edge, Scene } from './scene'
 
@@ -127,6 +127,33 @@ describe('the morph', () => {
     expect(at(flat, front, 0.2).levels[0].cell.spill!.value).toBeGreaterThan(0)
     expect(at(flat, front, 1).levels[0]).toEqual(front.levels[0])
     expect(at(front, front, 0.5).levels[0].cell.spill!.value).toBe(1)
+  })
+
+  it('grows a halftone one side lacks from amount 0, and swaps its grid inside a dip of its amount', () => {
+    const lines = scene({ name: 'a', levels: [level('s')] })
+    const dots = halftone({ amount: 0.8, pitch: 12, size: 1.1, fade: 0.4, turn: 30, reach: 0.1 })
+    const dotted = scene({ name: 'b', levels: [level('s', { halftone: dots })] })
+    expect(at(lines, dotted, 0.25).levels[0].halftone).toEqual({ ...dots, amount: { value: 0.2 } })
+    expect(at(dotted, lines, 1).levels[0].halftone).toEqual({ ...dots, amount: { value: 0 } })
+    expect(at(lines, lines, 0.5).levels[0].halftone).toBeUndefined()
+    // a lattice into a hex screen: the grid swaps at the middle, where the amount is gone, and lands on B
+    const hex = scene({ name: 'c', levels: [level('s', { halftone: { ...dots, grid: 'hex', pitch: { value: 60 } } })] })
+    expect(at(dotted, hex, 0.49).levels[0].halftone).toMatchObject({ grid: 'lattice' })
+    expect(at(dotted, hex, 0.5).levels[0].halftone).toMatchObject({ grid: 'hex', amount: { value: 0 } })
+    expect(at(dotted, hex, 0.5).levels[0].halftone!.pitch.value).toBe(36)
+    expect(at(dotted, hex, 0.2).levels[0].halftone!.amount.value).toBeGreaterThan(0)
+    expect(at(dotted, hex, 1).levels[0]).toEqual(hex.levels[0])
+    expect(at(hex, hex, 0.5).levels[0].halftone!.amount.value).toBe(0.8)
+    // a link group's spread on amount dips with it
+    const spread = (h: typeof dots) => ({ ...h, amount: { value: 0, spread: 4 } })
+    const spreadAt = (t: number) =>
+      at(
+        scene({ name: 'a', levels: [level('s', { halftone: spread(dots) })] }),
+        scene({ name: 'b', levels: [level('s', { halftone: spread({ ...dots, grid: 'hex' }) })] }),
+        t,
+      ).levels[0].halftone!.amount
+    expect(spreadAt(0.5)).toEqual({ value: 0, spread: 0 })
+    expect(spreadAt(0)).toEqual({ value: 0, spread: 4 })
   })
 
   it('drops spill where the lattice swaps into one that cannot spill', () => {

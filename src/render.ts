@@ -1,11 +1,11 @@
 // The renderer: a cache of the shader's programs, each keyed by its sorted parts, compiled on first use or warmed
 // between frames (a few at a time where the browser compiles in parallel), and ready once it has drawn once into a
 // 1x1 target. A draw is given the parts its scene needs and draws on their program once it is ready; until then on
-// main's everything program, the one of its three (every part but fills and metal, every part but metal, and every
-// part) the live scene's fills need, where that is ready, else on the parts' program compiled then. It packs the
-// scene into the program's uniforms (setting one the program leaves out does nothing) and level rows, and draws one
-// full-screen triangle into whatever framebuffer is bound, over the whole canvas or a smaller picture in its
-// bottom-left corner.
+// main's everything program, the one of its nine (every part but fills and metal, every part but metal, and every
+// part, each without the halftone, with it but not its screen, and with both) the live scene's fills and halftones
+// need, where that is ready, else on the parts' program compiled then. It packs the scene into the program's uniforms
+// (setting one the program leaves out does nothing) and level rows, and draws one full-screen triangle into whatever
+// framebuffer is bound, over the whole canvas or a smaller picture in its bottom-left corner.
 import {
   allLevels,
   BACKGROUNDS,
@@ -15,6 +15,7 @@ import {
   LINES,
   MAX_LEVELS,
   MIXES,
+  screened,
   SHAPES,
   VARIATIONS,
   variationWeight,
@@ -120,12 +121,11 @@ export function packLevels(
   return data
 }
 
-// main's everything program, the fallback: plain, fills, and fills with metal, as the frame's fills need
-export const EVERYTHING: readonly (readonly Part[])[] = [
-  PARTS.filter((p) => p !== 'fill' && p !== 'metal'),
-  PARTS.filter((p) => p !== 'metal'),
-  PARTS,
-]
+// main's everything program, the fallback: plain, fills, and fills with metal, as the frame's fills need, each without
+// the halftone, with it, and with its screen too, as the frame's halftones need
+export const EVERYTHING: readonly (readonly Part[])[] = [['halftone', 'screen'], ['screen'], []].flatMap((ht) =>
+  [['fill', 'metal'], ['metal'], []].map((fill) => PARTS.filter((p) => !ht.includes(p) && !fill.includes(p))),
+)
 // at most this many programs compile at once where the browser compiles in parallel
 const IN_FLIGHT = 3
 
@@ -177,6 +177,7 @@ const locate = (gl: WebGL2RenderingContext, program: WebGLProgram) => {
     field: u('uField'),
     fieldC: u('uFieldC'),
     cross: u('uCross'),
+    screen: u('uScreen'),
   }
 }
 
@@ -328,12 +329,14 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
       at: 0,
     }
     const mixed = (a: boolean, b: boolean) => Number(a) * (1 - far.at) + Number(b) * far.at
-    // the everything program the fills need: metal where a level paints metal, fills where one paints at all, else
-    // plain (a morph's scene holds both ends' fills)
-    const fills = allLevels(scene.levels).flatMap(({ level }) =>
-      level.fill && level.fill.amount.value > 0 ? [level.fill] : [],
-    )
-    const all = everything[fills.some((f) => f.metal.value > 0) ? 2 : fills.length ? 1 : 0]
+    // the everything program the fills and halftones need: metal where a level paints metal, fills where one paints at
+    // all, else plain; and the screen where a level draws dots on one, the halftone where one draws dots at all (a
+    // morph's scene holds both ends' fills and halftones)
+    const levels = allLevels(scene.levels).map(({ level }) => level)
+    const fills = levels.flatMap(({ fill }) => (fill && fill.amount.value > 0 ? [fill] : []))
+    const dotted = levels.filter((level) => level.halftone && level.halftone.amount.value > 0)
+    const fill = fills.some((f) => f.metal.value > 0) ? 2 : fills.length ? 1 : 0
+    const all = everything[3 * (dotted.some(screened) ? 2 : dotted.length ? 1 : 0) + fill]
     // the parts' own program once ready; until then the everything program where it is ready, the parts' program
     // compiled between frames, else the parts' program compiled now
     const own = parts && sortedOf(parts)
@@ -410,6 +413,15 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
       bg?.scale.value ?? 1,
     )
     gl.uniform4f(loc.bgSoak, bg?.at[0].value ?? 0, bg?.at[1].value ?? 0, bg?.edge.value ?? 0, bg?.seep.value ?? 0)
+    // the picture's one screen, the first screened level's, on while a screened level draws dots
+    const screen = levels.find(screened)?.halftone
+    gl.uniform4f(
+      loc.screen,
+      dotted.some(screened) ? 1 : 0,
+      screen?.pitch.value ?? 1,
+      (screen?.turn.value ?? 0) * RAD,
+      screen?.grid === 'hex' ? 1 : 0,
+    )
     gl.uniform1i(loc.aa, post.aa)
     gl.uniform1f(loc.gamma, post.gamma.value)
     gl.drawArrays(gl.TRIANGLES, 0, 3)

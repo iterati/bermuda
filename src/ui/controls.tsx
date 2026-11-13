@@ -25,6 +25,7 @@ import {
   fielded,
   FIELDS,
   folded,
+  GRIDS,
   hardRange,
   LATTICES,
   knobsOf,
@@ -1037,6 +1038,62 @@ function LevelSection({ id }: { id: string }) {
             }
           >
             + fill
+          </button>
+        </div>
+      )}
+      {level.halftone ? (
+        <Row
+          title="halftone"
+          knobs={[
+            ['halftone', `${at}.halftone.amount`],
+            ['pitch', `${at}.halftone.pitch`],
+            ['size', `${at}.halftone.size`],
+            ['fade', `${at}.halftone.fade`],
+            ['turn', `${at}.halftone.turn`],
+            ['reach', `${at}.halftone.reach`],
+          ]}
+        >
+          <Choice
+            label="grid"
+            value={level.halftone.grid}
+            options={GRIDS}
+            onChange={(grid) => edit((d) => (findLevel(d, id).level.halftone!.grid = grid))}
+          />
+          <button
+            className="mini"
+            title="drop the halftone"
+            onClick={() =>
+              edit((d) => {
+                delete findLevel(d, id).level.halftone
+                prune(d)
+              })
+            }
+          >
+            ×
+          </button>
+        </Row>
+      ) : (
+        <div className="row">
+          <span className="row-title">halftone</span>
+          <button
+            className="mini"
+            title="draw this level as dots, each sized by how much of it draws there: on its own lattice or a screen"
+            onClick={() =>
+              edit(
+                (d) =>
+                  (findLevel(d, id).level.halftone = {
+                    amount: { value: 1 },
+                    grid: 'lattice',
+                    pitch: { value: 8 },
+                    size: { value: 1 },
+                    fade: { value: 0.6 },
+                    turn: { value: 0 },
+                    reach: { value: 0.05 },
+                  }),
+              )
+            }
+          >
+            + halftone
           </button>
         </div>
       )}

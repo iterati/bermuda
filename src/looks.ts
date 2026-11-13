@@ -1,5 +1,5 @@
 // The built-in looks: four Tapestries made through the level chain, the bank's twenty remixing them, then older remixes,
-// then the deco family's fills.
+// then the deco family's fills and its halftones.
 // Periods are in clock units, one a second at the default 60 bpm; angles are in degrees. Each is wired to the music
 // (music.ts wire) but the one made for it, wired its own way.
 import { stopsFromCosine } from './colour'
@@ -11,6 +11,7 @@ import type {
   Bank,
   Dots,
   Fill,
+  Halftone,
   Join,
   Knob,
   LatticeKind,
@@ -89,6 +90,7 @@ type LevelSpec = {
   speed?: K
   cellSpread?: K
   fill?: Fill
+  halftone?: Halftone
 }
 
 export function level(id: string, s: LevelSpec = {}): Level {
@@ -115,6 +117,7 @@ export function level(id: string, s: LevelSpec = {}): Level {
   if (s.sectors !== undefined) out.lattice.sectors = s.sectors
   if (s.link) out.link = s.link
   if (s.fill) out.fill = structuredClone(s.fill)
+  if (s.halftone) out.halftone = structuredClone(s.halftone)
   return out
 }
 
@@ -236,6 +239,20 @@ export const fill = (s: Partial<Record<Exclude<keyof Fill, 'front'>, K>> & { fro
   ramp: k(s.ramp ?? 0),
   alternate: k(s.alternate ?? 0),
   ...(s.front ? { front: true } : {}),
+})
+
+// a level drawn as dots on its own lattice, 8 a cell, each dimmed most of the way as it shrinks, unless the spec says
+// otherwise
+export const halftone = (
+  s: Partial<Record<Exclude<keyof Halftone, 'grid'>, K>> & { grid?: Halftone['grid'] } = {},
+): Halftone => ({
+  amount: k(s.amount ?? 1),
+  grid: s.grid ?? 'lattice',
+  pitch: k(s.pitch ?? 8),
+  size: k(s.size ?? 1),
+  fade: k(s.fade ?? 0.6),
+  turn: k(s.turn ?? 0),
+  reach: k(s.reach ?? 0),
 })
 
 // a palette of OKLCh stops (lightness, chroma, hue) evenly round the index, each segment mixed the one way
@@ -2610,6 +2627,67 @@ export const LOOKS: Scene[] = [
     },
     gamma: 1,
     modulators: [mod('open', 'cos', 24, [['levels[fan].variants[0].shape.form', 0.04]])],
+  }),
+  // the halftones: Lattice - Mandala with its petals pressed into dots on their own lattice, the lace filled in bands
+  scene({
+    name: 'Halftone - Mandala press',
+    zoom: 0.55,
+    levels: [
+      level('petals', {
+        lattice: 'polar',
+        sectors: 12,
+        e2: [0.25, 0.9],
+        shape: star(6, 3, 0.4, { round: 0.2 }),
+        at: 0,
+        speed: 0.6,
+        halftone: halftone({ pitch: 7, fade: 0.7, reach: 0.1 }),
+      }),
+      level('lace', {
+        scale: 2.6,
+        turn: 30,
+        e2: HEX,
+        shape: star(6, 2, 0.42, { twist: 30 }),
+        at: 0.4,
+        fill: fill({ tone: 0.5, bands: 4, step: 0.1 }),
+      }),
+      level('seed', { scale: R3, turn: 30, e2: HEX, shape: star(6, 4, 0.4), at: 0.7 }),
+    ],
+    rings: { value: 2, play: [1, 4] },
+    drift: { value: 0.3, play: [0.1, 0.6] },
+    radialWeight: 0.15,
+    width: { value: 0.004, spread: 0.004 },
+    palette: 'dusk',
+    radius: 0.3,
+    modulators: [
+      mod('spin', 'ramp', 240, [['frame.turn', 180]]),
+      mod('stagger', 'cos', 32, [['levels[petals].lattice.e2[0]', 0.25]]),
+      mod('rings', 'cos', 21, [['levels[petals].lattice.e2[1]', 0.15]]),
+      mod('character', 'tri', 15, [['levels[seed].variants[0].shape.m', 1.5]]),
+      mod('hue', 'cos', 60, [['palette.hue', 60]]),
+    ],
+  }),
+  // Tapestry 1 as LED rings: the halftone's amount spread over the link group from 0, so the leader stays lines and
+  // the deeper three turn into hex dots on the screen, each as dim as it is small
+  scene({
+    name: 'Halftone - LED rings',
+    zoom: 1.78,
+    levels: linked('sq', 4, {
+      scale: { value: 1.75, play: [1.25, 2.25] },
+      shape: star(6, 2, 0.5, { twist: 30 }),
+      at: { value: 0, spread: 1 },
+      speed: 0.35,
+      halftone: halftone({ amount: { value: 0, spread: 4 }, grid: 'hex', pitch: 90, fade: 1, reach: 0.05 }),
+    }),
+    rings: 1.9,
+    drift: 0.25,
+    falloff: 1.5,
+    time: 1 / 3,
+    gamma: 1,
+    modulators: [
+      mod('breathe', 'cos', 119, [['levels[sq1].affine.scale', 0.5]]),
+      mod('size', 'tri', 17, [['levels[sq1].variants[0].shape.r', 0.4]]),
+      mod('gain', 'cos', 69, [['contour.radialWeight', 2]]),
+    ],
   }),
 ]
   .map((look) => (look.modulators.some((m) => m.listen) ? look : update(look, wire)))

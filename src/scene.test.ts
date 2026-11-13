@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { background, BANK, fill, join, level, LOOKS, mod, scene, shape, star } from './looks'
+import { background, BANK, fill, halftone, join, level, LOOKS, mod, scene, shape, star } from './looks'
 import { capturePreset } from './motion'
 import {
   BACKGROUNDS,
@@ -10,6 +10,7 @@ import {
   folded,
   FEATURES,
   FORMLESS,
+  GRIDS,
   hardRange,
   KINDS,
   kindOf,
@@ -139,6 +140,27 @@ describe('a scene as JSON', () => {
       expect(resolve(look, 'levels[l1].fill.bands')?.value).toBe(8)
       expect(kindOf('palette.field.centre[1]')).toBe('palette.field.centre[1]')
     }
+  })
+
+  it("round-trips a halftone on each grid, and on a linked level's leader", () => {
+    const look = scene({
+      name: 'dots',
+      levels: [
+        ...GRIDS.map((grid, i) =>
+          level(`h${i}`, { halftone: halftone({ grid, pitch: { value: 40, play: [20, 60] }, turn: 15, reach: 0.05 }) }),
+        ),
+        level('lead', { halftone: halftone({ amount: { value: 0, spread: 4 }, grid: 'hex', fade: 1 }) }),
+        level('follow', {
+          link: 'lead',
+          halftone: halftone({ amount: { value: 0, spread: 4 }, grid: 'hex', fade: 1 }),
+        }),
+      ],
+      modulators: [mod('press', 'cos', 16, [['levels[h0].halftone.size', 0.2]])],
+    })
+    expect(parseScene(JSON.stringify(look))).toEqual(look)
+    expect(look.levels.map((l) => l.halftone!.grid)).toEqual([...GRIDS, 'hex', 'hex'])
+    expect(resolve(look, 'levels[h1].halftone.pitch')?.value).toBe(40)
+    expect(kindOf('levels[lead].halftone.turn')).toBe('levels[].halftone.turn')
   })
 
   it('names every knob by a path through level ids, sub-chains included', () => {
@@ -272,6 +294,47 @@ describe('the knob kinds', () => {
     const macros = [{ id: 'x', name: 'x', value: 0, targets: [{ knob: 'levels[a].fill.metal', from: 0, to: 1 }] }]
     expect(showing({}, { macros })).toEqual(at.filter((k) => k !== 'step'))
     expect(showing({ bands: 0 }, { modulators: driven('bands') })).toContain('step')
+  })
+
+  it("shows the halftone's knobs once amount can rise, turn on screens only, and the screen's pitch and turn on the first screened level alone", () => {
+    const at = ['amount', 'pitch', 'size', 'fade', 'turn', 'reach']
+    const showing = (s: Scene, level: Address) => at.filter((k) => shows(s, `${level}.halftone.${k}`))
+    const one = (o: Parameters<typeof halftone>[0], more: Partial<Parameters<typeof scene>[0]> = {}) =>
+      showing(scene({ name: 'h', levels: [level('a', { halftone: halftone(o) })], ...more }), 'levels[a]')
+    expect(one({ amount: 0 })).toEqual(['amount'])
+    expect(one({})).toEqual(at.filter((k) => k !== 'turn'))
+    expect(one({ grid: 'square' })).toEqual(at)
+    expect(one({ amount: 0, grid: 'hex' })).toEqual(['amount'])
+    expect(one({ amount: { value: 0, spread: 4 }, grid: 'hex' })).toEqual(at)
+    expect(one({ amount: { value: 0, play: [0, 1] } })).toEqual(at.filter((k) => k !== 'turn'))
+    const driven = [mod('m', 'cos', 8, [['levels[a].halftone.amount', 0.5]])]
+    expect(one({ amount: 0 }, { modulators: driven })).toEqual(at.filter((k) => k !== 'turn'))
+    const macros = [{ id: 'x', name: 'x', value: 0, targets: [{ knob: 'levels[a].halftone.amount', from: 0, to: 1 }] }]
+    expect(one({ amount: 0, grid: 'square' }, { macros })).toEqual(at)
+    // one screen a picture: the first screened level's, a sub-chain's after its parent, so a later one's pitch and
+    // turn are dead, while a lattice level keeps its own pitch
+    const below = level('c', { halftone: halftone({ grid: 'square' }) })
+    const three = scene({
+      name: 'three',
+      levels: [
+        level('a', { halftone: halftone(), variants: [{ share: 1, shape: star(6, 2, 0.4), below: [below] }] }),
+        level('b', { halftone: halftone({ grid: 'hex' }) }),
+      ],
+    })
+    const [a, c, b] = ['levels[a]', 'levels[a].variants[0].below[c]', 'levels[b]'].map((l) => showing(three, l))
+    expect([a, c, b]).toEqual([at.filter((k) => k !== 'turn'), at, ['amount', 'size', 'fade', 'reach']])
+    // the first screened level sets the screen at amount 0 too, so its pitch and turn show while a later one draws
+    const first = scene({
+      name: 'first',
+      levels: [
+        level('x', { halftone: halftone({ amount: 0, grid: 'hex' }) }),
+        level('y', { halftone: halftone({ grid: 'square' }) }),
+      ],
+    })
+    expect(['levels[x]', 'levels[y]'].map((l) => showing(first, l))).toEqual([
+      ['amount', 'pitch', 'turn'],
+      ['amount', 'size', 'fade', 'reach'],
+    ])
   })
 
   it("shows the field's kind and centre once depth or radius can move, its angle on linear and its scale on noise", () => {
@@ -834,6 +897,21 @@ describe('the parse refuses a broken scene, naming its field', () => {
         delete (s.levels[0].fill as Partial<Fill>).ramp
       }),
       /^levels\[sq1\]\.fill\.ramp: is missing/,
+    ],
+    [
+      'a halftone on an unknown grid',
+      broken((s) => (s.levels[0].halftone = { ...halftone(), grid: 'dots' as 'hex' })),
+      /^levels\[sq1\]\.halftone\.grid: must be one of lattice, square, hex/,
+    ],
+    [
+      'a halftone of pitch 0',
+      broken((s) => (s.levels[0].halftone = halftone({ pitch: 0 }))),
+      /^levels\[sq1\]\.halftone\.pitch\.value: 0 is outside 1 to 160/,
+    ],
+    [
+      'a halftone of size 1.3',
+      broken((s) => (s.levels[0].halftone = halftone({ size: 1.3 }))),
+      /^levels\[sq1\]\.halftone\.size\.value: 1\.3 is outside 0 to 1\.2/,
     ],
     [
       'a colour field of an unknown kind',

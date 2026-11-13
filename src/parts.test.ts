@@ -1,22 +1,22 @@
 // The shader's parts: needs gives a scene the variation, shape and lattice kinds and the features it holds, by
 // presence, the same at every preset, dice and frame, and a morph both ends' and the morph's; the generator leaves out
-// each part not given and, with every part on, gives the app's three programs; the engine registry gives every part to
-// one engine, in PARTS' order. In WebGL2 (headless Chrome) the core alone and every part on compile and draw, and every
-// look and preset, and every bank link's middle, draws on a program of only its own parts exactly as on the everything
-// program, both from the renderer's cache. The cache draws a scene's first frame on its own program, compiled then, or
-// on the everything program while its own is not ready; it warms the sets it is given in order, each once with a 1x1
-// draw, keys a program by its sorted parts and gives its compile time.
+// each part not given and, with every part on but its fills' and halftones', gives the app's nine everything programs;
+// the engine registry gives every part to one engine, in PARTS' order. In WebGL2 (headless Chrome) the core alone and
+// every part on compile and draw, and every look and preset, and every bank link's middle, draws on a program of only
+// its own parts exactly as on the everything program, both from the renderer's cache. The cache draws a scene's first
+// frame on its own program, compiled then, or on the everything program while its own is not ready; it warms the sets
+// it is given in order, each once with a 1x1 draw, keys a program by its sorted parts and gives its compile time.
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import { build, type Rollup } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { ENGINES } from './engines'
-import { background, BANK, fill, join, level, LOOKS, scene, shape, star } from './looks'
+import { background, BANK, fill, halftone, join, level, LOOKS, scene, shape, star } from './looks'
 import { morph } from './morph'
 import { advance, applyPreset, dice, newLive, update, type Live } from './motion'
 import { entryScene } from './play'
-import type { Drew, Toward } from './render'
+import { EVERYTHING, type Drew, type Toward } from './render'
 import { knobsOf, LATTICES, SHAPES, VARIATIONS, type Scene } from './scene'
 import { generateShader, needs, PARTS, type Part } from './shader'
 
@@ -76,7 +76,7 @@ describe('needs', () => {
     )
   })
 
-  it('needs a join, spill, dots, a soak and a fill only where the scene has them, and the stretch for screen lines or metal', () => {
+  it('needs a join, spill, dots, a soak, a fill and a halftone only where the scene has them, and the stretch for screen lines or metal', () => {
     const at = (s: Partial<Parameters<typeof scene>[0]>, l: Parameters<typeof level>[1] = {}) =>
       sorted(needs(scene({ name: 'at', levels: [level('a', l)], ...s })))
     expect(at({}, { shape: star(6, 2, 0.4, { join: join(shape('box', 0.2, 0.5), [0.1, 0], 0.05, 0) }) })).toEqual([
@@ -90,6 +90,9 @@ describe('needs', () => {
     expect(at({ background: background('gradient') })).toEqual([])
     // a fill brings metal by presence, at metal 0, and metal the stretch
     expect(at({}, { fill: fill({ amount: 0 }) })).toEqual(['fill', 'metal', 'stretch'])
+    // a halftone by presence, at amount 0, and a screened one the screen
+    expect(at({}, { halftone: halftone({ amount: 0 }) })).toEqual(['halftone'])
+    expect(at({}, { halftone: halftone({ amount: 0, grid: 'square' }) })).toEqual(['halftone', 'screen'])
     expect(at({ units: 'screen' })).toEqual(['stretch'])
   })
 
@@ -165,36 +168,30 @@ describe('generateShader', () => {
     }
   })
 
-  it("generates main's three programs with every part on, without metal, and without fill and metal", () => {
-    const programs = [
-      generateShader(),
-      generateShader(PARTS.filter((p) => p !== 'metal')),
-      generateShader(PARTS.filter((p) => p !== 'metal' && p !== 'fill')),
-    ]
+  it("generates main's nine programs: every part on, without metal, and without fill and metal, each without the halftone, without its screen, and with both", () => {
+    const programs = EVERYTHING.map(generateShader)
     // the defines before METAL's, which brings FILL
     const defines = (text: string) => text.split('#ifdef METAL')[0].match(/^#define \w+$/gm) ?? []
-    expect(programs.map(defines)).toEqual([['#define METAL'], ['#define FILL'], []])
+    const fills = [[], ['#define FILL'], ['#define METAL']]
+    expect(programs.map(defines)).toEqual(
+      [[], ['#define HT'], ['#define HTS', '#define HT']].flatMap((ht) => fills.map((f) => [...f, ...ht])),
+    )
     for (const text of programs) expect(kindsIn(text)).toEqual(every)
-    expect(generateShader(PARTS)).toBe(programs[0])
+    expect(generateShader(PARTS)).toBe(programs[8])
   })
 
-  it("calls vary, lattice, cellAt and drawn once each in render, with every part on and in main's three programs", () => {
+  it("calls vary, lattice, cellAt, drawn and level once each in render, with every part on and in main's nine programs", () => {
     // each function's call sites, its name's every use but its definition: a compiler inlines each call, so the own
     // cell and the cells round it share one lattice and one cellAt, and the stretch's probes the level's one vary
     const calls = (text: string) =>
       Object.fromEntries(
-        (['vary', 'lattice', 'cellAt', 'drawn'] as const).map((fn) => [
+        (['vary', 'lattice', 'cellAt', 'drawn', 'level'] as const).map((fn) => [
           fn,
           (text.match(new RegExp(`\\b${fn}\\(`, 'g'))?.length ?? 0) - 1,
         ]),
       )
-    const once = { vary: 1, lattice: 1, cellAt: 1, drawn: 1 }
-    for (const parts of [
-      PARTS,
-      PARTS.filter((p) => p !== 'metal'),
-      PARTS.filter((p) => p !== 'metal' && p !== 'fill'),
-      [],
-    ])
+    const once = { vary: 1, lattice: 1, cellAt: 1, drawn: 1, level: 1 }
+    for (const parts of [PARTS, ...EVERYTHING, []])
       expect(calls(generateShader(parts)), `${parts.length} parts`).toEqual(once)
   })
 })
@@ -217,6 +214,8 @@ describe('the engine registry', () => {
       'morph',
       'fill',
       'metal',
+      'halftone',
+      'screen',
     ])
     expect(new Set(parts).size).toBe(parts.length)
     expect(ENGINES.map((e) => e.name)).toEqual(['fractal', 'shapes', 'tiling', 'lines', 'backgrounds', 'morph', 'deco'])
@@ -348,7 +347,7 @@ describe('in WebGL2', () => {
       "draws on the everything program while a scene's program is not ready, then on its own once warmed",
       { timeout: 120_000 },
       async () => {
-        const plainSet = PARTS.filter((p) => p !== 'fill' && p !== 'metal')
+        const plainSet = EVERYTHING[0]
         const { drew, log } = await run(
           [{ scene: box }, { scene: box, parts: ['shape.box'], step: true }, { scene: box, parts: ['shape.box'] }],
           { plain: plainSet, own: ['shape.box'] },

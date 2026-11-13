@@ -27,13 +27,15 @@ export type Place =
   | 'variantDist' // variantDist's shape, before its onion
   | 'drawn' // drawn's line, before its fade
   | 'afterDrawn' // after drawn
-  | 'beforeRender' // before render
+  | 'beforeRender' // before level, the walk's step
   | 'flag' // a level's first, ahead of its point
   | 'point' // a level's point: q = vary(q0, j)
   | 'cells' // a level's cells and line: the own cell's alone
   | 'fieldAtCells' // a field at cells, after the cell's shift
   | 'ancestry' // a level's colour, ahead of its own index
   | 'paint' // a level's colour, ahead of its line's
+  | 'walks' // render's, ahead of its walk down the chain
+  | 'level' // render's step down the chain: Draw d = level(s, ground, i, 0., 0.)
   | 'crossChain' // main's chains a sample draws: 1
 
 export type EngineName = 'fractal' | 'shapes' | 'tiling' | 'lines' | 'backgrounds' | 'morph' | 'deco'

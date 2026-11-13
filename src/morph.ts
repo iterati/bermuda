@@ -6,7 +6,7 @@
 // where it goes). Each depth runs its own window of the fader, staggered by the edge, and depth-indexed values stay
 // with the depth (the shader counts depth by weight).
 import { paletteAt } from './colour'
-import { mixFill } from './engines/deco'
+import { mixFill, mixHalftone } from './engines/deco'
 import { mixDots } from './engines/lines'
 import { mixJoin } from './engines/shapes'
 import { advance, newLive, type Live } from './motion'
@@ -261,6 +261,16 @@ function mixLevels(
     }
     const fill = mixFill(a.fill, b.fill, t, k)
     if (fill) level.fill = fill
+    // a halftone's grid swaps at the middle, where its amount dips to nothing, its link group's spread with it
+    const halftone = mixHalftone(a.halftone, b.halftone, t, k)
+    if (halftone) {
+      if (a.halftone && b.halftone && a.halftone.grid !== b.halftone.grid) {
+        const { amount } = halftone
+        const f = 1 - dip(t, 0.05)
+        halftone.amount = { ...scaled(amount, f), ...(amount.spread ? { spread: amount.spread * f } : {}) }
+      }
+      level.halftone = halftone
+    }
     if (a.id !== b.id) far.set(level, { id: b.id, at: t })
     // the far side's picture shares the level's knobs, so a bend of the scene bends both
     const c = smooth(0, 1, t)

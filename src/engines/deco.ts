@@ -1,13 +1,18 @@
-// Deco: step A's fills and their metal. A level's fill paints its cells' shapes in bands in from their edges, the
-// line over it keeping as much of itself as the fill's line, and metal lights each facet by its slope on the screen.
-// Its preprocessor text is in every program, FILL and METAL defined only where the program holds fill or metal; the
-// front order's text runs inside Tiling's spill loop and the core's own cell, and metal's flag ahead of the stretch.
+// Deco: step A's fills and their metal, and step B's halftone. A level's fill paints its cells' shapes in bands in from
+// their edges, the line over it keeping as much of itself as the fill's line, and metal lights each facet by its slope
+// on the screen. A level's halftone draws it again at its nearest dot's centre, on its own lattice or on the picture's
+// one screen, and sizes the dot by what it drew there. Its preprocessor text is in every program, FILL and METAL
+// defined only where the program holds fill or metal, HT and HTS where it holds the halftone or its screen; the front
+// order's and a lattice dot's text run inside Tiling's spill loop and the core's own cell, and metal's flag ahead of
+// the stretch.
 // Its row texels, from its first (FILL_TEXEL):
 //   0: the fill's amount, line, tone, bands (a level without a fill: 0, 1, 0, 0)
 //   1: its step, metal, light (radians), shade
 //   2: its ramp, alternate, front order (0 or 1), unused
-import { allLevels, type Fill } from '../scene'
-import { RAD, VARIANT_TEXELS, type Engine, type KnobMorph, type Layout } from './engine'
+//   3: the halftone's amount, grid (GRIDS' index), pitch, size (a level without a halftone: amount 0)
+//   4: its fade, turn (radians), reach, unused
+import { allLevels, GRIDS, screened, type Fill, type Halftone } from '../scene'
+import { lattice, RAD, VARIANT_TEXELS, type Engine, type KnobMorph, type Layout } from './engine'
 
 // metal's flag, ahead of the level's vary where the stretch is, as it picks how many points vary takes
 export const metalFlag = (layout: Layout) => `#ifdef METAL
@@ -88,21 +93,43 @@ export const frontAlone = (layout: Layout) => `#ifdef FILL
 #endif
 `
 
+// a lattice dot: the cell's point moved to its own lattice's nearest dot, pitch to a cell in its cell frame (the pad
+// divided on oblique and voronoi, a square pad elsewhere), q with it so the cells round it are found round the dot
+export const latticeDot = (cell: string, indent: string) => `#ifdef HT
+${indent}if (pitch > 0.) {
+${indent}  vec2 e2 = t7.x == ${lattice('oblique')} || t7.x == ${lattice('voronoi')} ? t1.zw : vec2(0, 1);
+${indent}  vec2 o = oblique(${cell}.xy * pitch, e2).xy / pitch;
+${indent}  q -= o;
+${indent}  ${cell}.xy -= o;
+${indent}  off = length(o);
+${indent}}
+#endif
+`
+
 export const deco: Engine = {
   name: 'deco',
-  parts: ['fill', 'metal'],
-  // a fill brings metal even at metal 0, and metal the stretch, as metal reads its slope on the screen
+  parts: ['fill', 'metal', 'halftone', 'screen'],
+  // a fill brings metal even at metal 0, and metal the stretch, as metal reads its slope on the screen; a halftone on
+  // a screen brings the screen, at amount 0 too
   needs: (scene, add) => {
-    for (const { level } of allLevels(scene.levels))
+    for (const { level } of allLevels(scene.levels)) {
       if (level.fill) {
         add('fill')
         add('metal')
         add('stretch')
       }
+      if (level.halftone) add('halftone')
+      if (screened(level)) add('screen')
+    }
   },
-  glsl: (has, layout) => ({
-    defines: has('metal') ? '#define METAL\n' : has('fill') ? '#define FILL\n' : '',
-    beforeRender: `#ifdef FILL
+  glsl: (has, layout) => {
+    // the screen brings the halftone
+    const ht = has('halftone') || has('screen')
+    return {
+      defines: `${has('metal') ? '#define METAL\n' : has('fill') ? '#define FILL\n' : ''}${
+        has('screen') ? '#define HTS\n#define HT\n' : has('halftone') ? '#define HT\n' : ''
+      }`,
+      beforeRender: `#ifdef FILL
 // whether cell id a is in front of cell id b: the lower row, then the one further left
 bool before(vec2 a, vec2 b) { return a.y < b.y || (a.y == b.y && a.x < b.x); }
 
@@ -147,46 +174,138 @@ vec4 paint(int j, Cell c, vec2 id, float ci, float trap, float pxc, mat2 J, floa
   return vec4(mix(metalAt(idx + b * f1.x, lit, f1), metalAt(idx + nb * f1.x, lit, f1), t), cover);
 }
 #endif
-`,
-    fieldAtCells: `#ifdef FILL
+${
+  ht
+    ? `#ifdef HTS
+uniform vec4 uScreen;  // the picture's one screen: on, dots up the screen, turn (radians), hex
+#endif
+`
+    : ''
+}`,
+      fieldAtCells: `#ifdef FILL
       // front order's cell fades in by spill, as its paint does
       if (fr && inFront) gShift = mix(gShift, shiftAt(p - unturn * fat), t6.w);
 #endif
 `,
-    ancestry: `#ifdef FILL
+      ancestry: `#ifdef FILL
     float ci0 = ci;
 #endif
 `,
-    paint: `#ifdef FILL
+      paint: `#ifdef FILL
     // the paint, each painted cell wearing its own colour, faded as the line is by the level's weight and its cells'
-    // size, laid over the ground
+    // size, laid over the ground; laid is how much of the pixel it covers, as the ground's own is mixed
     if (f0.x > 0.) {
-      float shown = w * smoothstep(1., 3., uRes.y * .5 * px);
+      float shown = w * smoothstep(1., 3., uRes.y * .5 * px), laidUnder = laid;
       vec3 under = ground;
       if (inBack) {
         vec4 c = paint(j, back, bid, ci0, trap, pxc, J, w, mirror);
-        ground = mix(ground, c.rgb, clamp(c.a * shown, 0., 1.));
+        float x = clamp(c.a * shown, 0., 1.);
+        ground = mix(ground, c.rgb, x);
+        laid = mix(laid, 1., x);
       }
       if (inFront) {
         vec4 c = paint(j, front, fid, ci0, trap, pxc, J, w, mirror);
-        ground = mix(ground, c.rgb, clamp(c.a * shown, 0., 1.));
+        float x = clamp(c.a * shown, 0., 1.);
+        ground = mix(ground, c.rgb, x);
+        laid = mix(laid, 1., x);
       }
       // front order fades in by spill over the cell's own paint, so a morph swaps it unseen where spill is nothing
       if (fr && t6.w < 1.) {
         vec4 c = paint(j, own, cell.zw, ci0, trap, pxc, J, w, mirror);
-        ground = mix(mix(under, c.rgb, clamp(c.a * shown, 0., 1.)), ground, t6.w);
+        float x = clamp(c.a * shown, 0., 1.);
+        ground = mix(mix(under, c.rgb, x), ground, t6.w);
+        laid = mix(mix(laidUnder, 1., x), laid, t6.w);
       }
     }
 #endif
 `,
-  }),
-  texels: 3,
-  pack: ({ fill }, put) => {
-    // a level without a fill draws its line alone
+      ...(ht
+        ? {
+            walks: `#ifdef HTS
+  // the picture's one screen: the pixel's nearest dot, its offset from the dot's centre (sd, in screen units) and the
+  // dot's centre walked down the chain beside the pixel (t)
+  float sp = 2. / uScreen.y;
+  vec4 sn = oblique(rot(-uScreen.z) * uv / sp, uScreen.w > .5 ? vec2(.5, .8660254) : vec2(0, 1));
+  vec2 sd = rot(uScreen.z) * sn.xy * sp;
+  Walk t = walk(uv - sd, start);
+#endif
+`,
+            level: `    // the level (pass 0), then, where it has a halftone (h0.x its amount), drawn again at its nearest
+    // dot's centre: on its own lattice from where the pixel's walk came in (pass 1), or on the screen by the dot's
+    // walk t (pass 2), which reaches this level here or not at all (in another sub-chain: no dot) and steps on beside
+    // the pixel's walk either way. One level call for the passes, so it is inlined once, and only as many passes as
+    // are drawn.
+    vec4 h0 = row(s.j, ${layout.deco} + 3), h1 = row(s.j, ${layout.deco} + 4);
+    bool screened = h0.y > .5, here = false;
+    int dots = h0.x > 0. && !screened ? 1 : 0, steps = 0;
+#ifdef HTS
+    here = h0.x > 0. && screened && t.j == s.j;
+    steps = uScreen.x > 0. && t.j >= 0 ? 1 : 0;
+#endif
+    Walk s0 = s;
+    vec3 g0 = ground, gd = vec3(0);
+    Draw d, dd = Draw(0., vec3(0), 1., 0., 0.);
+    for (int k = 0; k < 1 + dots + steps; k++) {
+      int pass = k == 0 ? 0 : k == dots ? 1 : 2;
+      Walk w = s0;
+#ifdef HTS
+      if (pass == 2) w = t;
+#endif
+      // a lattice dot keeps the colour field's shift at its cell, which the pixel's step read
+      if (pass == 1) w.shift = s.shift;
+      vec3 g = pass == 0 ? ground : vec3(0);
+      Draw e = level(w, g, i, pass == 1 ? h0.z : 0., pass == 0 ? 0. : h1.z);
+      if (pass == 0) {
+        s = w;
+        ground = g;
+        d = e;
+      } else if (pass == 1 || here) {
+        dd = e;
+        gd = g;
+      }
+#ifdef HTS
+      if (pass == 2) t = w;
+#endif
+    }
+    if (h0.x > 0.) {
+      // the dot's size v, what the level drew at its centre, its line at reach and its paint: its radius size times
+      // half the gap to the next dot times the root of v, over a pixel (aa) at its edge, a dot under a pixel fading as
+      // it shrinks, and its light faded by v as far as fade. The line's share of it is light and the paint's share
+      // paint, in the dot centre's colours, and the level's own draw crossfades into the dot's by amount.
+      float v = clamp(dd.a + dd.laid, 0., 1.), gap = .5 / h0.z, dist = dd.off, aa = 2. / uRes.y / dd.px;
+#ifdef HTS
+      if (screened) {
+        gap = .5 * sp;
+        dist = length(sd);
+        aa = 2. / uRes.y;
+      }
+#endif
+      float r = gap * h0.w * sqrt(v);
+      float m = (1. - smoothstep(r - aa, r + aa, dist)) * min(r / aa, 1.) * mix(1., v, h1.x);
+      float sf = clamp(dd.laid / max(dd.a + dd.laid, 1e-4), 0., 1.);
+      float a = mix(d.a, m * (1. - sf), h0.x);
+      d.col = mix(d.col * d.a, dd.col * m * (1. - sf), h0.x) / max(a, 1e-6);
+      d.a = a;
+      ground = mix(ground, mix(g0, dd.laid > 0. ? gd / dd.laid : g0, m * sf), h0.x);
+    }
+`,
+          }
+        : {}),
+    }
+  },
+  texels: 5,
+  pack: ({ fill, halftone }, put) => {
+    // a level without a fill draws its line alone, and one without a halftone (its amount 0) as itself
     put(0, fill?.amount.value ?? 0, fill?.line.value ?? 1, fill?.tone.value ?? 0, fill?.bands.value ?? 0)
-    if (!fill) return
-    put(1, fill.step.value, fill.metal.value, fill.light.value * RAD, fill.shade.value)
-    put(2, fill.ramp.value, fill.alternate.value, fill.front ? 1 : 0, 0)
+    if (fill) {
+      put(1, fill.step.value, fill.metal.value, fill.light.value * RAD, fill.shade.value)
+      put(2, fill.ramp.value, fill.alternate.value, fill.front ? 1 : 0, 0)
+    }
+    if (halftone) {
+      const { amount, grid, pitch, size, fade, turn, reach } = halftone
+      put(3, amount.value, GRIDS.indexOf(grid), pitch.value, size.value)
+      put(4, fade.value, turn.value * RAD, reach.value, 0)
+    }
   },
 }
 
@@ -223,5 +342,26 @@ export function mixFill(a: Fill | undefined, b: Fill | undefined, t: number, k: 
     ramp: k(fa.ramp, fb.ramp),
     alternate: k(fa.alternate, fb.alternate),
     ...(front ? { front } : {}),
+  }
+}
+
+// A halftone one side lacks morphs from amount 0, with the other side's knobs and grid; a change of grid swaps at the
+// middle, where its amount dips to nothing (morph.ts)
+export function mixHalftone(
+  a: Halftone | undefined,
+  b: Halftone | undefined,
+  t: number,
+  k: KnobMorph,
+): Halftone | undefined {
+  if (!a && !b) return undefined
+  const [ha, hb] = [a ?? { ...b!, amount: { value: 0 } }, b ?? { ...a!, amount: { value: 0 } }]
+  return {
+    amount: k(ha.amount, hb.amount),
+    grid: t < 0.5 ? ha.grid : hb.grid,
+    pitch: k(ha.pitch, hb.pitch),
+    size: k(ha.size, hb.size),
+    fade: k(ha.fade, hb.fade),
+    turn: k(ha.turn, hb.turn),
+    reach: k(ha.reach, hb.reach),
   }
 }

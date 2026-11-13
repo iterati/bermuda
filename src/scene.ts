@@ -33,6 +33,7 @@ export type Level = {
   variants: { share: Knob; shape: Shape; below?: Level[] }[] // below: a per-cell sub-chain
   colour: { at: Knob; speed: Knob; cellSpread: Knob }
   fill?: Fill // after the deco step: absent, the level draws its line alone
+  halftone?: Halftone // after the deco step's second part: absent, the level draws as itself
 }
 // A level's paint, under the lines and over the background, down the chain: its cells' shapes covered by amount,
 // softened inward by ramp, coloured from the palette tone round from the line's (alternate more on odd cells), in
@@ -51,6 +52,21 @@ export type Fill = {
   ramp: Knob
   alternate: Knob
   front?: true
+}
+// A level drawn as dots: at each dot's centre the level is drawn again, its line at reach plus its fill (held to 1)
+// sizing the dot to size times half the gap to the next and dimming it by as much as fade, the line's share light
+// and the fill's paint, in the centre's colours; amount crossfades the level's own draw into its dots. On the lattice
+// grid the dots divide the level's own cells, pitch a cell, and ride its warps; on a square or hex screen they sit
+// still on the screen, pitch up it, turned by turn, from the first level whose halftone is on a screen, one screen a
+// picture.
+export type Halftone = {
+  amount: Knob
+  grid: (typeof GRIDS)[number]
+  pitch: Knob
+  size: Knob
+  fade: Knob
+  turn: Knob
+  reach: Knob
 }
 export type Scene = {
   // a look: play ranges and macros travel with it
@@ -264,6 +280,7 @@ export const LINES = ['glow', 'smooth', 'hard', 'band', 'dots'] as const
 // soak: Helen Frankenthaler's soak-stain pools of thinned paint on raw canvas
 export const BACKGROUNDS = ['flat', 'gradient', 'soak'] as const
 export const FIELDS = ['radial', 'linear', 'noise'] as const
+export const GRIDS = ['lattice', 'square', 'hex'] as const
 export const FIELD_STEPS: [number, number] = [1, 16]
 export const WAVES = ['cos', 'tri', 'beat', 'ramp', 'steps'] as const
 // What the app hears in the music (music.ts), each 0 to 1: the loudness, the tone (dark to light), the drive (a
@@ -324,6 +341,23 @@ const fills =
   (...names: string[]) =>
   (scene: Scene, at: KnobAt) =>
     ['amount', ...names].every((name) => canMove(scene, `${at.level!.prefix}.fill.${name}`))
+// whether the level's halftone is on a screen
+export const screened = (level: Level) => !!level.halftone && level.halftone.grid !== 'lattice'
+// the level's halftone can rise above 0; or, for a knob of its screen on a screened level, the level is the first
+// screened one, whose screen the picture draws on alone, and some screened level's halftone can rise
+const halftones =
+  (knob?: 'pitch' | 'turn') =>
+  (scene: Scene, at: KnobAt): boolean => {
+    const { prefix, level } = at.level!
+    if (!knob || !screened(level)) return knob !== 'turn' && canMove(scene, `${prefix}.halftone.amount`)
+    return (
+      allLevels(scene.levels).find((l) => screened(l.level))!.level === level &&
+      knobsOf(scene).some(
+        (k) =>
+          !!k.level && screened(k.level.level) && /\.halftone\.amount$/.test(k.address) && canMove(scene, k.address),
+      )
+    )
+  }
 // the colour field moves a colour: its depth or the palette's radius can be other than 0
 export const fielded = (scene: Scene) =>
   canMove(scene, 'palette.field.depth', true) || canMove(scene, 'palette.radius', true)
@@ -638,6 +672,41 @@ export const KINDS: Record<string, Kind> = {
     help: "moves every other cell's fill round the palette by this much, by its id's parity, as a sunburst's rays alternate",
     shows: fills(),
   },
+  'levels[].halftone.amount': {
+    range: [0, 1],
+    label: 'halftone',
+    help: "draws this level as dots, each sized by how much of it draws at the dot's centre: 0 the level as it is, 1 dots alone",
+  },
+  'levels[].halftone.pitch': {
+    range: [1, 160],
+    label: 'pitch',
+    help: "dots a cell on the lattice, dots up the screen on a screen, where a picture draws its first screened level's: a later one's is dead",
+    shows: halftones('pitch'),
+  },
+  'levels[].halftone.size': {
+    range: [0, 1.2],
+    label: 'size',
+    help: 'how big a dot grows where the level draws whole, against half the gap to the next dot: 1 just touches it',
+    shows: halftones(),
+  },
+  'levels[].halftone.fade': {
+    range: [0, 1],
+    label: 'fade',
+    help: 'dims each dot as far as it is small: 0 every dot as bright as the level, 1 a dot as dim as it is small',
+    shows: halftones(),
+  },
+  'levels[].halftone.turn': {
+    range: [-360, 360],
+    label: 'turn',
+    help: "turns the screen's dots round the picture, in degrees; a picture draws its first screened level's, so a later one's is dead",
+    shows: halftones('turn'),
+  },
+  'levels[].halftone.reach': {
+    range: [0, 0.5],
+    label: 'reach',
+    help: "how wide the level's line is read at each dot's centre, in line units, so dots near a line grow: 0 its own width",
+    shows: halftones(),
+  },
   'contour.rings': {
     range: [0, 24],
     label: 'rings',
@@ -796,6 +865,7 @@ export const PERIOD: Record<string, number> = {
   'levels[].fill.shade': 1,
   'levels[].fill.light': 360,
   'palette.field.angle': 360,
+  'levels[].halftone.turn': 360,
 }
 
 // 'levels[a].variants[1].below[b].affine.offset[0]' -> 'levels[].affine.offset[0]'
@@ -1070,7 +1140,7 @@ function level(v: unknown, path: string, before: Level[], ids: Set<string>): Lev
     v,
     path,
     ['id', 'weight', 'affine', 'variations', 'lattice', 'cell', 'variants', 'colour'],
-    ['link', 'fill'],
+    ['link', 'fill', 'halftone'],
   )
   const out = { id: o.id as string } as Level
   if (o.link !== undefined) {
@@ -1157,6 +1227,19 @@ function level(v: unknown, path: string, before: Level[], ids: Set<string>): Lev
     if (fill.front !== undefined) {
       if (fill.front !== true) fail(`${at}.front`, 'must be true when given')
       out.fill.front = true
+    }
+  }
+  if (o.halftone !== undefined) {
+    const at = `${path}.halftone`
+    const ht = obj(o.halftone, at, ['amount', 'grid', 'pitch', 'size', 'fade', 'turn', 'reach'])
+    out.halftone = {
+      amount: knob(ht.amount, `${at}.amount`),
+      grid: oneOf(ht.grid, `${at}.grid`, GRIDS),
+      pitch: knob(ht.pitch, `${at}.pitch`),
+      size: knob(ht.size, `${at}.size`),
+      fade: knob(ht.fade, `${at}.fade`),
+      turn: knob(ht.turn, `${at}.turn`),
+      reach: knob(ht.reach, `${at}.reach`),
     }
   }
   return out

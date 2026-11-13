@@ -14,8 +14,8 @@ export const morph: Engine = {
           colourAt: 'uToward.y > 0. ? mix(c, palette(idx + uToward.w + gShift), uToward.y) : c',
           pigment: 'uToward.y > 0. ? mix(c, palette(at + uToward.w), uToward.y) : c',
           drawn: `  if (uToward.y > 0.)
-    a = mix(a, contour(c.d, k, rb, uToward.z + c.f * ringPhase, uToward.x, scale, lw, lf, dash, c.sgn * uCrawl.y),
-            uToward.y);
+    a = mix(a, contour(c.d, k, rb, uToward.z + c.f * ringPhase, reach > 0. && uToward.x > 3.5 ? 1. : uToward.x, scale,
+                       lw, lf, dash, c.sgn * uCrawl.y), uToward.y);
 `,
           crossChain: '2',
         }

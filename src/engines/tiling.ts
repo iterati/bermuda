@@ -2,7 +2,7 @@
 // round a cell drawn where they reach into it. Its texels are the core's: the lattice's kind, sectors and jitter, and
 // spill.
 import { allLevels, LATTICES, type LatticeKind } from '../scene'
-import { frontDeclared, frontNear, frontOwn, metalFlag, pulled, unpulled } from './deco'
+import { frontDeclared, frontNear, frontOwn, latticeDot, metalFlag, pulled, unpulled } from './deco'
 import { cell, kept, kinds, type Engine } from './engine'
 import { stretchLine } from './fractal'
 
@@ -115,7 +115,7 @@ ${pulled}        // the cell itself at q
 ${unpulled}        }
       }
       if (k == 4) {
-        cell = nc;
+${latticeDot('nc', '        ')}        cell = nc;
         kc = kn;
       } else if (nc.zw == cell.zw) continue;
       Cell c = cellAt(j, mix(p, mirror ? mirrored(nc.xy, nc.zw) : nc.xy, w), nc.zw, w, ringOf(q, nc, t7.x));
@@ -142,7 +142,7 @@ ${frontNear}    }
     for (int s = 0; s < (t6.w > 0. ? 2 : 1); s++) {
       Cell c = own;
       if (s == 1) c = near;
-      float l = drawn(c, t4.z, depth, scale);
+      float l = drawn(c, t4.z, depth, scale, reach);
       a = s == 0 ? l : mix(a, l, t6.w);
     }
 `,
