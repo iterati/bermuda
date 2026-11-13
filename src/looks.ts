@@ -1771,10 +1771,12 @@ export const LOOKS: Scene[] = [
   scene({
     name: 'Shapes - Marching ants',
     zoom: 1.3,
+    // the ants' cells mirror, so the crumbs under them meet themselves at the cells' edges, each crumb its own colour
+    // alone, as one that took the ants' would change colour across an edge
     levels: [
       level('ants', {
         scale: 0.6,
-        by: 'parity',
+        by: 'mirror',
         shape: shape('box', 0.38, 0.8, { corner: 0.08 }),
         at: 0,
         speed: 0.8,
@@ -1787,8 +1789,8 @@ export const LOOKS: Scene[] = [
         cellTurn: 45,
         shape: shape('cross', 0.4, 0.3, { corner: 0.04 }),
         at: 0.5,
-        speed: 0.8,
-        cellSpread: 0.4,
+        speed: 1,
+        cellSpread: 0.6,
       }),
     ],
     line: 'dots',
