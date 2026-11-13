@@ -36,17 +36,18 @@ const counted = (n: number, what: string) => `${n} ${what}${n === 1 ? '' : 's'}`
 export function Looks({ looks, saved, onLoad, onSave, onDelete, onError, part }: Props) {
   const { scene, edit } = useCtl()
   const [presetName, setPresetName] = useState('')
+  const mine = looks.filter((l) => !LOOKS.some((b) => b.name === l.name))
   const folders = [
     ...FOLDERS.map((f) => ({ name: f.name, looks: looks.filter((l) => f.looks.some((b) => b.name === l.name)) })),
-    { name: MINE, looks: looks.filter((l) => !LOOKS.some((b) => b.name === l.name)) },
-  ].filter((f) => f.looks.length)
-  const folderOf = (name: string) => folders.find((f) => f.looks.some((l) => l.name === name))?.name
-  const [open, setOpen] = useState(() => new Set([folderOf(scene.name)]))
-  // the playing look's folder opens as it comes to play
-  const [playing, setPlaying] = useState(scene.name)
-  if (playing !== scene.name) {
-    setPlaying(scene.name)
-    setOpen(new Set(open).add(folderOf(scene.name)))
+    ...(mine.length ? [{ name: MINE, looks: mine }] : []),
+  ]
+  const here = folders.find((f) => f.looks.some((l) => l.name === scene.name))?.name
+  const [open, setOpen] = useState(() => new Set(here ? [here] : []))
+  // the playing look's folder opens as it comes to play, or as it is saved into Mine
+  const [playing, setPlaying] = useState({ name: scene.name, here })
+  if (playing.name !== scene.name || playing.here !== here) {
+    setPlaying({ name: scene.name, here })
+    if (here) setOpen(new Set(open).add(here))
   }
   // the playing look's presets as it has them now
   const presetsOf = (look: Scene) => (look.name === scene.name ? scene.presets : look.presets)

@@ -1203,7 +1203,7 @@ button {
   font-weight: normal;
   color: var(--dim);
 }
-.folder.open + .looks {
+.folder + .looks {
   margin: 4px 0 6px;
 }
 .looks {

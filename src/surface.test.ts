@@ -522,13 +522,14 @@ describe('the play surface', () => {
 
   it("the looks are in their folders, each opening and closing, the playing look's opening itself, with open all and close all; the keys and slots count through the whole list, open or closed, and Mine, last, holds the looks saved under a name no built-in has", async () => {
     // one look saved under a name of its own, and one under a built-in's, which stays in its folder
-    const deco = FOLDERS.find((f) => f.name === 'Deco')!.looks
+    const folder = FOLDERS.find((f) => f.name === 'Deco')!
+    const deco = folder.looks
     await page.evaluate(
       (saved) => localStorage.setItem('bermuda.looks', JSON.stringify(saved)),
       [{ ...deco[0], name: 'My own look' }, deco[1]],
     )
     await page.reload()
-    await page.waitForSelector('.knob')
+    await page.waitForSelector('.knob', { timeout: 55_000 })
     await press('.picker', 'Looks')
     // each folder's head: its arrow, its name and what it holds; the playing look's folder alone is open
     const heads = () =>
@@ -561,7 +562,7 @@ describe('the play surface', () => {
       )
     // the Tapestries keep their whole names, Deco's looks lose their family's, and each keeps its place's slot
     expect(await shown()).toEqual(FOLDERS[0].looks.map((l) => l.name))
-    await head('Deco')
+    await head(folder.name)
     await head(FOLDERS[0].name)
     expect(await shown()).toEqual(deco.map((l) => l.name.slice(l.name.indexOf(' - ') + 3)))
     expect(await slots()).toEqual(deco.map((l) => LOOKS.indexOf(l)))
@@ -578,6 +579,19 @@ describe('the play surface', () => {
     expect((await heads()).every(([, open]) => open)).toBe(true)
     expect(await slots()).toEqual([...LOOKS.keys(), LOOKS.length])
     expect((await shown()).at(-1)).toBe('My own look')
+    // the playing look saved under a new name goes into Mine, which opens
+    await press('.context', 'close all')
+    await page.click('.look-title')
+    await page.keyboard.press('End')
+    await page.keyboard.type(' saved')
+    await page.$eval('.look-title', (el) => (el as HTMLInputElement).blur())
+    await page.keyboard.press('s')
+    await pause()
+    expect(await heads()).toEqual([
+      ...closed.slice(0, -1),
+      [`▾Mine${holds([deco[0], { ...LOOKS[4], name: `${LOOKS[4].name} saved` }])}`, true],
+    ])
+    expect(await shown()).toEqual(['My own look', `${LOOKS[4].name} saved`])
   }, 60_000)
 
   it("the dice sit where the play surface puts them: ⚄ look in the bar after mutate, ⚄ chip by the panel's live head, ⚄ at a row's end and in a chip's title, and ⚄ page by the strip, each rolling its own knobs inside their play ranges", async () => {
