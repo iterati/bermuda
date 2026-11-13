@@ -1213,7 +1213,9 @@ export const LOOKS: Scene[] = [
   scene({
     name: 'Plasma',
     // a sinusoid's wobbling field drawn as its contour lines: dense echo rings round one circle, flowing, the
-    // colours running round a long palette
+    // colours running round a long palette. The field's cells mirror, so the swirl in them meets itself at their
+    // edges, and the swirl is at full weight, as a level under 1 blends its cells' offsets with the plane's and parts
+    // at their edges
     levels: [
       level('field', {
         scale: 0.35,
@@ -1221,6 +1223,7 @@ export const LOOKS: Scene[] = [
           ['linear', 0.5],
           ['sinusoidal', { value: 1, play: [0.6, 1.5] }],
         ],
+        by: 'mirror',
         shape: star(6, 2, 0.3, { round: 1 }),
         at: 0,
         speed: 0.3,
@@ -1231,7 +1234,6 @@ export const LOOKS: Scene[] = [
           ['linear', 0.6],
           ['swirl', { value: 0.4, play: [0.2, 0.7] }],
         ],
-        weight: 0.6,
         shape: star(6, 2, 0.35, { round: 1 }),
         at: 0.5,
         speed: 0.4,
