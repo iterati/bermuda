@@ -1822,7 +1822,7 @@ export const LOOKS: Scene[] = [
     zoom: 1.2,
     levels: [
       ...linked('blob', 2, {
-        scale: { value: 0.8, spread: 1.4 },
+        scale: { value: 1.3, spread: 1.4 },
         turn: { value: 0, spread: 30 },
         e2: HEX,
         spill: 1,
@@ -1866,6 +1866,7 @@ export const LOOKS: Scene[] = [
           'levels[blob1].variants[0].shape.join.blend': 0.1,
           'levels[blob1].variants[0].shape.join.offset[0]': 0.12,
           'levels[blob1].variants[0].shape.onion': 0.03,
+          'levels[blob1].affine.scale': 0.8,
           'frame.zoom': 0.6,
         },
       },
@@ -2293,7 +2294,7 @@ export const LOOKS: Scene[] = [
     // same either side of it; ex and bent push the arms out
     levels: [
       level('root', {
-        scale: 1.6,
+        scale: 3,
         vary: [
           ['julia', { value: 1, play: [0.5, 1] }],
           ['ex', { value: 0, play: [0, 0.4] }],
@@ -2309,9 +2310,9 @@ export const LOOKS: Scene[] = [
       level('flake', { scale: R3, turn: 30, e2: HEX, shape: star(6, 2, 0.38, { twist: 30 }), at: 0.4 }),
       level('frost', { scale: R3, turn: 30, e2: HEX, shape: star(6, 3, 0.35), at: 0.8 }),
     ],
-    rings: 1.5,
+    rings: 3,
     drift: 0.6,
-    width: { value: 0.0035, spread: 0.004 },
+    width: { value: 0.006, spread: 0.004 },
     falloff: 1.2,
     palette: 'ice',
     radius: 0.25,
