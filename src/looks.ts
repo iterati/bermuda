@@ -803,12 +803,15 @@ export const LOOKS: Scene[] = [
   scene({
     name: 'Diagonal maze',
     // 10 PRINT: an upright segment corner to corner in each square, turned 45° either way by a hash of the cell
-    // (Truchet), its echo rings the maze's corridors
+    // (Truchet), its echo rings the maze's corridors, each the nearest of its own cell's and its neighbours' (spill),
+    // so they run on across the cells' edges. The inner maze is at rest: in the turned cells it would part at their
+    // edges
     levels: [
       level('maze', {
         scale: { value: 3, play: [2.5, 4] },
         by: 'hash',
         cellTurn: 45,
+        spill: 1,
         shape: shape('segment', 0.7071, 0.1),
         at: 0.3,
         speed: 0.5,
@@ -818,7 +821,7 @@ export const LOOKS: Scene[] = [
         scale: 2,
         by: 'hash',
         cellTurn: 45,
-        weight: 0.35,
+        weight: 0,
         shape: shape('segment', 0.7071, 0.1),
         at: 0.65,
         speed: 0.6,
